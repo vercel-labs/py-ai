@@ -1,0 +1,24 @@
+[project]
+name = "proto-sdk"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Andrey Buzin", email = "contactbuzin@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=0.40.0",
+    "httpx>=0.28.1",
+    "openai>=2.14.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.21,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "notebook>=7.5.1",
+    "python-dotenv>=1.2.1",
+]
