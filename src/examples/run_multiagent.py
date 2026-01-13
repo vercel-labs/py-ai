@@ -10,7 +10,7 @@ Demonstrates:
 """
 
 import asyncio
-import dataclasses
+import inspect
 import json
 import os
 
@@ -24,129 +24,145 @@ dotenv.load_dotenv()
 
 
 # -----------------------------------------------------------------------------
-# LABELED AGENT LOOP - like get_root but with label support
+# AGENT ABSTRACTION
 # -----------------------------------------------------------------------------
-async def run_labeled_agent(
-    runtime: core.Runtime,
-    llm: core.LanguageModel,
-    messages: list[core.Message],
-    tools: list[core.Tool],
-    label: str,
-) -> None:
+class Agent:
     """
-    Run an agent loop, pushing all messages to the shared runtime with a label.
+    Encapsulates agent configuration and provides methods for running/composing.
 
-    This is essentially get_root() inlined, but:
-    1. Takes runtime as parameter (doesn't create its own Collector)
-    2. Labels every message before pushing
+    An Agent holds:
+    - llm: The language model to use
+    - system_prompt: The agent's identity/instructions
+    - tools: Optional list of tools the agent can use
+    - label: Optional label for multi-agent streaming (distinguishes messages)
 
-    All messages go through the same firehose - the label lets consumers
-    distinguish which agent produced each message.
-    """
-    while True:
-        tool_calls = []
-        assistant_msg = None
-
-        # Stream from LLM - each message gets labeled and pushed to shared runtime
-        async for message in llm.stream(messages=messages, tools=tools):
-            message.label = label  # Tag with agent identity
-            await runtime.push(message)
-
-            if message.is_done:
-                assistant_msg = message
-                # Collect tool calls for execution
-                for part in message.parts:
-                    if isinstance(part, core.ToolCallPart):
-                        tool_calls.append(part)
-
-        # Append assistant message to this agent's history
-        if assistant_msg:
-            messages.append(assistant_msg)
-
-        # No tool calls = agent is done
-        if not tool_calls:
-            break
-
-        # Execute tool calls and push results to the firehose
-        for tool_call in tool_calls:
-            tool_fn = next(t for t in tools if t.name == tool_call.tool_name)
-            args = json.loads(tool_call.tool_args)
-
-            # Check if tool wants runtime injected (for agent-as-tool pattern)
-            import inspect
-            sig = inspect.signature(tool_fn.fn)
-            if "runtime" in sig.parameters:
-                args["runtime"] = runtime
-
-            result = await tool_fn.fn(**args)
-
-            tool_msg = core.Message(
-                role="tool",
-                label=label,  # Tool results also get labeled
-                parts=[
-                    core.ToolResultPart(
-                        tool_call_id=tool_call.tool_call_id,
-                        result={"output": result},
-                    )
-                ],
-            )
-            messages.append(tool_msg)
-            await runtime.push(tool_msg)
-
-
-# -----------------------------------------------------------------------------
-# AGENT-AS-TOOL: Wrap an agent as a tool that streams to shared runtime
-# -----------------------------------------------------------------------------
-def create_agent_tool(
-    llm: core.LanguageModel,
-    system_prompt: str,
-    tool_name: str,
-    tool_description: str,
-) -> core.Tool:
-    """
-    Create a tool that runs an inner agent.
-
-    The inner agent receives the same runtime (via injection) and pushes
-    its messages to the shared firehose with its own label.
+    Usage patterns:
+    1. Direct run: `await agent.run(runtime, "user message")`
+    2. As tool: `agent.as_tool("name", "description")` returns a Tool
+    3. Custom loop: Use `agent.create_messages()` and run your own loop
     """
 
-    async def inner_agent_fn(query: str, runtime: core.Runtime) -> dict:
-        # Inner agent has isolated message history
-        # but shares the runtime/firehose with everyone else
-        inner_messages = [
+    def __init__(
+        self,
+        llm: core.LanguageModel,
+        system_prompt: str,
+        tools: list[core.Tool] | None = None,
+        label: str | None = None,
+    ):
+        self.llm = llm
+        self.system_prompt = system_prompt
+        self.tools = tools or []
+        self.label = label
+
+    def create_messages(self, user_message: str) -> list[core.Message]:
+        """Create initial message list with system prompt and user message."""
+        return [
             core.Message(
                 role="system",
-                parts=[core.TextPart(text=system_prompt)],
+                parts=[core.TextPart(text=self.system_prompt)],
             ),
             core.Message(
                 role="user",
-                parts=[core.TextPart(text=query)],
+                parts=[core.TextPart(text=user_message)],
             ),
         ]
 
-        # Run inner agent - it pushes to the same runtime
-        await run_labeled_agent(
-            runtime=runtime,
-            llm=llm,
-            messages=inner_messages,
-            tools=[],
-            label=f"tool:{tool_name}",
+    async def run(
+        self,
+        runtime: core.Runtime,
+        user_message: str,
+        *,
+        label: str | None = None,
+    ) -> None:
+        """
+        Run the agent loop, pushing all messages to the runtime.
+
+        Args:
+            runtime: The runtime to push messages to
+            user_message: The user's input
+            label: Override the agent's default label for this run
+        """
+        effective_label = label or self.label or "agent"
+        messages = self.create_messages(user_message)
+
+        while True:
+            tool_calls = []
+            assistant_msg = None
+
+            # Stream from LLM - each message gets labeled and pushed
+            async for message in self.llm.stream(messages=messages, tools=self.tools):
+                message.label = effective_label
+                await runtime.push(message)
+
+                if message.is_done:
+                    assistant_msg = message
+                    for part in message.parts:
+                        if isinstance(part, core.ToolCallPart):
+                            tool_calls.append(part)
+
+            if assistant_msg:
+                messages.append(assistant_msg)
+
+            if not tool_calls:
+                break
+
+            # Execute tool calls
+            for tool_call in tool_calls:
+                tool_fn = next(t for t in self.tools if t.name == tool_call.tool_name)
+                args = json.loads(tool_call.tool_args)
+
+                # Inject runtime if tool wants it (agent-as-tool pattern)
+                sig = inspect.signature(tool_fn.fn)
+                if "runtime" in sig.parameters:
+                    args["runtime"] = runtime
+
+                result = await tool_fn.fn(**args)
+
+                tool_msg = core.Message(
+                    role="tool",
+                    label=effective_label,
+                    parts=[
+                        core.ToolResultPart(
+                            tool_call_id=tool_call.tool_call_id,
+                            result={"output": result},
+                        )
+                    ],
+                )
+                messages.append(tool_msg)
+                await runtime.push(tool_msg)
+
+    def as_tool(self, name: str, description: str) -> core.Tool:
+        """
+        Wrap this agent as a tool that can be used by other agents.
+
+        The inner agent shares the runtime with its caller, pushing
+        messages to the same firehose with label "tool:{name}".
+        """
+        async def inner_agent_fn(query: str, runtime: core.Runtime) -> dict:
+            await self.run(runtime, query, label=f"tool:{name}")
+            return {"status": "done"}
+
+        return core.Tool(
+            name=name,
+            description=description,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The query for the agent"}
+                },
+                "required": ["query"],
+            },
+            fn=inner_agent_fn,
         )
 
-        return {"status": "done"}
-
-    return core.Tool(
-        name=tool_name,
-        description=tool_description,
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "The query for the agent"}
-            },
-            "required": ["query"],
-        },
-        fn=inner_agent_fn,
-    )
+    def with_label(self, label: str) -> "Agent":
+        """Return a copy of this agent with a different label."""
+        return Agent(
+            llm=self.llm,
+            system_prompt=self.system_prompt,
+            tools=self.tools,
+            label=label,
+        )
 
 
 # -----------------------------------------------------------------------------
@@ -160,6 +176,40 @@ def get_multiagent_root(llm: core.LanguageModel, user_query: str):
     through the single runtime it receives.
     """
 
+    # Define agents upfront - configuration is separate from execution
+    technical_agent = Agent(
+        llm=llm,
+        system_prompt="You are a technical expert. Give a brief (2-3 sentence) technical analysis.",
+        label="technical",
+    )
+
+    business_agent = Agent(
+        llm=llm,
+        system_prompt="You are a business analyst. Give a brief (2-3 sentence) business analysis.",
+        label="business",
+    )
+
+    fact_checker = Agent(
+        llm=llm,
+        system_prompt="You are a fact-checker. Briefly verify or correct the given claim in 1-2 sentences.",
+    )
+
+    orchestrator = Agent(
+        llm=llm,
+        system_prompt=(
+            "You are an orchestrator. You have a fact_checker tool. "
+            "Use it to verify one key claim, then summarize."
+        ),
+        tools=[fact_checker.as_tool("fact_checker", "Verify factual claims. Pass a claim to check.")],
+        label="orchestrator",
+    )
+
+    synthesis_agent = Agent(
+        llm=llm,
+        system_prompt="You are a senior analyst. Synthesize into 2-3 sentences.",
+        label="synthesis",
+    )
+
     async def multiagent_loop(runtime: core.Runtime) -> None:
         """
         Orchestration logic. All sub-agents push to the same runtime.
@@ -170,86 +220,17 @@ def get_multiagent_root(llm: core.LanguageModel, user_query: str):
         3. Final synthesis
         """
 
-        # =====================================================================
         # STEP 1: FAN-OUT - Two agents in parallel
-        # =====================================================================
-        # Both agents push to the same runtime, distinguished by label.
-
-        messages_technical = [
-            core.Message(
-                role="system",
-                parts=[core.TextPart(text="You are a technical expert. Give a brief (2-3 sentence) technical analysis.")],
-            ),
-            core.Message(
-                role="user",
-                parts=[core.TextPart(text=f"Technical aspects of: {user_query}")],
-            ),
-        ]
-
-        messages_business = [
-            core.Message(
-                role="system",
-                parts=[core.TextPart(text="You are a business analyst. Give a brief (2-3 sentence) business analysis.")],
-            ),
-            core.Message(
-                role="user",
-                parts=[core.TextPart(text=f"Business implications of: {user_query}")],
-            ),
-        ]
-
-        # Parallel execution - both push to same runtime
         await asyncio.gather(
-            run_labeled_agent(runtime, llm, messages_technical, [], "technical"),
-            run_labeled_agent(runtime, llm, messages_business, [], "business"),
+            technical_agent.run(runtime, f"Technical aspects of: {user_query}"),
+            business_agent.run(runtime, f"Business implications of: {user_query}"),
         )
 
-        # =====================================================================
-        # STEP 2: AGENT-AS-TOOL
-        # =====================================================================
-        # Orchestrator agent can call fact_checker tool.
-        # When fact_checker runs, it also pushes to the same runtime.
+        # STEP 2: AGENT-AS-TOOL - orchestrator can call fact_checker
+        await orchestrator.run(runtime, f"Review and verify one claim about: {user_query}")
 
-        fact_checker_tool = create_agent_tool(
-            llm,
-            system_prompt="You are a fact-checker. Briefly verify or correct the given claim in 1-2 sentences.",
-            tool_name="fact_checker",
-            tool_description="Verify factual claims. Pass a claim to check.",
-        )
-
-        messages_orchestrator = [
-            core.Message(
-                role="system",
-                parts=[core.TextPart(text=(
-                    "You are an orchestrator. You have a fact_checker tool. "
-                    "Use it to verify one key claim, then summarize."
-                ))],
-            ),
-            core.Message(
-                role="user",
-                parts=[core.TextPart(text=f"Review and verify one claim about: {user_query}")],
-            ),
-        ]
-
-        await run_labeled_agent(
-            runtime, llm, messages_orchestrator, [fact_checker_tool], "orchestrator"
-        )
-
-        # =====================================================================
         # STEP 3: FINAL SYNTHESIS
-        # =====================================================================
-
-        messages_synthesis = [
-            core.Message(
-                role="system",
-                parts=[core.TextPart(text="You are a senior analyst. Synthesize into 2-3 sentences.")],
-            ),
-            core.Message(
-                role="user",
-                parts=[core.TextPart(text=f"Summarize: {user_query}")],
-            ),
-        ]
-
-        await run_labeled_agent(runtime, llm, messages_synthesis, [], "synthesis")
+        await synthesis_agent.run(runtime, f"Summarize: {user_query}")
 
     return multiagent_loop
 
@@ -269,10 +250,24 @@ async def main():
         user_query="What are the implications of large language models for software development?",
     )
 
+    # Legend
+    print("[cyan]■ technical[/cyan]  [magenta]■ business[/magenta]  [yellow]■ orchestrator[/yellow]  [green]■ fact_checker[/green]  [blue]■ synthesis[/blue]\n")
+
     # Single Collector - ALL agents stream through this one firehose
+    colors = {
+        "technical": "cyan",
+        "business": "magenta",
+        "orchestrator": "yellow",
+        "tool:fact_checker": "green",
+        "synthesis": "blue",
+    }
     async for msg in core.Collector().stream(root):
-        # Output message as dictionary for technical evaluation
-        print(dataclasses.asdict(msg))
+        label = msg.label or "unknown"
+        color = colors.get(label, "white")
+        print(f"[{color}]■[/{color}]", end="", flush=True)
+
+    print()  # Final newline
+            
 
 
 if __name__ == "__main__":
