@@ -4,13 +4,16 @@ import abc
 import asyncio
 import dataclasses
 import inspect
-from collections.abc import AsyncGenerator, Awaitable
+from collections.abc import AsyncGenerator, Awaitable, Coroutine
 from typing import Any, Literal, Callable, get_origin, get_args, get_type_hints
 import uuid
 
 import pydantic
 
 
+# tool introspection that uses pydantic to figure out the correct way
+# to json-serialize arguments so that the tool description can be passed
+# to the LLM
 def _get_param_schema(param_type: type) -> dict[str, Any]:
     """Get JSON schema for a Python type using Pydantic's TypeAdapter."""
     schema = pydantic.TypeAdapter(param_type).json_schema()
@@ -117,6 +120,7 @@ class Message:
     id: str = dataclasses.field(default_factory=_gen_id)
     is_done: bool = False
     text_delta: str = ""
+    label: str | None = None
 
 
 class LanguageModel(abc.ABC):
@@ -125,6 +129,7 @@ class LanguageModel(abc.ABC):
         self, messages: list[Message], tools: list[Tool] | None = None
     ) -> AsyncGenerator[Message, None]:
         raise NotImplementedError
+        yield
 
 
 class _Sentinel:
@@ -137,7 +142,7 @@ _SENTINEL = _Sentinel()
 # owns message queue
 # exposes .stream() that yields messages from queue
 # is consumer and also transforms whatever is consumed into a generator
-class Loop:
+class Collector:
     def __init__(self) -> None:
         self.queue: asyncio.Queue[Message | _Sentinel] = asyncio.Queue()
         self._done: bool = False
@@ -172,28 +177,53 @@ class Loop:
 # gets injected into tools so they can push to the Loop queue
 # is produces
 class Runtime:
-    def __init__(self, loop: Loop) -> None:
-        self._loop: Loop = loop
-        self.llm: LanguageModel = LanguageModel()
+    def __init__(self, collector: Collector) -> None:
+        self._colletor: Collector = collector
 
     async def push(self, message: Message) -> None:
-        await self._loop.queue.put(message)
-
-    async def stream(self) -> AsyncGenerator[Message, None]:
-        async for message in self.llm.stream():
-            await self.push(message)
-            yield message
+        await self._colletor.queue.put(message)
 
 
 # defines the execution graph for the root
 # calls the LLM, invokes tools, etc
-async def loop_root():
-    pass
+def get_root(llm: LanguageModel, messages: list[Message], tools: list[Tool]):
+    async def loop_fn(runtime: Runtime) -> None:
+        import json
 
+        while True:
+            tool_calls = []
+            assistant_msg = None
 
-async def main():
-    pass
+            async for message in llm.stream(messages=messages, tools=tools):
+                await runtime.push(message)
 
+                if message.is_done:
+                    assistant_msg = message
+                    for part in message.parts:
+                        if isinstance(part, ToolCallPart):
+                            tool_calls.append(part)
 
-if __name__ == "__main__":
-    asyncio.run(main())
+            if assistant_msg:
+                messages.append(assistant_msg)
+
+            if not tool_calls:
+                break
+
+            for tool_call in tool_calls:
+                tool_fn = next(t for t in tools if t.name == tool_call.tool_name)
+                args = json.loads(tool_call.tool_args)
+                result = await tool_fn.fn(**args)
+
+                tool_msg = Message(
+                    role="tool",
+                    parts=[
+                        ToolResultPart(
+                            tool_call_id=tool_call.tool_call_id,
+                            result={"output": result},
+                        )
+                    ],
+                )
+                messages.append(tool_msg)
+                await runtime.push(tool_msg)
+
+    return loop_fn

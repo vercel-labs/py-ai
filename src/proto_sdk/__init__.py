@@ -8,9 +8,11 @@ from proto_sdk.core import (
     ToolResultPart,
     Tool,
     LanguageModel,
-    Loop,
+    Collector,
     Runtime,
     tool,
+    get_root,
+    _gen_id,
 )
 
 __all__ = [
@@ -21,7 +23,9 @@ __all__ = [
     "ToolResultPart",
     "Tool",
     "LanguageModel",
-    "Loop",
+    "Collector",
     "Runtime",
     "tool",
+    "get_root",
+    "_gen_id",
 ]

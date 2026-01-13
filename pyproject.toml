@@ -11,6 +11,7 @@ dependencies = [
     "anthropic>=0.40.0",
     "httpx>=0.28.1",
     "openai>=2.14.0",
+    "rich>=14.2.0",
 ]
 
 [build-system]

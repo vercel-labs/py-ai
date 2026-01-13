@@ -1,14 +1,24 @@
-"""Minimal example of using the LanguageModel to stream a completion with tools."""
+"""Minimal agent using Collector.stream() with get_root()."""
 
 import asyncio
 import os
+import random
 
 from proto_sdk import core
 from proto_sdk.openai import OpenAIModel
+from rich.console import Console
 
 import dotenv
 
 dotenv.load_dotenv()
+
+console = Console()
+
+
+@core.tool
+async def roll_dice(sides: int = 6) -> dict:
+    """Roll a dice with the specified number of sides."""
+    return {"result": random.randint(1, sides)}
 
 
 @core.tool
@@ -17,33 +27,26 @@ async def get_weather(location: str) -> dict:
     return {"temperature": 72, "condition": "sunny", "location": location}
 
 
-@core.tool
-async def add_numbers(a: int, b: int) -> dict:
-    """Add two numbers together."""
-    return {"result": a + b}
-
-
 async def main():
-    model = "anthropic/claude-sonnet-4.5"
-    base_url = "https://ai-gateway.vercel.sh/v1"
-    api_key = os.environ.get("AI_GATEWAY_API_KEY")
-    model = OpenAIModel(model=model, api_key=api_key, base_url=base_url)
-    tools = [get_weather, add_numbers]
+    llm = OpenAIModel(
+        model="anthropic/claude-sonnet-4.5",
+        api_key=os.environ.get("AI_GATEWAY_API_KEY"),
+        base_url="https://ai-gateway.vercel.sh/v1",
+    )
 
     messages = [
         core.Message(
             role="user",
-            parts=[core.TextPart(text="What's the weather in San Francisco?")],
+            parts=[core.TextPart(text="Roll a d20 and check Tokyo weather.")],
         )
     ]
 
-    print("Streaming response...")
-    async for msg in model.stream(messages, tools):
-        if msg.text_delta:
-            print(msg.text_delta, end="", flush=True)
+    root = core.get_root(llm, messages, tools=[roll_dice, get_weather])
+
+    async for msg in core.Collector().stream(root):
+        console.print(msg)
         if msg.is_done:
-            print("\n---")
-            print(f"Final message parts: {msg.parts}")
+            print()
 
 
 if __name__ == "__main__":
