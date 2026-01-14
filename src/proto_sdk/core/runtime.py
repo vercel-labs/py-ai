@@ -4,7 +4,9 @@ import abc
 import asyncio
 import dataclasses
 import inspect
+import json
 from collections.abc import AsyncGenerator, Awaitable, Coroutine
+import contextvars
 from typing import Any, Literal, Callable, get_origin, get_args, get_type_hints
 import uuid
 
@@ -184,46 +186,91 @@ class Runtime:
         await self._colletor.queue.put(message)
 
 
-# defines the execution graph for the root
-# calls the LLM, invokes tools, etc
-def get_root(llm: LanguageModel, messages: list[Message], tools: list[Tool]):
-    async def loop_fn(runtime: Runtime) -> None:
-        import json
+_runtime: contextvars.ContextVar[Runtime] = contextvars.ContextVar("runtime")
 
-        while True:
-            tool_calls = []
-            assistant_msg = None
 
-            async for message in llm.stream(messages=messages, tools=tools):
-                await runtime.push(message)
+async def stream_text(
+    llm: LanguageModel, messages: list[Message]
+) -> AsyncGenerator[Message]:
+    runtime = _runtime.get()
+    if runtime is None:
+        raise ValueError("Runtime not set")
 
-                if message.is_done:
-                    assistant_msg = message
-                    for part in message.parts:
-                        if isinstance(part, ToolCallPart):
-                            tool_calls.append(part)
+    async for message in llm.stream(messages=messages):
+        await runtime.push(message)
+        yield message
 
-            if assistant_msg:
-                messages.append(assistant_msg)
 
-            if not tool_calls:
-                break
+async def stream_loop(
+    llm: LanguageModel, messages: list[Message], tools: list[Tool]
+) -> AsyncGenerator[Message]:
+    runtime = _runtime.get()
+    if runtime is None:
+        raise ValueError("Runtime not set")
 
-            for tool_call in tool_calls:
-                tool_fn = next(t for t in tools if t.name == tool_call.tool_name)
-                args = json.loads(tool_call.tool_args)
-                result = await tool_fn.fn(**args)
+    while True:
+        tool_calls = []
+        assistant_msg = None
 
-                tool_msg = Message(
-                    role="tool",
-                    parts=[
-                        ToolResultPart(
-                            tool_call_id=tool_call.tool_call_id,
-                            result={"output": result},
-                        )
-                    ],
-                )
-                messages.append(tool_msg)
-                await runtime.push(tool_msg)
+        async for message in llm.stream(messages=messages, tools=tools):
+            await runtime.push(message)
+            yield message
 
-    return loop_fn
+            if message.is_done:
+                assistant_msg = message
+                for part in message.parts:
+                    if isinstance(part, ToolCallPart):
+                        tool_calls.append(part)
+
+        if assistant_msg:
+            messages.append(assistant_msg)
+
+        if not tool_calls:
+            break
+
+        for tool_call in tool_calls:
+            tool_fn = next(t for t in tools if t.name == tool_call.tool_name)
+            args = json.loads(tool_call.tool_args)
+            result = await tool_fn.fn(**args)
+
+            tool_msg = Message(
+                role="tool",
+                parts=[
+                    ToolResultPart(
+                        tool_call_id=tool_call.tool_call_id,
+                        result={"output": result},
+                    )
+                ],
+            )
+            messages.append(tool_msg)
+            await runtime.push(tool_msg)
+            yield tool_msg
+
+
+async def stream(
+    root: Callable[[Runtime], Coroutine[Any, Any, None]],
+) -> AsyncGenerator[Message]:
+    collector = Collector()
+    runtime = Runtime(collector)
+    token_runtime = _runtime.set(runtime)
+
+    try:
+        async with asyncio.TaskGroup() as tg:
+            _task: asyncio.Task[None] = tg.create_task(root(runtime))
+
+            while True:
+                msg = await collector.queue.get()
+                if isinstance(msg, _Sentinel):
+                    break
+                yield msg
+
+    finally:
+        _runtime.reset(token_runtime)
+
+
+async def buffer(stream: AsyncGenerator[Message]) -> list[Message]:
+    messages: list[Message] = []
+    async for message in stream:
+        if message.is_done:
+            messages.append(message)
+    return messages
