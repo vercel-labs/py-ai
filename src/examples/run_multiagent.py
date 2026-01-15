@@ -33,6 +33,14 @@ def make_messages(system_prompt: str, user_query: str) -> list[ai.Message]:
     ]
 
 
+@ai.tool
+async def add_one(number: int) -> int:
+    return number + 1
+
+@ai.tool
+async def multiply_by_two(number: int) -> int:
+    return number * 2
+
 async def multiagent(llm: ai.openai.OpenAIModel, user_query: str) -> list[ai.Message]:
     tech_msgs, biz_msgs = await asyncio.gather(
         ai.buffer(
@@ -40,9 +48,9 @@ async def multiagent(llm: ai.openai.OpenAIModel, user_query: str) -> list[ai.Mes
                 llm,
                 messages=make_messages(
                     "You are the test assistant 1.",
-                    f"Add one to user query: {user_query}",
+                    f"Use your tool on the user query: {user_query}",
                 ),
-                tools=[],
+                tools=[add_one],
                 label="a1",
             )
         ),
@@ -51,9 +59,9 @@ async def multiagent(llm: ai.openai.OpenAIModel, user_query: str) -> list[ai.Mes
                 llm,
                 messages=make_messages(
                     "You are the test assistant 2.",
-                    f"Multiply user query by 2: {user_query}",
+                    f"Use your tool on the user query: {user_query}",
                 ),
-                tools=[],
+                tools=[multiply_by_two],
                 label="a2",
             )
         ),
@@ -92,7 +100,8 @@ async def main():
     async for msg in ai.execute(multiagent, llm, user_query):
         label = msg.label or "unknown"
         color = colors.get(label, "white")
-        rich.print(f"[{color}]■[/{color}] " + get_text([msg]))
+        rich.print(f"[{color}]■[/{color}]", end=" ", flush=True)
+        rich.print(msg)
 
 
 if __name__ == "__main__":
