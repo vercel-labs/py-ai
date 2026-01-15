@@ -134,56 +134,23 @@ class LanguageModel(abc.ABC):
         yield
 
 
-class _Sentinel:
-    pass
-
-
-_SENTINEL = _Sentinel()
-
-
-# owns message queue
-# exposes .stream() that yields messages from queue
-# is consumer and also transforms whatever is consumed into a generator
-class Collector:
-    def __init__(self) -> None:
-        self.queue: asyncio.Queue[Message | _Sentinel] = asyncio.Queue()
-        self._done: bool = False
-
-    async def stream(
-        self, root: Callable[[Runtime], Awaitable[None]]
-    ) -> AsyncGenerator[Message]:
-        runtime = Runtime(self)
-
-        async with asyncio.TaskGroup() as g:
-            _ = g.create_task(self._stop_when_done(root(runtime)))
-
-            while True:
-                message = await self.queue.get()
-                if isinstance(message, _Sentinel):
-                    break
-                yield message
-
-    # checks if the task has quit and gracefully
-    # shuts down the queue (why do we need this?)
-    async def _stop_when_done(self, task: Awaitable[None]):
-        try:
-            await task
-        finally:
-            self.queue.put_nowait(_SENTINEL)  # FIXME: swap out for a proper sentinel
-
-    def close(self) -> None:
-        self._done = True
-        self.queue.put_nowait(_SENTINEL)
-
-
-# gets injected into tools so they can push to the Loop queue
-# is produces
 class Runtime:
-    def __init__(self, collector: Collector) -> None:
-        self._colletor: Collector = collector
+    class _Sentinel:
+        pass
 
-    async def push(self, message: Message) -> None:
-        await self._colletor.queue.put(message)
+    _SENTINEL = _Sentinel()
+
+    def __init__(self) -> None:
+        self._queue: asyncio.Queue[Message | Runtime._Sentinel] = asyncio.Queue()
+
+    async def put(self, message: Message) -> None:
+        await self._queue.put(message)
+
+    async def get(self) -> Message | Runtime._Sentinel:
+        return await self._queue.get()
+
+    async def signal_done(self) -> None:
+        await self._queue.put(self._SENTINEL)
 
 
 _runtime: contextvars.ContextVar[Runtime] = contextvars.ContextVar("runtime")
@@ -197,7 +164,7 @@ async def stream_text(
         raise ValueError("Runtime not set")
 
     async for message in llm.stream(messages=messages):
-        await runtime.push(message)
+        await runtime.put(message)
         yield message
 
 
@@ -213,7 +180,7 @@ async def stream_loop(
         assistant_msg = None
 
         async for message in llm.stream(messages=messages, tools=tools):
-            await runtime.push(message)
+            await runtime.put(message)
             yield message
 
             if message.is_done:
@@ -243,24 +210,32 @@ async def stream_loop(
                 ],
             )
             messages.append(tool_msg)
-            await runtime.push(tool_msg)
+            await runtime.put(tool_msg)
             yield tool_msg
 
 
-async def stream(
-    root: Callable[[Runtime], Coroutine[Any, Any, None]],
+async def _stop_when_done(runtime: Runtime, task: Awaitable[None]) -> None:
+    try:
+        await task
+    finally:
+        await runtime.signal_done()
+
+
+async def execute(
+    root: Callable[[Runtime], Coroutine[Any, Any, None]], *args: Any
 ) -> AsyncGenerator[Message]:
-    collector = Collector()
-    runtime = Runtime(collector)
+    runtime = Runtime()
     token_runtime = _runtime.set(runtime)
 
     try:
         async with asyncio.TaskGroup() as tg:
-            _task: asyncio.Task[None] = tg.create_task(root(runtime))
+            _task: asyncio.Task[None] = tg.create_task(
+                _stop_when_done(runtime, root(*args))
+            )
 
             while True:
-                msg = await collector.queue.get()
-                if isinstance(msg, _Sentinel):
+                msg = await runtime.get()
+                if isinstance(msg, Runtime._Sentinel):
                     break
                 yield msg
 
