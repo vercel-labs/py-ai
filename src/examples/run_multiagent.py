@@ -33,9 +33,7 @@ def make_messages(system_prompt: str, user_query: str) -> list[ai.Message]:
     ]
 
 
-async def multiagent(
-    llm: ai.openai.OpenAIModel, user_query: str
-) -> list[ai.Message]:
+async def multiagent(llm: ai.openai.OpenAIModel, user_query: str) -> list[ai.Message]:
     tech_msgs, biz_msgs = await asyncio.gather(
         ai.buffer(
             ai.stream_loop(
@@ -45,6 +43,7 @@ async def multiagent(
                     f"Add one to user query: {user_query}",
                 ),
                 tools=[],
+                label="a1",
             )
         ),
         ai.buffer(
@@ -55,6 +54,7 @@ async def multiagent(
                     f"Multiply user query by 2: {user_query}",
                 ),
                 tools=[],
+                label="a2",
             )
         ),
     )
@@ -68,6 +68,7 @@ async def multiagent(
                 "You are the test assistant 3.",
                 f"Add the results of the previous two assistants: {combined}",
             ),
+            label="a3",
         ),
     )
 
@@ -79,31 +80,19 @@ async def main():
         base_url="https://ai-gateway.vercel.sh/v1",
     )
 
-    user_query = (
-        "Ten"
-    )
-
-    # Legend
-    rich.print(
-        "[cyan]■ technical[/cyan]  [magenta]■ business[/magenta]  [yellow]■ orchestrator[/yellow]  [green]■ fact_checker[/green]  [blue]■ synthesis[/blue]\n"
-    )
+    user_query = "Ten"
 
     colors = {
-        "technical": "cyan",
-        "business": "magenta",
-        "orchestrator": "yellow",
-        "tool:fact_checker": "green",
-        "synthesis": "blue",
+        "a1": "cyan",
+        "a2": "magenta",
+        "a3": "green",
     }
 
     # stream() sets up the runtime context; our flow function receives it
     async for msg in ai.execute(multiagent, llm, user_query):
-        rich.print(msg)
-        # label = msg.label or "unknown"
-        # color = colors.get(label, "white")
-        # rich.print(f"[{color}]■[/{color}]", end="", flush=True)
-
-    # rich.print()
+        label = msg.label or "unknown"
+        color = colors.get(label, "white")
+        rich.print(f"[{color}]■[/{color}] " + get_text([msg]))
 
 
 if __name__ == "__main__":

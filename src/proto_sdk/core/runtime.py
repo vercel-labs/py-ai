@@ -157,19 +157,20 @@ _runtime: contextvars.ContextVar[Runtime] = contextvars.ContextVar("runtime")
 
 
 async def stream_text(
-    llm: LanguageModel, messages: list[Message]
+    llm: LanguageModel, messages: list[Message], label: str | None = None
 ) -> AsyncGenerator[Message]:
     runtime = _runtime.get()
     if runtime is None:
         raise ValueError("Runtime not set")
 
     async for message in llm.stream(messages=messages):
+        message.label = label
         await runtime.put(message)
         yield message
 
 
 async def stream_loop(
-    llm: LanguageModel, messages: list[Message], tools: list[Tool]
+    llm: LanguageModel, messages: list[Message], tools: list[Tool], label: str | None = None
 ) -> AsyncGenerator[Message]:
     runtime = _runtime.get()
     if runtime is None:
@@ -180,6 +181,7 @@ async def stream_loop(
         assistant_msg = None
 
         async for message in llm.stream(messages=messages, tools=tools):
+            message.label = label
             await runtime.put(message)
             yield message
 
@@ -208,6 +210,7 @@ async def stream_loop(
                         result={"output": result},
                     )
                 ],
+                label=label,
             )
             messages.append(tool_msg)
             await runtime.put(tool_msg)
