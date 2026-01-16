@@ -12,7 +12,7 @@ from .core.runtime import (
     stream_text,
 )
 
-from . import openai, ui
+from . import mcp, openai, ui
 
 __all__ = [
     "Message",
@@ -27,6 +27,7 @@ __all__ = [
     "stream_loop",
     "stream_text",
     "buffer",
+    "mcp",
     "openai",
     "ui",
 ]
