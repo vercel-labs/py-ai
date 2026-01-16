@@ -60,7 +60,7 @@ async def context7_example_http(llm: ai.openai.OpenAIModel, user_query: str):
     return await ai.stream_loop(
         llm,
         messages=make_messages(
-            "Test run. Call resolve-library-id for 'next.js' and stop.",
+            "Test run. Please reason about this test run briefly, then call resolve-library-id for 'next.js' and stop.",
             user_query,
         ),
         tools=context7_tools,
@@ -89,6 +89,18 @@ async def context7_example_stdio(llm: ai.openai.OpenAIModel, user_query: str):
 
 # Clean up connections when done (optional - happens automatically on exit)
 # await ai.mcp.close_connections()
+
+
+async def thinking_example(llm: ai.LanguageModel, user_query: str):
+    """Example using reasoning/thinking models (GPT 5.2, o-series, or Claude with thinking)."""
+    return await ai.stream_text(
+        llm,
+        messages=make_messages(
+            "You are a helpful assistant that thinks step by step.",
+            user_query,
+        ),
+        label="thinking",
+    )
 
 
 async def multiagent(llm: ai.openai.OpenAIModel, user_query: str) -> list[ai.Message]:
@@ -129,18 +141,28 @@ async def multiagent(llm: ai.openai.OpenAIModel, user_query: str) -> list[ai.Mes
 
 async def main():
     llm = ai.openai.OpenAIModel(
-        model="anthropic/claude-sonnet-4.5",
+        model="openai/gpt-5.2",
         api_key=os.environ.get("AI_GATEWAY_API_KEY"),
         base_url="https://ai-gateway.vercel.sh/v1",
     )
 
-    user_query = "Ten"
+    # LLM with extended thinking using OpenAI's GPT 5.2 reasoning model via Vercel AI Gateway
+    # Uses budget_tokens to control reasoning depth (or use reasoning_effort="medium")
+    # See: https://vercel.com/docs/ai-gateway/openai-compat/advanced
+    thinking_llm = ai.openai.OpenAIModel(
+        model="openai/gpt-5.2",
+        base_url="https://ai-gateway.vercel.sh/v1",
+        api_key=os.environ.get("AI_GATEWAY_API_KEY"),
+        thinking=True,
+        budget_tokens=10000,
+    )
 
     colors = {
         "a1": "cyan",
         "a2": "magenta",
         "a3": "green",
         "context7": "yellow",
+        "thinking": "blue",
     }
 
     # regular streaming example
@@ -161,7 +183,7 @@ async def main():
     context7_query = "next.js middleware"
 
     # HTTP transport
-    async for msg in ai.execute(context7_example_http, llm, context7_query):
+    async for msg in ai.execute(context7_example_http, thinking_llm, context7_query):
         label = msg.label or "unknown"
         color = colors.get(label, "white")
         rich.print(f"[{color}]■[/{color}]", end=" ", flush=True)

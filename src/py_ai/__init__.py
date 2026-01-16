@@ -3,7 +3,9 @@ from .core.runtime import (
     Part,
     TextPart,
     ToolCallPart,
+    ToolCallDelta,
     ToolResultPart,
+    ReasoningPart,
     Tool,
     LanguageModel,
     tool,
@@ -12,14 +14,16 @@ from .core.runtime import (
     stream_text,
 )
 
-from . import mcp, openai, ui
+from . import anthropic, mcp, openai, ui
 
 __all__ = [
     "Message",
     "Part",
     "TextPart",
     "ToolCallPart",
+    "ToolCallDelta",
     "ToolResultPart",
+    "ReasoningPart",
     "Tool",
     "LanguageModel",
     "tool",
@@ -27,6 +31,7 @@ __all__ = [
     "stream_loop",
     "stream_text",
     "buffer",
+    "anthropic",
     "mcp",
     "openai",
     "ui",

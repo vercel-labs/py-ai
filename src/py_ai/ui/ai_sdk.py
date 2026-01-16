@@ -68,6 +68,88 @@ class TextEndPart:
 
 
 @dataclasses.dataclass
+class ReasoningStartPart:
+    """Indicates the beginning of a reasoning block."""
+
+    id: str
+    type: Literal["reasoning-start"] = dataclasses.field(
+        default="reasoning-start", init=False
+    )
+    provider_metadata: dict[str, Any] | None = None
+
+
+@dataclasses.dataclass
+class ReasoningDeltaPart:
+    """Contains incremental reasoning content for the reasoning block."""
+
+    id: str
+    delta: str
+    type: Literal["reasoning-delta"] = dataclasses.field(
+        default="reasoning-delta", init=False
+    )
+    provider_metadata: dict[str, Any] | None = None
+
+
+@dataclasses.dataclass
+class ReasoningEndPart:
+    """Indicates the completion of a reasoning block."""
+
+    id: str
+    type: Literal["reasoning-end"] = dataclasses.field(
+        default="reasoning-end", init=False
+    )
+    provider_metadata: dict[str, Any] | None = None
+
+
+@dataclasses.dataclass
+class SourceUrlPart:
+    """References to external URLs."""
+
+    source_id: str
+    url: str
+    type: Literal["source-url"] = dataclasses.field(default="source-url", init=False)
+    title: str | None = None
+    provider_metadata: dict[str, Any] | None = None
+
+
+@dataclasses.dataclass
+class SourceDocumentPart:
+    """References to documents or files."""
+
+    source_id: str
+    media_type: str
+    title: str
+    type: Literal["source-document"] = dataclasses.field(
+        default="source-document", init=False
+    )
+    filename: str | None = None
+    provider_metadata: dict[str, Any] | None = None
+
+
+@dataclasses.dataclass
+class FilePart:
+    """The file parts contain references to files with their media type."""
+
+    url: str
+    media_type: str
+    type: Literal["file"] = dataclasses.field(default="file", init=False)
+    provider_metadata: dict[str, Any] | None = None
+
+
+@dataclasses.dataclass
+class DataPart:
+    """Custom data parts allow streaming of arbitrary structured data with type-specific handling.
+
+    The type will be formatted as 'data-{data_type}' in the output.
+    """
+
+    data_type: str
+    data: Any
+    id: str | None = None
+    transient: bool | None = None
+
+
+@dataclasses.dataclass
 class ToolInputStartPart:
     """Indicates the beginning of tool input streaming."""
 
@@ -79,6 +161,17 @@ class ToolInputStartPart:
     provider_executed: bool | None = None
     dynamic: bool | None = None
     title: str | None = None
+
+
+@dataclasses.dataclass
+class ToolInputDeltaPart:
+    """Incremental chunks of tool input as it's being generated."""
+
+    tool_call_id: str
+    input_text_delta: str
+    type: Literal["tool-input-delta"] = dataclasses.field(
+        default="tool-input-delta", init=False
+    )
 
 
 @dataclasses.dataclass
@@ -98,6 +191,23 @@ class ToolInputAvailablePart:
 
 
 @dataclasses.dataclass
+class ToolInputErrorPart:
+    """Indicates an error occurred during tool input processing."""
+
+    tool_call_id: str
+    tool_name: str
+    input: Any
+    error_text: str
+    type: Literal["tool-input-error"] = dataclasses.field(
+        default="tool-input-error", init=False
+    )
+    provider_executed: bool | None = None
+    provider_metadata: dict[str, Any] | None = None
+    dynamic: bool | None = None
+    title: str | None = None
+
+
+@dataclasses.dataclass
 class ToolOutputAvailablePart:
     """Contains the result of tool execution."""
 
@@ -109,6 +219,40 @@ class ToolOutputAvailablePart:
     provider_executed: bool | None = None
     dynamic: bool | None = None
     preliminary: bool | None = None
+
+
+@dataclasses.dataclass
+class ToolOutputErrorPart:
+    """Indicates an error occurred during tool execution."""
+
+    tool_call_id: str
+    error_text: str
+    type: Literal["tool-output-error"] = dataclasses.field(
+        default="tool-output-error", init=False
+    )
+    provider_executed: bool | None = None
+    dynamic: bool | None = None
+
+
+@dataclasses.dataclass
+class ToolOutputDeniedPart:
+    """Indicates tool execution was denied."""
+
+    tool_call_id: str
+    type: Literal["tool-output-denied"] = dataclasses.field(
+        default="tool-output-denied", init=False
+    )
+
+
+@dataclasses.dataclass
+class ToolApprovalRequestPart:
+    """Requests approval for tool execution."""
+
+    approval_id: str
+    tool_call_id: str
+    type: Literal["tool-approval-request"] = dataclasses.field(
+        default="tool-approval-request", init=False
+    )
 
 
 @dataclasses.dataclass
@@ -135,6 +279,23 @@ class FinishPart:
 
 
 @dataclasses.dataclass
+class AbortPart:
+    """Indicates the message was aborted."""
+
+    type: Literal["abort"] = dataclasses.field(default="abort", init=False)
+
+
+@dataclasses.dataclass
+class MessageMetadataPart:
+    """Contains message metadata."""
+
+    message_metadata: Any
+    type: Literal["message-metadata"] = dataclasses.field(
+        default="message-metadata", init=False
+    )
+
+
+@dataclasses.dataclass
 class ErrorPart:
     """The error parts are appended to the message as they are received."""
 
@@ -147,12 +308,26 @@ UIMessageStreamPart = (
     | TextStartPart
     | TextDeltaPart
     | TextEndPart
+    | ReasoningStartPart
+    | ReasoningDeltaPart
+    | ReasoningEndPart
+    | SourceUrlPart
+    | SourceDocumentPart
+    | FilePart
+    | DataPart
     | ToolInputStartPart
+    | ToolInputDeltaPart
     | ToolInputAvailablePart
+    | ToolInputErrorPart
     | ToolOutputAvailablePart
+    | ToolOutputErrorPart
+    | ToolOutputDeniedPart
+    | ToolApprovalRequestPart
     | StartStepPart
     | FinishStepPart
     | FinishPart
+    | AbortPart
+    | MessageMetadataPart
     | ErrorPart
 )
 
@@ -194,13 +369,22 @@ async def to_ui_message_stream(
     """
     # Track state for proper event sequencing
     current_text_id: str | None = None
+    current_reasoning_id: str | None = None
     current_label: str | None = None
     emitted_start: bool = False
     in_step: bool = False
+    started_tool_calls: set[str] = set()  # track which tool calls we've started
 
     async for msg in messages:
         # Emit start part on first message or label change (new agent)
         if not emitted_start or (msg.label and msg.label != current_label):
+            # Close any open blocks before switching
+            if current_reasoning_id:
+                yield ReasoningEndPart(id=current_reasoning_id)
+                current_reasoning_id = None
+            if current_text_id:
+                yield TextEndPart(id=current_text_id)
+                current_text_id = None
             if in_step:
                 yield FinishStepPart()
                 in_step = False
@@ -212,18 +396,49 @@ async def to_ui_message_stream(
             emitted_start = True
             in_step = True
             current_label = msg.label
-            current_text_id = None
+            started_tool_calls = set()
+
+        # Handle reasoning streaming (deltas) - reasoning comes before text
+        if msg.reasoning_delta:
+            if not current_reasoning_id:
+                current_reasoning_id = _generate_id("reasoning")
+                yield ReasoningStartPart(id=current_reasoning_id)
+
+            yield ReasoningDeltaPart(id=current_reasoning_id, delta=msg.reasoning_delta)
 
         # Handle text streaming (deltas)
         if msg.text_delta:
+            # Close reasoning block when text starts (reasoning precedes text)
+            if current_reasoning_id:
+                yield ReasoningEndPart(id=current_reasoning_id)
+                current_reasoning_id = None
+
             if not current_text_id:
                 current_text_id = _generate_id("text")
                 yield TextStartPart(id=current_text_id)
 
             yield TextDeltaPart(id=current_text_id, delta=msg.text_delta)
 
+        # Handle streaming tool call arguments
+        for delta in msg.tool_call_deltas:
+            if delta.tool_call_id not in started_tool_calls:
+                started_tool_calls.add(delta.tool_call_id)
+                yield ToolInputStartPart(
+                    tool_call_id=delta.tool_call_id,
+                    tool_name=delta.tool_name,
+                )
+            yield ToolInputDeltaPart(
+                tool_call_id=delta.tool_call_id,
+                input_text_delta=delta.args_delta,
+            )
+
         # Handle completed messages
         if msg.is_done:
+            # Close any open reasoning block
+            if current_reasoning_id:
+                yield ReasoningEndPart(id=current_reasoning_id)
+                current_reasoning_id = None
+
             # Close any open text block
             if current_text_id:
                 yield TextEndPart(id=current_text_id)
@@ -234,10 +449,12 @@ async def to_ui_message_stream(
             for part in msg.parts:
                 if isinstance(part, ai.ToolCallPart):
                     has_tool_calls = True
-                    yield ToolInputStartPart(
-                        tool_call_id=part.tool_call_id,
-                        tool_name=part.tool_name,
-                    )
+                    # Emit start if we haven't seen this tool call streaming
+                    if part.tool_call_id not in started_tool_calls:
+                        yield ToolInputStartPart(
+                            tool_call_id=part.tool_call_id,
+                            tool_name=part.tool_name,
+                        )
                     yield ToolInputAvailablePart(
                         tool_call_id=part.tool_call_id,
                         tool_name=part.tool_name,
@@ -261,6 +478,8 @@ async def to_ui_message_stream(
                 emitted_start = False
 
     # Final cleanup
+    if current_reasoning_id:
+        yield ReasoningEndPart(id=current_reasoning_id)
     if current_text_id:
         yield TextEndPart(id=current_text_id)
     if in_step:

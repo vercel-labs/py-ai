@@ -1,0 +1,229 @@
+from __future__ import annotations
+
+import json
+import os
+from collections.abc import AsyncGenerator
+from typing import Any, override
+
+import anthropic
+
+from ..core import runtime as core
+
+
+def _tools_to_anthropic(tools: list[core.Tool]) -> list[dict[str, Any]]:
+    """Convert internal Tool objects to Anthropic tool schema format."""
+    return [
+        {
+            "name": tool.name,
+            "description": tool.description,
+            "input_schema": tool.parameters,
+        }
+        for tool in tools
+    ]
+
+
+def _messages_to_anthropic(
+    messages: list[core.Message],
+) -> tuple[str | None, list[dict[str, Any]]]:
+    """Convert internal messages to Anthropic API format.
+
+    Returns (system_prompt, messages) tuple since Anthropic handles system differently.
+    """
+    system_prompt: str | None = None
+    result: list[dict[str, Any]] = []
+
+    for msg in messages:
+        if msg.role == "system":
+            system_prompt = "".join(
+                p.text for p in msg.parts if isinstance(p, core.TextPart)
+            )
+        elif msg.role == "tool":
+            for part in msg.parts:
+                if isinstance(part, core.ToolResultPart):
+                    result.append(
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": part.tool_call_id,
+                                    "content": str(part.result),
+                                }
+                            ],
+                        }
+                    )
+        elif msg.role == "assistant":
+            content: list[dict[str, Any]] = []
+            for part in msg.parts:
+                if isinstance(part, core.ReasoningPart):
+                    # Only include thinking blocks if we have the signature
+                    # (required by Anthropic API for multi-turn conversations)
+                    if part.signature:
+                        content.append({
+                            "type": "thinking",
+                            "thinking": part.reasoning,
+                            "signature": part.signature,
+                        })
+                elif isinstance(part, core.TextPart):
+                    content.append({"type": "text", "text": part.text})
+                elif isinstance(part, core.ToolCallPart):
+                    # tool_args is a JSON string, but Anthropic expects input as a dict
+                    tool_input = json.loads(part.tool_args) if part.tool_args else {}
+                    content.append(
+                        {
+                            "type": "tool_use",
+                            "id": part.tool_call_id,
+                            "name": part.tool_name,
+                            "input": tool_input,
+                        }
+                    )
+            if content:
+                result.append({"role": "assistant", "content": content})
+        else:
+            content_text = "".join(
+                p.text for p in msg.parts if isinstance(p, core.TextPart)
+            )
+            result.append({"role": "user", "content": content_text})
+
+    return system_prompt, result
+
+
+class AnthropicModel(core.LanguageModel):
+    """Anthropic adapter with native extended thinking support."""
+
+    def __init__(
+        self,
+        model: str = "claude-sonnet-4-5-20250929",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        thinking: bool = False,
+        budget_tokens: int = 10000,
+    ) -> None:
+        self._model = model
+        self._thinking = thinking
+        self._budget_tokens = budget_tokens
+        resolved_key = api_key or os.environ.get("ANTHROPIC_API_KEY") or ""
+        self._client = anthropic.AsyncAnthropic(base_url=base_url, api_key=resolved_key)
+
+    @override
+    async def stream(
+        self, messages: list[core.Message], tools: list[core.Tool] | None = None
+    ) -> AsyncGenerator[core.Message, None]:
+        system_prompt, anthropic_messages = _messages_to_anthropic(messages)
+        anthropic_tools = _tools_to_anthropic(tools) if tools else None
+
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": anthropic_messages,
+            "max_tokens": 8192,
+        }
+        if system_prompt:
+            kwargs["system"] = system_prompt
+        if anthropic_tools:
+            kwargs["tools"] = anthropic_tools
+
+        if self._thinking:
+            kwargs["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": self._budget_tokens,
+            }
+
+        text_content = ""
+        thinking_content = ""
+        thinking_signature = ""
+        tool_calls: dict[str, dict] = {}
+        message_id = core._gen_id()
+        current_tool_id: str | None = None
+
+        async with self._client.messages.stream(**kwargs) as stream:
+            async for event in stream:
+                text_delta = ""
+                thinking_delta = ""
+                tool_call_deltas: list[core.ToolCallDelta] = []
+
+                if event.type == "content_block_start":
+                    block = event.content_block
+                    if block.type == "tool_use":
+                        current_tool_id = block.id
+                        tool_calls[block.id] = {"name": block.name, "args": ""}
+
+                elif event.type == "content_block_delta":
+                    delta = event.delta
+                    if delta.type == "text_delta":
+                        text_delta = delta.text
+                        text_content += delta.text
+                    elif delta.type == "thinking_delta":
+                        thinking_delta = delta.thinking
+                        thinking_content += delta.thinking
+                    elif delta.type == "signature_delta":
+                        # Capture the signature for thinking blocks
+                        thinking_signature += delta.signature
+                    elif delta.type == "input_json_delta":
+                        if current_tool_id and current_tool_id in tool_calls:
+                            tool_calls[current_tool_id]["args"] += delta.partial_json
+                            tool_call_deltas.append(
+                                core.ToolCallDelta(
+                                    tool_call_id=current_tool_id,
+                                    tool_name=tool_calls[current_tool_id]["name"],
+                                    args_delta=delta.partial_json,
+                                )
+                            )
+
+                elif event.type == "content_block_stop":
+                    current_tool_id = None
+
+                elif event.type == "message_stop":
+                    final_parts: list[core.Part] = []
+                    if thinking_content:
+                        final_parts.append(core.ReasoningPart(
+                            reasoning=thinking_content,
+                            signature=thinking_signature or None,
+                        ))
+                    if text_content:
+                        final_parts.append(core.TextPart(text=text_content))
+                    for tc_id, tc in tool_calls.items():
+                        final_parts.append(
+                            core.ToolCallPart(
+                                tool_call_id=tc_id,
+                                tool_name=tc["name"],
+                                tool_args=tc["args"],
+                            )
+                        )
+
+                    yield core.Message(
+                        role="assistant",
+                        parts=final_parts,
+                        id=message_id,
+                        is_done=True,
+                        text_delta="",
+                        reasoning_delta="",
+                        tool_call_deltas=[],
+                    )
+                    return
+
+                current_parts: list[core.Part] = []
+                if thinking_content:
+                    current_parts.append(core.ReasoningPart(
+                        reasoning=thinking_content,
+                        signature=thinking_signature or None,
+                    ))
+                if text_content:
+                    current_parts.append(core.TextPart(text=text_content))
+                for tc_id, tc in tool_calls.items():
+                    current_parts.append(
+                        core.ToolCallPart(
+                            tool_call_id=tc_id,
+                            tool_name=tc["name"],
+                            tool_args=tc["args"],
+                        )
+                    )
+
+                yield core.Message(
+                    role="assistant",
+                    parts=current_parts,
+                    id=message_id,
+                    is_done=False,
+                    text_delta=text_delta,
+                    reasoning_delta=thinking_delta,
+                    tool_call_deltas=tool_call_deltas,
+                )
