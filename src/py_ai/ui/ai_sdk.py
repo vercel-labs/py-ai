@@ -372,6 +372,7 @@ async def to_ui_message_stream(
     current_label: str | None = None
     emitted_start: bool = False
     in_step: bool = False
+    started_tool_calls: set[str] = set()  # track which tool calls we've started
 
     async for msg in messages:
         # Emit start part on first message or label change (new agent)
@@ -388,6 +389,7 @@ async def to_ui_message_stream(
             in_step = True
             current_label = msg.label
             current_text_id = None
+            started_tool_calls = set()
 
         # Handle text streaming (deltas)
         if msg.text_delta:
@@ -396,6 +398,19 @@ async def to_ui_message_stream(
                 yield TextStartPart(id=current_text_id)
 
             yield TextDeltaPart(id=current_text_id, delta=msg.text_delta)
+
+        # Handle streaming tool call arguments
+        for delta in msg.tool_call_deltas:
+            if delta.tool_call_id not in started_tool_calls:
+                started_tool_calls.add(delta.tool_call_id)
+                yield ToolInputStartPart(
+                    tool_call_id=delta.tool_call_id,
+                    tool_name=delta.tool_name,
+                )
+            yield ToolInputDeltaPart(
+                tool_call_id=delta.tool_call_id,
+                input_text_delta=delta.args_delta,
+            )
 
         # Handle completed messages
         if msg.is_done:
@@ -409,10 +424,12 @@ async def to_ui_message_stream(
             for part in msg.parts:
                 if isinstance(part, ai.ToolCallPart):
                     has_tool_calls = True
-                    yield ToolInputStartPart(
-                        tool_call_id=part.tool_call_id,
-                        tool_name=part.tool_name,
-                    )
+                    # Emit start if we haven't seen this tool call streaming
+                    if part.tool_call_id not in started_tool_calls:
+                        yield ToolInputStartPart(
+                            tool_call_id=part.tool_call_id,
+                            tool_name=part.tool_name,
+                        )
                     yield ToolInputAvailablePart(
                         tool_call_id=part.tool_call_id,
                         tool_name=part.tool_name,

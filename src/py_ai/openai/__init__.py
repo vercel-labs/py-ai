@@ -112,6 +112,7 @@ class OpenAIModel(core.LanguageModel):
                 text_delta = delta.content
                 text_content += delta.content
 
+            tool_call_deltas: list[core.ToolCallDelta] = []
             if delta.tool_calls:
                 for tc in delta.tool_calls:
                     idx = tc.index
@@ -124,6 +125,15 @@ class OpenAIModel(core.LanguageModel):
                             tool_calls[idx]["name"] = tc.function.name
                         if tc.function.arguments:
                             tool_calls[idx]["args"] += tc.function.arguments
+                            # Capture the delta for streaming
+                            if tool_calls[idx]["id"]:
+                                tool_call_deltas.append(
+                                    core.ToolCallDelta(
+                                        tool_call_id=tool_calls[idx]["id"],
+                                        tool_name=tool_calls[idx]["name"] or "",
+                                        args_delta=tc.function.arguments,
+                                    )
+                                )
 
             parts: list[core.Part] = []
             if text_content:
@@ -146,6 +156,7 @@ class OpenAIModel(core.LanguageModel):
                 id=message_id,
                 is_done=is_done,
                 text_delta=text_delta,
+                tool_call_deltas=tool_call_deltas,
             )
 
             if is_done:
