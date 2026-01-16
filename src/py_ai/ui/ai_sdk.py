@@ -369,6 +369,7 @@ async def to_ui_message_stream(
     """
     # Track state for proper event sequencing
     current_text_id: str | None = None
+    current_reasoning_id: str | None = None
     current_label: str | None = None
     emitted_start: bool = False
     in_step: bool = False
@@ -377,6 +378,13 @@ async def to_ui_message_stream(
     async for msg in messages:
         # Emit start part on first message or label change (new agent)
         if not emitted_start or (msg.label and msg.label != current_label):
+            # Close any open blocks before switching
+            if current_reasoning_id:
+                yield ReasoningEndPart(id=current_reasoning_id)
+                current_reasoning_id = None
+            if current_text_id:
+                yield TextEndPart(id=current_text_id)
+                current_text_id = None
             if in_step:
                 yield FinishStepPart()
                 in_step = False
@@ -388,11 +396,23 @@ async def to_ui_message_stream(
             emitted_start = True
             in_step = True
             current_label = msg.label
-            current_text_id = None
             started_tool_calls = set()
+
+        # Handle reasoning streaming (deltas) - reasoning comes before text
+        if msg.reasoning_delta:
+            if not current_reasoning_id:
+                current_reasoning_id = _generate_id("reasoning")
+                yield ReasoningStartPart(id=current_reasoning_id)
+
+            yield ReasoningDeltaPart(id=current_reasoning_id, delta=msg.reasoning_delta)
 
         # Handle text streaming (deltas)
         if msg.text_delta:
+            # Close reasoning block when text starts (reasoning precedes text)
+            if current_reasoning_id:
+                yield ReasoningEndPart(id=current_reasoning_id)
+                current_reasoning_id = None
+
             if not current_text_id:
                 current_text_id = _generate_id("text")
                 yield TextStartPart(id=current_text_id)
@@ -414,6 +434,11 @@ async def to_ui_message_stream(
 
         # Handle completed messages
         if msg.is_done:
+            # Close any open reasoning block
+            if current_reasoning_id:
+                yield ReasoningEndPart(id=current_reasoning_id)
+                current_reasoning_id = None
+
             # Close any open text block
             if current_text_id:
                 yield TextEndPart(id=current_text_id)
@@ -453,6 +478,8 @@ async def to_ui_message_stream(
                 emitted_start = False
 
     # Final cleanup
+    if current_reasoning_id:
+        yield ReasoningEndPart(id=current_reasoning_id)
     if current_text_id:
         yield TextEndPart(id=current_text_id)
     if in_step:
