@@ -10,7 +10,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any, Literal
 
-import proto_sdk as ai
+import py_ai as ai
 
 # necessary headers for the streaming integration to work
 

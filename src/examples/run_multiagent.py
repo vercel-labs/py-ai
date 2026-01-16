@@ -4,7 +4,7 @@ import os
 import dotenv
 import rich
 
-import proto_sdk as ai
+import py_ai as ai
 
 dotenv.load_dotenv()
 
