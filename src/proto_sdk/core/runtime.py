@@ -5,7 +5,7 @@ import asyncio
 import dataclasses
 import inspect
 import json
-from collections.abc import AsyncGenerator, Awaitable, Coroutine
+from collections.abc import AsyncGenerator, Awaitable, Coroutine, Generator
 import contextvars
 from typing import Any, Literal, Callable, get_origin, get_args, get_type_hints
 import uuid
@@ -124,6 +124,13 @@ class Message:
     text_delta: str = ""
     label: str | None = None
 
+    @property
+    def text(self) -> str:
+        for part in self.parts:
+            if isinstance(part, TextPart):
+                return part.text
+        return ""
+
 
 class LanguageModel(abc.ABC):
     @abc.abstractmethod
@@ -156,7 +163,7 @@ class Runtime:
 _runtime: contextvars.ContextVar[Runtime] = contextvars.ContextVar("runtime")
 
 
-async def stream_text(
+async def _do_stream_text(
     llm: LanguageModel, messages: list[Message], label: str | None = None
 ) -> AsyncGenerator[Message]:
     runtime = _runtime.get()
@@ -169,8 +176,11 @@ async def stream_text(
         yield message
 
 
-async def stream_loop(
-    llm: LanguageModel, messages: list[Message], tools: list[Tool], label: str | None = None
+async def _do_stream_loop(
+    llm: LanguageModel,
+    messages: list[Message],
+    tools: list[Tool],
+    label: str | None = None,
 ) -> AsyncGenerator[Message]:
     runtime = _runtime.get()
     if runtime is None:
@@ -217,6 +227,51 @@ async def stream_loop(
             yield tool_msg
 
 
+class Stream:
+    def __init__(self, generator: AsyncGenerator[Message, None]) -> None:
+        self._generator = generator
+        self._messages: list[Message] = []
+        self._is_consumed: bool = False
+
+    async def __aiter__(self) -> AsyncGenerator[Message, None]:
+        async for message in self._generator:
+            if message.is_done:
+                self._messages.append(message)
+            yield message
+        self._is_consumed = True
+
+    def __await__(self) -> Generator[Any, None, list[Message]]:
+        return self._collect().__await__()
+
+    async def _collect(self) -> list[Message]:
+        if self._is_consumed:
+            return self._messages
+        async for _ in self:
+            pass
+        return self._messages
+
+    @property
+    def result(self) -> list[Message]:
+        if not self._is_consumed:
+            raise ValueError("Stream is not consumed")
+        return self._messages
+
+
+def stream_text(
+    llm: LanguageModel, messages: list[Message], label: str | None = None
+) -> Stream:
+    return Stream(_do_stream_text(llm, messages, label))
+
+
+def stream_loop(
+    llm: LanguageModel,
+    messages: list[Message],
+    tools: list[Tool],
+    label: str | None = None,
+) -> Stream:
+    return Stream(_do_stream_loop(llm, messages, tools, label))
+
+
 async def _stop_when_done(runtime: Runtime, task: Awaitable[None]) -> None:
     try:
         await task
@@ -244,11 +299,3 @@ async def execute(
 
     finally:
         _runtime.reset(token_runtime)
-
-
-async def buffer(stream: AsyncGenerator[Message]) -> list[Message]:
-    messages: list[Message] = []
-    async for message in stream:
-        if message.is_done:
-            messages.append(message)
-    return messages
