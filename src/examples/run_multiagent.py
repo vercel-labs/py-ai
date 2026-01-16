@@ -91,6 +91,18 @@ async def context7_example_stdio(llm: ai.openai.OpenAIModel, user_query: str):
 # await ai.mcp.close_connections()
 
 
+async def thinking_example(llm: ai.LanguageModel, user_query: str):
+    """Example using Claude extended thinking."""
+    return await ai.stream_text(
+        llm,
+        messages=make_messages(
+            "You are a helpful assistant. Think through problems carefully.",
+            user_query,
+        ),
+        label="thinking",
+    )
+
+
 async def multiagent(llm: ai.openai.OpenAIModel, user_query: str) -> list[ai.Message]:
     stream1, stream2 = await asyncio.gather(
         ai.stream_loop(
@@ -134,6 +146,16 @@ async def main():
         base_url="https://ai-gateway.vercel.sh/v1",
     )
 
+    # LLM with extended thinking using Anthropic adapter via Vercel AI Gateway
+    # Uses the Anthropic-compatible endpoint (not OpenAI-compatible) for thinking support
+    thinking_llm = ai.anthropic.AnthropicModel(
+        model="claude-sonnet-4-5-20250929",
+        base_url="https://ai-gateway.vercel.sh",
+        api_key=os.environ.get("AI_GATEWAY_API_KEY"),
+        thinking=True,
+        budget_tokens=10000,
+    )
+
     user_query = "Ten"
 
     colors = {
@@ -141,6 +163,7 @@ async def main():
         "a2": "magenta",
         "a3": "green",
         "context7": "yellow",
+        "thinking": "blue",
     }
 
     # regular streaming example
@@ -161,7 +184,7 @@ async def main():
     context7_query = "next.js middleware"
 
     # HTTP transport
-    async for msg in ai.execute(context7_example_http, llm, context7_query):
+    async for msg in ai.execute(context7_example_http, thinking_llm, context7_query):
         label = msg.label or "unknown"
         color = colors.get(label, "white")
         rich.print(f"[{color}]■[/{color}]", end=" ", flush=True)

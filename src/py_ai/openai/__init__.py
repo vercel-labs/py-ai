@@ -4,7 +4,7 @@ import os
 from collections.abc import AsyncGenerator
 from typing import Any, override
 
-from openai import AsyncOpenAI
+import openai
 
 from ..core import runtime as core
 
@@ -77,7 +77,7 @@ class OpenAIModel(core.LanguageModel):
     ) -> None:
         self._model = model
         resolved_key = api_key or os.environ.get("OPENAI_API_KEY") or ""
-        self._client = AsyncOpenAI(base_url=base_url, api_key=resolved_key)
+        self._client = openai.AsyncOpenAI(base_url=base_url, api_key=resolved_key)
 
     @override
     async def stream(
@@ -125,7 +125,6 @@ class OpenAIModel(core.LanguageModel):
                             tool_calls[idx]["name"] = tc.function.name
                         if tc.function.arguments:
                             tool_calls[idx]["args"] += tc.function.arguments
-                            # Capture the delta for streaming
                             if tool_calls[idx]["id"]:
                                 tool_call_deltas.append(
                                     core.ToolCallDelta(
