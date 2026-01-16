@@ -43,6 +43,54 @@ async def multiply_by_two(number: int) -> int:
     return number * 2
 
 
+# --- Context7 MCP Integration ---
+# Context7 provides up-to-date documentation for any library.
+# Add "use context7" to prompts or let the agent auto-invoke.
+# API key should be in .env as CONTEXT7_API_KEY
+
+
+async def context7_example_http(llm: ai.openai.OpenAIModel, user_query: str):
+    """Context7 via HTTP transport."""
+    context7_tools = await ai.mcp.get_http_tools(
+        "https://mcp.context7.com/mcp",
+        headers={"CONTEXT7_API_KEY": os.environ.get("CONTEXT7_API_KEY", "")},
+        tool_prefix="context7",
+    )
+
+    return await ai.stream_loop(
+        llm,
+        messages=make_messages(
+            "Test run. Call resolve-library-id for 'next.js' and stop.",
+            user_query,
+        ),
+        tools=context7_tools,
+        label="context7",
+    )
+
+
+async def context7_example_stdio(llm: ai.openai.OpenAIModel, user_query: str):
+    """Context7 via stdio transport (npx)."""
+    context7_tools = await ai.mcp.get_stdio_tools(
+        "npx", "-y", "@upstash/context7-mcp",
+        "--api-key", os.environ.get("CONTEXT7_API_KEY", ""),
+        tool_prefix="context7",
+    )
+
+    return await ai.stream_loop(
+        llm,
+        messages=make_messages(
+            "Test run. Call resolve-library-id for 'next.js' and stop.",
+            user_query,
+        ),
+        tools=context7_tools,
+        label="context7",
+    )
+
+
+# Clean up connections when done (optional - happens automatically on exit)
+# await ai.mcp.close_connections()
+
+
 async def multiagent(llm: ai.openai.OpenAIModel, user_query: str) -> list[ai.Message]:
     stream1, stream2 = await asyncio.gather(
         ai.stream_loop(
@@ -92,14 +140,39 @@ async def main():
         "a1": "cyan",
         "a2": "magenta",
         "a3": "green",
+        "context7": "yellow",
     }
 
-    # stream() sets up the runtime context; our flow function receives it
-    async for msg in ai.execute(multiagent, llm, user_query):
+    # regular streaming example
+    # async for msg in ai.execute(multiagent, llm, user_query):
+    #     label = msg.label or "unknown"
+    #     color = colors.get(label, "white")
+    #     rich.print(f"[{color}]■[/{color}]", end=" ", flush=True)
+    #     rich.print(msg)
+
+    # AI SDK UI-formatted SSE streaming
+    # async for msg in ai.ui.ai_sdk.to_sse_stream(
+    #     ai.execute(multiagent, llm, user_query)
+    # ):
+    #     rich.print(msg)
+
+    # --- Context7 Example ---
+    # Toggle between HTTP and stdio transport:
+    context7_query = "next.js middleware"
+
+    # HTTP transport
+    async for msg in ai.execute(context7_example_http, llm, context7_query):
         label = msg.label or "unknown"
         color = colors.get(label, "white")
         rich.print(f"[{color}]■[/{color}]", end=" ", flush=True)
         rich.print(msg)
+
+    # stdio transport
+    # async for msg in ai.execute(context7_example_stdio, llm, context7_query):
+    #     label = msg.label or "unknown"
+    #     color = colors.get(label, "white")
+    #     rich.print(f"[{color}]■[/{color}]", end=" ", flush=True)
+    #     rich.print(msg)
 
 
 if __name__ == "__main__":

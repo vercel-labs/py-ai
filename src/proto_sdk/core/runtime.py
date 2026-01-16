@@ -12,6 +12,7 @@ import uuid
 
 import pydantic
 
+from .. import mcp
 
 # tool introspection that uses pydantic to figure out the correct way
 # to json-serialize arguments so that the tool description can be passed
@@ -285,6 +286,9 @@ async def execute(
     runtime = Runtime()
     token_runtime = _runtime.set(runtime)
 
+    mcp_pool: dict[str, mcp.client._Connection] = {}
+    mcp_token = mcp.client._pool.set(mcp_pool)
+
     try:
         async with asyncio.TaskGroup() as tg:
             _task: asyncio.Task[None] = tg.create_task(
@@ -298,4 +302,8 @@ async def execute(
                 yield msg
 
     finally:
+        if mcp_token is not None:
+            await mcp.client.close_connections()
+            mcp.client._pool.reset(mcp_token)
+
         _runtime.reset(token_runtime)
