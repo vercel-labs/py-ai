@@ -1218,41 +1218,6 @@ wheels = [
 ]
 
 [[package]]
-name = "proto-sdk"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "anthropic" },
-    { name = "httpx" },
-    { name = "mcp" },
-    { name = "openai" },
-    { name = "pydantic" },
-    { name = "rich" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "notebook" },
-    { name = "python-dotenv" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anthropic", specifier = ">=0.40.0" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "mcp", specifier = ">=1.18.0" },
-    { name = "openai", specifier = ">=2.14.0" },
-    { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "rich", specifier = ">=14.2.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "notebook", specifier = ">=7.5.1" },
-    { name = "python-dotenv", specifier = ">=1.2.1" },
-]
-
-[[package]]
 name = "psutil"
 version = "7.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1296,6 +1261,41 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/cd/05/0a34433a064256a578f1783a10da6df098ceaa4a57bbeaa96a6c0352786b/pure_eval-0.2.3.tar.gz", hash = "sha256:5f4e983f40564c576c7c8635ae88db5956bb2229d7e9237d03b3c0b0190eaf42", size = 19752, upload-time = "2024-07-21T12:58:21.801Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8e/37/efad0257dc6e593a18957422533ff0f87ede7c9c6ea010a2177d738fb82f/pure_eval-0.2.3-py3-none-any.whl", hash = "sha256:1db8e35b67b3d218d818ae653e27f06c3aa420901fa7b081ca98cbedc874e0d0", size = 11842, upload-time = "2024-07-21T12:58:20.04Z" },
+]
+
+[[package]]
+name = "py-ai"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "anthropic" },
+    { name = "httpx" },
+    { name = "mcp" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "rich" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "notebook" },
+    { name = "python-dotenv" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anthropic", specifier = ">=0.40.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "mcp", specifier = ">=1.18.0" },
+    { name = "openai", specifier = ">=2.14.0" },
+    { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "rich", specifier = ">=14.2.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "notebook", specifier = ">=7.5.1" },
+    { name = "python-dotenv", specifier = ">=1.2.1" },
 ]
 
 [[package]]

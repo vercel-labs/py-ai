@@ -6,7 +6,7 @@ from typing import Any, override
 
 from openai import AsyncOpenAI
 
-from proto_sdk.core import runtime as core
+from ..core import runtime as core
 
 
 def _tools_to_openai(tools: list[core.Tool]) -> list[dict[str, Any]]:
