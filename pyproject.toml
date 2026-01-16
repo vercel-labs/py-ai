@@ -1,10 +1,10 @@
 [project]
-name = "proto-sdk"
+name = "py-ai"
 version = "0.1.0"
-description = "Add your description here"
+description = "The AI Toolkit for Python"
 readme = "README.md"
 authors = [
-    { name = "Andrey Buzin", email = "contactbuzin@gmail.com" }
+    { name = "Andrey Buzin", email = "andrey.buzin@vercel.com" }
 ]
 requires-python = ">=3.12"
 dependencies = [
