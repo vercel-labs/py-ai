@@ -94,11 +94,17 @@ async def main():
         "a3": "green",
     }
 
-    # stream() sets up the runtime context; our flow function receives it
-    async for msg in ai.execute(multiagent, llm, user_query):
-        label = msg.label or "unknown"
-        color = colors.get(label, "white")
-        rich.print(f"[{color}]■[/{color}]", end=" ", flush=True)
+    # regular streaming example
+    # async for msg in ai.execute(multiagent, llm, user_query):
+    #     label = msg.label or "unknown"
+    #     color = colors.get(label, "white")
+    #     rich.print(f"[{color}]■[/{color}]", end=" ", flush=True)
+    #     rich.print(msg)
+
+    # AI SDK UI-formatted SSE streaming
+    async for msg in ai.ui.ai_sdk.to_sse_stream(
+        ai.execute(multiagent, llm, user_query)
+    ):
         rich.print(msg)
 
 

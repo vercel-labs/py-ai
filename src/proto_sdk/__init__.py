@@ -10,10 +10,9 @@ from .core.runtime import (
     execute,
     stream_loop,
     stream_text,
-    buffer,
 )
 
-from . import openai
+from . import openai, ui
 
 __all__ = [
     "Message",
@@ -29,4 +28,5 @@ __all__ = [
     "stream_text",
     "buffer",
     "openai",
+    "ui",
 ]
