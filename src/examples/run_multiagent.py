@@ -60,7 +60,7 @@ async def context7_example_http(llm: ai.openai.OpenAIModel, user_query: str):
     return await ai.stream_loop(
         llm,
         messages=make_messages(
-            "Test run. Call resolve-library-id for 'next.js' and stop.",
+            "Test run. Please reason about this test run briefly, then call resolve-library-id for 'next.js' and stop.",
             user_query,
         ),
         tools=context7_tools,
@@ -92,11 +92,11 @@ async def context7_example_stdio(llm: ai.openai.OpenAIModel, user_query: str):
 
 
 async def thinking_example(llm: ai.LanguageModel, user_query: str):
-    """Example using Claude extended thinking."""
+    """Example using reasoning/thinking models (GPT 5.2, o-series, or Claude with thinking)."""
     return await ai.stream_text(
         llm,
         messages=make_messages(
-            "You are a helpful assistant. Think through problems carefully.",
+            "You are a helpful assistant that thinks step by step.",
             user_query,
         ),
         label="thinking",
@@ -141,22 +141,21 @@ async def multiagent(llm: ai.openai.OpenAIModel, user_query: str) -> list[ai.Mes
 
 async def main():
     llm = ai.openai.OpenAIModel(
-        model="anthropic/claude-sonnet-4.5",
+        model="openai/gpt-5.2",
         api_key=os.environ.get("AI_GATEWAY_API_KEY"),
         base_url="https://ai-gateway.vercel.sh/v1",
     )
 
-    # LLM with extended thinking using Anthropic adapter via Vercel AI Gateway
-    # Uses the Anthropic-compatible endpoint (not OpenAI-compatible) for thinking support
-    thinking_llm = ai.anthropic.AnthropicModel(
-        model="claude-sonnet-4-5-20250929",
-        base_url="https://ai-gateway.vercel.sh",
+    # LLM with extended thinking using OpenAI's GPT 5.2 reasoning model via Vercel AI Gateway
+    # Uses budget_tokens to control reasoning depth (or use reasoning_effort="medium")
+    # See: https://vercel.com/docs/ai-gateway/openai-compat/advanced
+    thinking_llm = ai.openai.OpenAIModel(
+        model="openai/gpt-5.2",
+        base_url="https://ai-gateway.vercel.sh/v1",
         api_key=os.environ.get("AI_GATEWAY_API_KEY"),
         thinking=True,
         budget_tokens=10000,
     )
-
-    user_query = "Ten"
 
     colors = {
         "a1": "cyan",
