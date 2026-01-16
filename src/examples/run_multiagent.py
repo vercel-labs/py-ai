@@ -37,47 +37,45 @@ def make_messages(system_prompt: str, user_query: str) -> list[ai.Message]:
 async def add_one(number: int) -> int:
     return number + 1
 
+
 @ai.tool
 async def multiply_by_two(number: int) -> int:
     return number * 2
 
+
 async def multiagent(llm: ai.openai.OpenAIModel, user_query: str) -> list[ai.Message]:
-    tech_msgs, biz_msgs = await asyncio.gather(
-        ai.buffer(
-            ai.stream_loop(
-                llm,
-                messages=make_messages(
-                    "You are the test assistant 1.",
-                    f"Use your tool on the user query: {user_query}",
-                ),
-                tools=[add_one],
-                label="a1",
-            )
+    stream1, stream2 = await asyncio.gather(
+        ai.stream_loop(
+            llm,
+            messages=make_messages(
+                "You are the test assistant 1.",
+                f"Use your tool on the user query: {user_query}",
+            ),
+            tools=[add_one],
+            label="a1",
         ),
-        ai.buffer(
-            ai.stream_loop(
-                llm,
-                messages=make_messages(
-                    "You are the test assistant 2.",
-                    f"Use your tool on the user query: {user_query}",
-                ),
-                tools=[multiply_by_two],
-                label="a2",
-            )
+        ai.stream_loop(
+            llm,
+            messages=make_messages(
+                "You are the test assistant 2.",
+                f"Use your tool on the user query: {user_query}",
+            ),
+            tools=[multiply_by_two],
+            label="a2",
         ),
     )
 
-    combined = get_text(tech_msgs[-1:]) + get_text(biz_msgs[-1:])
+    combined = "\n".join(msg.text for msg in stream1[-1:]) + "\n".join(
+        msg.text for msg in stream2[-1:]
+    )
 
-    return await ai.buffer(
-        ai.stream_text(
-            llm,
-            messages=make_messages(
-                "You are the test assistant 3.",
-                f"Add the results of the previous two assistants: {combined}",
-            ),
-            label="a3",
+    return await ai.stream_text(
+        llm,
+        messages=make_messages(
+            "You are the test assistant 3.",
+            f"Add the results of the previous two assistants: {combined}",
         ),
+        label="a3",
     )
 
 
