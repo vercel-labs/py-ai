@@ -7,10 +7,10 @@ from typing import Any, override
 
 import anthropic
 
-from ..core import runtime as core
+from .. import core
 
 
-def _tools_to_anthropic(tools: list[core.Tool]) -> list[dict[str, Any]]:
+def _tools_to_anthropic(tools: list[core.tools.Tool]) -> list[dict[str, Any]]:
     """Convert internal Tool objects to Anthropic tool schema format."""
     return [
         {
@@ -23,7 +23,7 @@ def _tools_to_anthropic(tools: list[core.Tool]) -> list[dict[str, Any]]:
 
 
 def _messages_to_anthropic(
-    messages: list[core.Message],
+    messages: list[core.messages.Message],
 ) -> tuple[str | None, list[dict[str, Any]]]:
     """Convert internal messages to Anthropic API format.
 
@@ -35,11 +35,11 @@ def _messages_to_anthropic(
     for msg in messages:
         if msg.role == "system":
             system_prompt = "".join(
-                p.text for p in msg.parts if isinstance(p, core.TextPart)
+                p.text for p in msg.parts if isinstance(p, core.messages.TextPart)
             )
         elif msg.role == "tool":
             for part in msg.parts:
-                if isinstance(part, core.ToolResultPart):
+                if isinstance(part, core.messages.ToolResultPart):
                     result.append(
                         {
                             "role": "user",
@@ -55,18 +55,20 @@ def _messages_to_anthropic(
         elif msg.role == "assistant":
             content: list[dict[str, Any]] = []
             for part in msg.parts:
-                if isinstance(part, core.ReasoningPart):
+                if isinstance(part, core.messages.ReasoningPart):
                     # Only include thinking blocks if we have the signature
                     # (required by Anthropic API for multi-turn conversations)
                     if part.signature:
-                        content.append({
-                            "type": "thinking",
-                            "thinking": part.reasoning,
-                            "signature": part.signature,
-                        })
-                elif isinstance(part, core.TextPart):
+                        content.append(
+                            {
+                                "type": "thinking",
+                                "thinking": part.reasoning,
+                                "signature": part.signature,
+                            }
+                        )
+                elif isinstance(part, core.messages.TextPart):
                     content.append({"type": "text", "text": part.text})
-                elif isinstance(part, core.ToolCallPart):
+                elif isinstance(part, core.messages.ToolCallPart):
                     # tool_args is a JSON string, but Anthropic expects input as a dict
                     tool_input = json.loads(part.tool_args) if part.tool_args else {}
                     content.append(
@@ -81,14 +83,14 @@ def _messages_to_anthropic(
                 result.append({"role": "assistant", "content": content})
         else:
             content_text = "".join(
-                p.text for p in msg.parts if isinstance(p, core.TextPart)
+                p.text for p in msg.parts if isinstance(p, core.messages.TextPart)
             )
             result.append({"role": "user", "content": content_text})
 
     return system_prompt, result
 
 
-class AnthropicModel(core.LanguageModel):
+class AnthropicModel(core.runtime.LanguageModel):
     """Anthropic adapter with native extended thinking support."""
 
     def __init__(
@@ -107,8 +109,10 @@ class AnthropicModel(core.LanguageModel):
 
     @override
     async def stream(
-        self, messages: list[core.Message], tools: list[core.Tool] | None = None
-    ) -> AsyncGenerator[core.Message, None]:
+        self,
+        messages: list[core.messages.Message],
+        tools: list[core.tools.Tool] | None = None,
+    ) -> AsyncGenerator[core.messages.Message, None]:
         system_prompt, anthropic_messages = _messages_to_anthropic(messages)
         anthropic_tools = _tools_to_anthropic(tools) if tools else None
 
@@ -132,14 +136,14 @@ class AnthropicModel(core.LanguageModel):
         thinking_content = ""
         thinking_signature = ""
         tool_calls: dict[str, dict] = {}
-        message_id = core._gen_id()
+        message_id = core.messages._gen_id()
         current_tool_id: str | None = None
 
         async with self._client.messages.stream(**kwargs) as stream:
             async for event in stream:
                 text_delta = ""
                 thinking_delta = ""
-                tool_call_deltas: list[core.ToolCallDelta] = []
+                tool_call_deltas: list[core.messages.ToolCallDelta] = []
 
                 if event.type == "content_block_start":
                     block = event.content_block
@@ -162,7 +166,7 @@ class AnthropicModel(core.LanguageModel):
                         if current_tool_id and current_tool_id in tool_calls:
                             tool_calls[current_tool_id]["args"] += delta.partial_json
                             tool_call_deltas.append(
-                                core.ToolCallDelta(
+                                core.messages.ToolCallDelta(
                                     tool_call_id=current_tool_id,
                                     tool_name=tool_calls[current_tool_id]["name"],
                                     args_delta=delta.partial_json,
@@ -173,24 +177,26 @@ class AnthropicModel(core.LanguageModel):
                     current_tool_id = None
 
                 elif event.type == "message_stop":
-                    final_parts: list[core.Part] = []
+                    final_parts: list[core.messages.Part] = []
                     if thinking_content:
-                        final_parts.append(core.ReasoningPart(
-                            reasoning=thinking_content,
-                            signature=thinking_signature or None,
-                        ))
+                        final_parts.append(
+                            core.messages.ReasoningPart(
+                                reasoning=thinking_content,
+                                signature=thinking_signature or None,
+                            )
+                        )
                     if text_content:
-                        final_parts.append(core.TextPart(text=text_content))
+                        final_parts.append(core.messages.TextPart(text=text_content))
                     for tc_id, tc in tool_calls.items():
                         final_parts.append(
-                            core.ToolCallPart(
+                            core.messages.ToolCallPart(
                                 tool_call_id=tc_id,
                                 tool_name=tc["name"],
                                 tool_args=tc["args"],
                             )
                         )
 
-                    yield core.Message(
+                    yield core.messages.Message(
                         role="assistant",
                         parts=final_parts,
                         id=message_id,
@@ -201,24 +207,26 @@ class AnthropicModel(core.LanguageModel):
                     )
                     return
 
-                current_parts: list[core.Part] = []
+                current_parts: list[core.messages.Part] = []
                 if thinking_content:
-                    current_parts.append(core.ReasoningPart(
-                        reasoning=thinking_content,
-                        signature=thinking_signature or None,
-                    ))
+                    current_parts.append(
+                        core.messages.ReasoningPart(
+                            reasoning=thinking_content,
+                            signature=thinking_signature or None,
+                        )
+                    )
                 if text_content:
-                    current_parts.append(core.TextPart(text=text_content))
+                    current_parts.append(core.messages.TextPart(text=text_content))
                 for tc_id, tc in tool_calls.items():
                     current_parts.append(
-                        core.ToolCallPart(
+                        core.messages.ToolCallPart(
                             tool_call_id=tc_id,
                             tool_name=tc["name"],
                             tool_args=tc["args"],
                         )
                     )
 
-                yield core.Message(
+                yield core.messages.Message(
                     role="assistant",
                     parts=current_parts,
                     id=message_id,

@@ -10,7 +10,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any, Literal
 
-import py_ai as ai
+from .. import core
 
 # necessary headers for the streaming integration to work
 
@@ -359,7 +359,7 @@ def format_sse(part: UIMessageStreamPart) -> str:
 
 
 async def to_ui_message_stream(
-    messages: AsyncGenerator[ai.Message, None],
+    messages: AsyncGenerator[core.messages.Message, None],
 ) -> AsyncGenerator[UIMessageStreamPart, None]:
     """
     Convert a proto_sdk message stream into AI SDK UI message stream parts.
@@ -447,7 +447,7 @@ async def to_ui_message_stream(
             # Emit tool-related parts
             has_tool_calls = False
             for part in msg.parts:
-                if isinstance(part, ai.ToolCallPart):
+                if isinstance(part, core.messages.ToolCallPart):
                     has_tool_calls = True
                     # Emit start if we haven't seen this tool call streaming
                     if part.tool_call_id not in started_tool_calls:
@@ -464,7 +464,7 @@ async def to_ui_message_stream(
             # Handle tool results
             if msg.role == "tool":
                 for part in msg.parts:
-                    if isinstance(part, ai.ToolResultPart):
+                    if isinstance(part, core.messages.ToolResultPart):
                         yield ToolOutputAvailablePart(
                             tool_call_id=part.tool_call_id,
                             output=part.result,
@@ -489,7 +489,7 @@ async def to_ui_message_stream(
 
 
 async def to_sse_stream(
-    messages: AsyncGenerator[ai.Message, None],
+    messages: AsyncGenerator[core.messages.Message, None],
 ) -> AsyncGenerator[str, None]:
     """
     Convert a proto_sdk message stream directly into SSE-formatted strings.

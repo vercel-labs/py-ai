@@ -135,7 +135,7 @@ async def get_stdio_tools(
     env: dict[str, str] | None = None,
     cwd: str | None = None,
     tool_prefix: str | None = None,
-) -> list[core.runtime.Tool]:
+) -> list[core.tools.Tool]:
     """
     Get tools from an MCP server running as a subprocess.
 
@@ -183,7 +183,7 @@ async def get_http_tools(
     *,
     headers: dict[str, str] | None = None,
     tool_prefix: str | None = None,
-) -> list[core.runtime.Tool]:
+) -> list[core.tools.Tool]:
     """
     Get tools from an MCP server over HTTP (Streamable HTTP transport).
 
@@ -225,13 +225,13 @@ def _mcp_tool_to_native(
     connection_key: str,
     transport_factory: Callable[[], contextlib.AbstractAsyncContextManager[Any]],
     tool_prefix: str | None,
-) -> core.runtime.Tool:
+) -> core.tools.Tool:
     """Convert an MCP tool to a native Tool."""
     name = mcp_tool.name
     if tool_prefix:
         name = f"{tool_prefix}_{name}"
 
-    return core.runtime.Tool(
+    return core.tools.Tool(
         name=name,
         description=mcp_tool.description or "",
         parameters=mcp_tool.inputSchema,

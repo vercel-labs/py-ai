@@ -6,10 +6,10 @@ from typing import Any, override
 
 import openai
 
-from ..core import runtime as core
+from .. import core
 
 
-def _tools_to_openai(tools: list[core.Tool]) -> list[dict[str, Any]]:
+def _tools_to_openai(tools: list[core.tools.Tool]) -> list[dict[str, Any]]:
     """Convert internal Tool objects to OpenAI tool schema format."""
     return [
         {
@@ -24,20 +24,20 @@ def _tools_to_openai(tools: list[core.Tool]) -> list[dict[str, Any]]:
     ]
 
 
-def _messages_to_openai(messages: list[core.Message]) -> list[dict[str, Any]]:
+def _messages_to_openai(messages: list[core.messages.Message]) -> list[dict[str, Any]]:
     """Convert internal messages to OpenAI API format.
-    
+
     The Vercel AI Gateway preserves reasoning details across interactions,
     normalizing formats from different providers. This is useful for tool
     calling workflows where the model needs to resume its thought process.
-    
+
     See: https://vercel.com/docs/ai-gateway/openai-compat/advanced
     """
     result: list[dict[str, Any]] = []
     for msg in messages:
         if msg.role == "tool":
             for part in msg.parts:
-                if isinstance(part, core.ToolResultPart):
+                if isinstance(part, core.messages.ToolResultPart):
                     result.append(
                         {
                             "role": "tool",
@@ -50,11 +50,11 @@ def _messages_to_openai(messages: list[core.Message]) -> list[dict[str, Any]]:
             reasoning = ""
             tool_calls = []
             for part in msg.parts:
-                if isinstance(part, core.ReasoningPart):
+                if isinstance(part, core.messages.ReasoningPart):
                     reasoning += part.reasoning
-                elif isinstance(part, core.TextPart):
+                elif isinstance(part, core.messages.TextPart):
                     content += part.text
-                elif isinstance(part, core.ToolCallPart):
+                elif isinstance(part, core.messages.ToolCallPart):
                     tool_calls.append(
                         {
                             "id": part.tool_call_id,
@@ -76,17 +76,19 @@ def _messages_to_openai(messages: list[core.Message]) -> list[dict[str, Any]]:
             result.append(entry)
         else:
             # User/system messages
-            content = "".join(p.text for p in msg.parts if isinstance(p, core.TextPart))
+            content = "".join(
+                p.text for p in msg.parts if isinstance(p, core.messages.TextPart)
+            )
             result.append({"role": msg.role, "content": content})
     return result
 
 
-class OpenAIModel(core.LanguageModel):
+class OpenAIModel(core.runtime.LanguageModel):
     """OpenAI adapter with reasoning/thinking support via Vercel AI Gateway.
-    
+
     Supports reasoning for models like GPT 5.x, o-series, and Claude via gateway.
     Uses the Vercel AI Gateway's unified reasoning API format.
-    
+
     See: https://vercel.com/docs/ai-gateway/openai-compat/advanced
     """
 
@@ -100,7 +102,7 @@ class OpenAIModel(core.LanguageModel):
         reasoning_effort: str | None = None,
     ) -> None:
         """Initialize OpenAI model adapter.
-        
+
         Args:
             model: Model identifier (e.g., 'openai/gpt-5.2', 'anthropic/claude-sonnet-4.5')
             base_url: API base URL (e.g., 'https://ai-gateway.vercel.sh/v1')
@@ -119,8 +121,10 @@ class OpenAIModel(core.LanguageModel):
 
     @override
     async def stream(
-        self, messages: list[core.Message], tools: list[core.Tool] | None = None
-    ) -> AsyncGenerator[core.Message, None]:
+        self,
+        messages: list[core.messages.Message],
+        tools: list[core.tools.Tool] | None = None,
+    ) -> AsyncGenerator[core.messages.Message, None]:
         openai_messages = _messages_to_openai(messages)
         openai_tools = _tools_to_openai(tools) if tools else None
 
@@ -148,7 +152,7 @@ class OpenAIModel(core.LanguageModel):
         text_content = ""
         reasoning_content = ""
         tool_calls: dict[int, dict] = {}  # index -> {id, name, args}
-        message_id = core._gen_id()
+        message_id = core.messages._gen_id()
 
         async for chunk in stream:
             if not chunk.choices:
@@ -170,7 +174,7 @@ class OpenAIModel(core.LanguageModel):
                 reasoning_value = delta.reasoning
             elif hasattr(delta, "model_extra") and delta.model_extra:
                 reasoning_value = delta.model_extra.get("reasoning")
-            
+
             if reasoning_value:
                 reasoning_delta = reasoning_value
                 reasoning_content += reasoning_value
@@ -179,7 +183,7 @@ class OpenAIModel(core.LanguageModel):
                 text_delta = delta.content
                 text_content += delta.content
 
-            tool_call_deltas: list[core.ToolCallDelta] = []
+            tool_call_deltas: list[core.messages.ToolCallDelta] = []
             if delta.tool_calls:
                 for tc in delta.tool_calls:
                     idx = tc.index
@@ -194,26 +198,28 @@ class OpenAIModel(core.LanguageModel):
                             tool_calls[idx]["args"] += tc.function.arguments
                             if tool_calls[idx]["id"]:
                                 tool_call_deltas.append(
-                                    core.ToolCallDelta(
+                                    core.messages.ToolCallDelta(
                                         tool_call_id=tool_calls[idx]["id"],
                                         tool_name=tool_calls[idx]["name"] or "",
                                         args_delta=tc.function.arguments,
                                     )
                                 )
 
-            parts: list[core.Part] = []
+            parts: list[core.messages.Part] = []
             # Reasoning part comes first (like Anthropic's thinking blocks)
             if reasoning_content:
-                parts.append(core.ReasoningPart(
-                    reasoning=reasoning_content,
-                    signature=None,  # OpenAI doesn't use signatures
-                ))
+                parts.append(
+                    core.messages.ReasoningPart(
+                        reasoning=reasoning_content,
+                        signature=None,  # OpenAI doesn't use signatures
+                    )
+                )
             if text_content:
-                parts.append(core.TextPart(text=text_content))
+                parts.append(core.messages.TextPart(text=text_content))
             for tc in tool_calls.values():
                 if tc["id"]:
                     parts.append(
-                        core.ToolCallPart(
+                        core.messages.ToolCallPart(
                             tool_call_id=tc["id"],
                             tool_name=tc["name"] or "",
                             tool_args=tc["args"],
@@ -222,7 +228,7 @@ class OpenAIModel(core.LanguageModel):
 
             is_done = choice.finish_reason is not None
 
-            yield core.Message(
+            yield core.messages.Message(
                 role="assistant",
                 parts=parts,
                 id=message_id,
