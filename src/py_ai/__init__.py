@@ -5,9 +5,8 @@ from .core.messages import (
     Message,
     Part,
     TextPart,
-    ToolCallPart,
-    ToolCallDelta,
-    ToolResultPart,
+    ToolPart,
+    ToolDelta,
     ReasoningPart,
 )
 from .core.tools import Tool, tool
@@ -24,9 +23,8 @@ __all__ = [
     "Message",
     "Part",
     "TextPart",
-    "ToolCallPart",
-    "ToolCallDelta",
-    "ToolResultPart",
+    "ToolPart",
+    "ToolDelta",
     "ReasoningPart",
     "Tool",
     "Stream",

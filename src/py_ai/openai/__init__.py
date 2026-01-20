@@ -31,30 +31,27 @@ def _messages_to_openai(messages: list[core.messages.Message]) -> list[dict[str,
     normalizing formats from different providers. This is useful for tool
     calling workflows where the model needs to resume its thought process.
 
+    Handles the unified ToolPart model where tool calls and results are in the same
+    assistant message. Converts back to OpenAI's expected format:
+    - tool_calls in assistant messages
+    - tool results as separate tool role messages
+
     See: https://vercel.com/docs/ai-gateway/openai-compat/advanced
     """
     result: list[dict[str, Any]] = []
     for msg in messages:
-        if msg.role == "tool":
-            for part in msg.parts:
-                if isinstance(part, core.messages.ToolResultPart):
-                    result.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": part.tool_call_id,
-                            "content": str(part.result),
-                        }
-                    )
-        elif msg.role == "assistant":
+        if msg.role == "assistant":
             content = ""
             reasoning = ""
             tool_calls = []
+            tool_results = []
+            
             for part in msg.parts:
                 if isinstance(part, core.messages.ReasoningPart):
                     reasoning += part.reasoning
                 elif isinstance(part, core.messages.TextPart):
                     content += part.text
-                elif isinstance(part, core.messages.ToolCallPart):
+                elif isinstance(part, core.messages.ToolPart):
                     tool_calls.append(
                         {
                             "id": part.tool_call_id,
@@ -65,6 +62,16 @@ def _messages_to_openai(messages: list[core.messages.Message]) -> list[dict[str,
                             },
                         }
                     )
+                    # If tool has a result, collect it for separate tool messages
+                    if part.status == "result" and part.result is not None:
+                        tool_results.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": part.tool_call_id,
+                                "content": str(part.result),
+                            }
+                        )
+            
             entry: dict[str, Any] = {"role": "assistant"}
             if content:
                 entry["content"] = content
@@ -74,6 +81,9 @@ def _messages_to_openai(messages: list[core.messages.Message]) -> list[dict[str,
             if tool_calls:
                 entry["tool_calls"] = tool_calls
             result.append(entry)
+            
+            # Emit tool results as separate messages (OpenAI API format)
+            result.extend(tool_results)
         else:
             # User/system messages
             content = "".join(
@@ -183,7 +193,7 @@ class OpenAIModel(core.runtime.LanguageModel):
                 text_delta = delta.content
                 text_content += delta.content
 
-            tool_call_deltas: list[core.messages.ToolCallDelta] = []
+            tool_call_deltas: list[core.messages.ToolDelta] = []
             if delta.tool_calls:
                 for tc in delta.tool_calls:
                     idx = tc.index
@@ -198,7 +208,7 @@ class OpenAIModel(core.runtime.LanguageModel):
                             tool_calls[idx]["args"] += tc.function.arguments
                             if tool_calls[idx]["id"]:
                                 tool_call_deltas.append(
-                                    core.messages.ToolCallDelta(
+                                    core.messages.ToolDelta(
                                         tool_call_id=tool_calls[idx]["id"],
                                         tool_name=tool_calls[idx]["name"] or "",
                                         args_delta=tc.function.arguments,
@@ -219,7 +229,7 @@ class OpenAIModel(core.runtime.LanguageModel):
             for tc in tool_calls.values():
                 if tc["id"]:
                     parts.append(
-                        core.messages.ToolCallPart(
+                        core.messages.ToolPart(
                             tool_call_id=tc["id"],
                             tool_name=tc["name"] or "",
                             tool_args=tc["args"],
@@ -235,7 +245,7 @@ class OpenAIModel(core.runtime.LanguageModel):
                 is_done=is_done,
                 text_delta=text_delta,
                 reasoning_delta=reasoning_delta,
-                tool_call_deltas=tool_call_deltas,
+                tool_deltas=tool_call_deltas,
             )
 
             if is_done:

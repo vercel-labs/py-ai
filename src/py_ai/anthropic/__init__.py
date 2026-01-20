@@ -28,6 +28,11 @@ def _messages_to_anthropic(
     """Convert internal messages to Anthropic API format.
 
     Returns (system_prompt, messages) tuple since Anthropic handles system differently.
+    
+    Handles the unified ToolPart model where tool calls and results are in the same
+    assistant message. Converts back to Anthropic's expected format:
+    - tool_use blocks in assistant messages
+    - tool_result blocks in user messages (after the assistant message)
     """
     system_prompt: str | None = None
     result: list[dict[str, Any]] = []
@@ -37,23 +42,10 @@ def _messages_to_anthropic(
             system_prompt = "".join(
                 p.text for p in msg.parts if isinstance(p, core.messages.TextPart)
             )
-        elif msg.role == "tool":
-            for part in msg.parts:
-                if isinstance(part, core.messages.ToolResultPart):
-                    result.append(
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "tool_result",
-                                    "tool_use_id": part.tool_call_id,
-                                    "content": str(part.result),
-                                }
-                            ],
-                        }
-                    )
         elif msg.role == "assistant":
             content: list[dict[str, Any]] = []
+            tool_results: list[dict[str, Any]] = []
+            
             for part in msg.parts:
                 if isinstance(part, core.messages.ReasoningPart):
                     # Only include thinking blocks if we have the signature
@@ -68,7 +60,7 @@ def _messages_to_anthropic(
                         )
                 elif isinstance(part, core.messages.TextPart):
                     content.append({"type": "text", "text": part.text})
-                elif isinstance(part, core.messages.ToolCallPart):
+                elif isinstance(part, core.messages.ToolPart):
                     # tool_args is a JSON string, but Anthropic expects input as a dict
                     tool_input = json.loads(part.tool_args) if part.tool_args else {}
                     content.append(
@@ -79,9 +71,24 @@ def _messages_to_anthropic(
                             "input": tool_input,
                         }
                     )
+                    # If tool has a result, collect it for a separate user message
+                    if part.status == "result" and part.result is not None:
+                        tool_results.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": part.tool_call_id,
+                                "content": str(part.result),
+                            }
+                        )
+            
             if content:
                 result.append({"role": "assistant", "content": content})
+            
+            # Emit tool results as a separate user message (Anthropic API format)
+            if tool_results:
+                result.append({"role": "user", "content": tool_results})
         else:
+            # User messages
             content_text = "".join(
                 p.text for p in msg.parts if isinstance(p, core.messages.TextPart)
             )
@@ -143,7 +150,7 @@ class AnthropicModel(core.runtime.LanguageModel):
             async for event in stream:
                 text_delta = ""
                 thinking_delta = ""
-                tool_call_deltas: list[core.messages.ToolCallDelta] = []
+                tool_call_deltas: list[core.messages.ToolDelta] = []
 
                 if event.type == "content_block_start":
                     block = event.content_block
@@ -166,7 +173,7 @@ class AnthropicModel(core.runtime.LanguageModel):
                         if current_tool_id and current_tool_id in tool_calls:
                             tool_calls[current_tool_id]["args"] += delta.partial_json
                             tool_call_deltas.append(
-                                core.messages.ToolCallDelta(
+                                core.messages.ToolDelta(
                                     tool_call_id=current_tool_id,
                                     tool_name=tool_calls[current_tool_id]["name"],
                                     args_delta=delta.partial_json,
@@ -189,7 +196,7 @@ class AnthropicModel(core.runtime.LanguageModel):
                         final_parts.append(core.messages.TextPart(text=text_content))
                     for tc_id, tc in tool_calls.items():
                         final_parts.append(
-                            core.messages.ToolCallPart(
+                            core.messages.ToolPart(
                                 tool_call_id=tc_id,
                                 tool_name=tc["name"],
                                 tool_args=tc["args"],
@@ -203,7 +210,7 @@ class AnthropicModel(core.runtime.LanguageModel):
                         is_done=True,
                         text_delta="",
                         reasoning_delta="",
-                        tool_call_deltas=[],
+                        tool_deltas=[],
                     )
                     return
 
@@ -219,7 +226,7 @@ class AnthropicModel(core.runtime.LanguageModel):
                     current_parts.append(core.messages.TextPart(text=text_content))
                 for tc_id, tc in tool_calls.items():
                     current_parts.append(
-                        core.messages.ToolCallPart(
+                        core.messages.ToolPart(
                             tool_call_id=tc_id,
                             tool_name=tc["name"],
                             tool_args=tc["args"],
@@ -233,5 +240,5 @@ class AnthropicModel(core.runtime.LanguageModel):
                     is_done=False,
                     text_delta=text_delta,
                     reasoning_delta=thinking_delta,
-                    tool_call_deltas=tool_call_deltas,
+                    tool_deltas=tool_call_deltas,
                 )

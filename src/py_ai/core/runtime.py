@@ -80,7 +80,7 @@ async def _do_stream_loop(
             if message.is_done:
                 assistant_msg = message
                 for part in message.parts:
-                    if isinstance(part, messages_.ToolCallPart):
+                    if isinstance(part, messages_.ToolPart):
                         tool_calls.append(part)
 
         if assistant_msg:
@@ -94,19 +94,19 @@ async def _do_stream_loop(
             args = json.loads(tool_call.tool_args)
             result = await tool_fn.fn(**args)
 
-            tool_msg = messages_.Message(
-                role="tool",
-                parts=[
-                    messages_.ToolResultPart(
-                        tool_call_id=tool_call.tool_call_id,
-                        result={"output": result},
-                    )
-                ],
-                label=label,
+            assert assistant_msg is not None, "Assistant message not found"
+
+            tool_part = assistant_msg.get_tool_part(tool_call.tool_call_id)
+
+            assert tool_part is not None, (
+                f"Tool part not found for tool call {tool_call.tool_call_id}"
             )
-            messages.append(tool_msg)
-            await runtime.put(tool_msg)
-            yield tool_msg
+
+            tool_part.status = "result"
+            tool_part.result = result
+
+            await runtime.put(assistant_msg)
+            yield assistant_msg
 
 
 class Stream:
@@ -118,6 +118,15 @@ class Stream:
     async def __aiter__(self) -> AsyncGenerator[messages_.Message, None]:
         async for message in self._generator:
             if message.is_done:
+                # upsert the message
+                # tool results get added to the same message that contains the call
+                existing_idx = next(
+                    (i for i, m in enumerate(self._messages) if m.id == message.id),
+                    None,
+                )
+                if existing_idx is not None:
+                    self._messages[existing_idx] = message
+            else:
                 self._messages.append(message)
             yield message
         self._is_consumed = True

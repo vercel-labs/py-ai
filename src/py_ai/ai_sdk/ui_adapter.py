@@ -374,6 +374,7 @@ async def to_ui_message_stream(
     emitted_start: bool = False
     in_step: bool = False
     started_tool_calls: set[str] = set()  # track which tool calls we've started
+    emitted_tool_results: set[str] = set()  # track which tool results we've emitted
 
     async for msg in messages:
         # Emit start part on first message or label change (new agent)
@@ -397,6 +398,7 @@ async def to_ui_message_stream(
             in_step = True
             current_label = msg.label
             started_tool_calls = set()
+            emitted_tool_results = set()
 
         # Handle reasoning streaming (deltas) - reasoning comes before text
         if msg.reasoning_delta:
@@ -420,7 +422,7 @@ async def to_ui_message_stream(
             yield TextDeltaPart(id=current_text_id, delta=msg.text_delta)
 
         # Handle streaming tool call arguments
-        for delta in msg.tool_call_deltas:
+        for delta in msg.tool_deltas:
             if delta.tool_call_id not in started_tool_calls:
                 started_tool_calls.add(delta.tool_call_id)
                 yield ToolInputStartPart(
@@ -444,34 +446,34 @@ async def to_ui_message_stream(
                 yield TextEndPart(id=current_text_id)
                 current_text_id = None
 
-            # Emit tool-related parts
-            has_tool_calls = False
+            # Emit tool-related parts (unified model: ToolPart contains both call and result)
+            has_pending_tool_calls = False
             for part in msg.parts:
-                if isinstance(part, core.messages.ToolCallPart):
-                    has_tool_calls = True
-                    # Emit start if we haven't seen this tool call streaming
-                    if part.tool_call_id not in started_tool_calls:
-                        yield ToolInputStartPart(
+                if isinstance(part, core.messages.ToolPart):
+                    if part.status == "pending":
+                        has_pending_tool_calls = True
+                        # Emit start if we haven't seen this tool call streaming
+                        if part.tool_call_id not in started_tool_calls:
+                            yield ToolInputStartPart(
+                                tool_call_id=part.tool_call_id,
+                                tool_name=part.tool_name,
+                            )
+                        yield ToolInputAvailablePart(
                             tool_call_id=part.tool_call_id,
                             tool_name=part.tool_name,
+                            input=part.tool_args,
                         )
-                    yield ToolInputAvailablePart(
-                        tool_call_id=part.tool_call_id,
-                        tool_name=part.tool_name,
-                        input=part.tool_args,
-                    )
+                    elif part.status == "result":
+                        # Tool result - emit output if we haven't already
+                        if part.tool_call_id not in emitted_tool_results:
+                            emitted_tool_results.add(part.tool_call_id)
+                            yield ToolOutputAvailablePart(
+                                tool_call_id=part.tool_call_id,
+                                output=part.result,
+                            )
 
-            # Handle tool results
-            if msg.role == "tool":
-                for part in msg.parts:
-                    if isinstance(part, core.messages.ToolResultPart):
-                        yield ToolOutputAvailablePart(
-                            tool_call_id=part.tool_call_id,
-                            output=part.result,
-                        )
-
-            # Finish step if we had tool calls (will continue with tool execution)
-            if has_tool_calls:
+            # Finish step if we had pending tool calls (will continue with tool execution)
+            if has_pending_tool_calls:
                 yield FinishStepPart()
                 yield FinishPart(finish_reason="tool-calls")
                 in_step = False
