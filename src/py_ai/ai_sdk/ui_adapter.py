@@ -520,127 +520,156 @@ async def to_sse_stream(
 # UI Message → Internal Message Conversion
 # ============================================================================
 #
-# Reference: https://ai-sdk.dev/docs/ai-sdk-ui/chatbot#messages
+# Reference: https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message
 #
-# Pydantic models for parsing AI SDK UI messages. These can be used directly
+# Pydantic models for parsing AI SDK v6 UI messages. These can be used directly
 # with FastAPI for automatic request body parsing.
+#
+# AI SDK v6 uses a `parts` array instead of legacy `content` string.
 
 
-class UIToolInvocation(pydantic.BaseModel):
-    """Tool invocation in AI SDK UI format.
-    
-    Reference: https://ai-sdk.dev/docs/ai-sdk-ui/chatbot#tool-invocations
+class UITextPart(pydantic.BaseModel):
+    """Text content part in AI SDK v6 format."""
+
+    type: Literal["text"]
+    text: str
+
+
+class UIReasoningPart(pydantic.BaseModel):
+    """Reasoning/thinking content part in AI SDK v6 format."""
+
+    type: Literal["reasoning"]
+    reasoning: str
+
+
+# Tool invocation states in AI SDK v6:
+# - "input-streaming": Tool arguments are being streamed
+# - "input-available": Tool arguments are complete, ready for execution
+# - "output-available": Tool has been executed, result is available
+# - "output-error": Tool execution failed
+UIToolInvocationState = Literal[
+    "input-streaming", "input-available", "output-available", "output-error"
+]
+
+
+class UIToolInvocationPart(pydantic.BaseModel):
+    """Tool invocation part in AI SDK v6 format.
+
+    Reference: https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message
     """
-    
+
     model_config = pydantic.ConfigDict(populate_by_name=True)
-    
-    tool_call_id: str = pydantic.Field(alias="toolCallId")
+
+    type: Literal["tool-invocation"]
+    tool_invocation_id: str = pydantic.Field(alias="toolInvocationId")
     tool_name: str = pydantic.Field(alias="toolName")
     args: dict[str, Any] = pydantic.Field(default_factory=dict)
-    state: Literal["partial-call", "call", "result"] = "call"
+    state: UIToolInvocationState = "input-available"
     result: Any | None = None
 
 
+# Union of all supported part types
+UIMessagePart = UITextPart | UIReasoningPart | UIToolInvocationPart
+
+
 class UIMessage(pydantic.BaseModel):
-    """Message in AI SDK UI format.
-    
+    """Message in AI SDK v6 format.
+
+    AI SDK v6 uses a `parts` array for structured content instead of the
+    legacy `content` string format.
+
     This model can be used directly with FastAPI for automatic parsing:
-    
+
         @app.post("/chat")
         async def chat(messages: list[UIMessage]):
             internal_messages = to_messages(messages)
             ...
-    
-    Reference: https://ai-sdk.dev/docs/ai-sdk-ui/chatbot#messages
+
+    Reference: https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message
     """
-    
+
     model_config = pydantic.ConfigDict(populate_by_name=True)
-    
+
     id: str = pydantic.Field(default_factory=lambda: _generate_id("msg"))
     role: Literal["user", "assistant", "system"]
-    content: str = ""
-    tool_invocations: list[UIToolInvocation] | None = pydantic.Field(
-        default=None, alias="toolInvocations"
-    )
-    reasoning: str | None = None
+    parts: list[UIMessagePart] = pydantic.Field(default_factory=list)
 
 
 def to_messages(ui_messages: list[UIMessage]) -> list[core.messages.Message]:
-    """Convert AI SDK UI messages to internal Message format.
-    
+    """Convert AI SDK v6 UI messages to internal Message format.
+
     Use this with FastAPI to convert incoming messages from the frontend:
-    
+
         from fastapi import FastAPI
         from fastapi.responses import StreamingResponse
         import py_ai as ai
         from py_ai.ai_sdk import ui_adapter
-        
+
         app = FastAPI()
-        
+
         @app.post("/chat")
         async def chat(messages: list[ui_adapter.UIMessage]):
             internal_messages = ui_adapter.to_messages(messages)
-            
+
             return StreamingResponse(
                 ui_adapter.to_sse_stream(ai.execute(my_agent, llm, internal_messages)),
                 headers=ui_adapter.UI_MESSAGE_STREAM_HEADERS,
             )
-    
+
     Args:
-        ui_messages: List of UIMessage objects from the AI SDK UI frontend.
-        
+        ui_messages: List of UIMessage objects from the AI SDK v6 frontend.
+
     Returns:
         List of internal Message objects ready for use with the runtime.
     """
     result: list[core.messages.Message] = []
-    
+
     for ui_msg in ui_messages:
-        parts: list[core.messages.Part] = []
-        
-        # Add reasoning part if present (comes before text for assistant messages)
-        if ui_msg.reasoning:
-            parts.append(core.messages.ReasoningPart(reasoning=ui_msg.reasoning))
-        
-        # Add text content if present
-        if ui_msg.content:
-            parts.append(core.messages.TextPart(text=ui_msg.content))
-        
-        # Add tool invocations (unified ToolPart model)
-        if ui_msg.tool_invocations:
-            for ti in ui_msg.tool_invocations:
+        internal_parts: list[core.messages.Part] = []
+
+        for part in ui_msg.parts:
+            if isinstance(part, UITextPart):
+                internal_parts.append(core.messages.TextPart(text=part.text))
+
+            elif isinstance(part, UIReasoningPart):
+                internal_parts.append(
+                    core.messages.ReasoningPart(reasoning=part.reasoning)
+                )
+
+            elif isinstance(part, UIToolInvocationPart):
                 # Convert args dict to JSON string (internal format)
-                tool_args = json.dumps(ti.args) if ti.args else "{}"
-                
-                # Determine status based on UI state
+                tool_args = json.dumps(part.args) if part.args else "{}"
+
+                # Map AI SDK v6 states to internal status
                 status: Literal["pending", "result"] = "pending"
-                if ti.state == "result":
+                if part.state in ("output-available", "output-error"):
                     status = "result"
-                
-                parts.append(
+
+                internal_parts.append(
                     core.messages.ToolPart(
-                        tool_call_id=ti.tool_call_id,
-                        tool_name=ti.tool_name,
+                        tool_call_id=part.tool_invocation_id,
+                        tool_name=part.tool_name,
                         tool_args=tool_args,
                         status=status,
-                        result=ti.result,
+                        result=part.result,
                     )
                 )
-        
+
         # Validate user/system messages have content - OpenAI requires it for these roles.
         # Assistant messages can have empty content if they have tool calls.
-        if ui_msg.role in ("user", "system") and not parts:
+        if ui_msg.role in ("user", "system") and not internal_parts:
             raise ValueError(
                 f"Message '{ui_msg.id}' has role '{ui_msg.role}' but no content. "
                 "User and system messages require non-empty content."
             )
-        
+
         result.append(
             core.messages.Message(
                 id=ui_msg.id,
                 role=ui_msg.role,
-                parts=parts,
+                parts=internal_parts,
                 is_done=True,
             )
         )
-    
+
     return result
