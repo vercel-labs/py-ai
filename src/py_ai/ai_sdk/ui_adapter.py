@@ -626,6 +626,14 @@ def to_messages(ui_messages: list[UIMessage]) -> list[core.messages.Message]:
                     )
                 )
         
+        # Validate user/system messages have content - OpenAI requires it for these roles.
+        # Assistant messages can have empty content if they have tool calls.
+        if ui_msg.role in ("user", "system") and not parts:
+            raise ValueError(
+                f"Message '{ui_msg.id}' has role '{ui_msg.role}' but no content. "
+                "User and system messages require non-empty content."
+            )
+        
         result.append(
             core.messages.Message(
                 id=ui_msg.id,
