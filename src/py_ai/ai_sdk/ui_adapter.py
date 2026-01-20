@@ -10,6 +10,8 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any, Literal
 
+import pydantic
+
 from .. import core
 
 # necessary headers for the streaming integration to work
@@ -512,3 +514,125 @@ async def to_sse_stream(
     """
     async for part in to_ui_message_stream(messages):
         yield format_sse(part)
+
+
+# ============================================================================
+# UI Message → Internal Message Conversion
+# ============================================================================
+#
+# Reference: https://ai-sdk.dev/docs/ai-sdk-ui/chatbot#messages
+#
+# Pydantic models for parsing AI SDK UI messages. These can be used directly
+# with FastAPI for automatic request body parsing.
+
+
+class UIToolInvocation(pydantic.BaseModel):
+    """Tool invocation in AI SDK UI format.
+    
+    Reference: https://ai-sdk.dev/docs/ai-sdk-ui/chatbot#tool-invocations
+    """
+    
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+    
+    tool_call_id: str = pydantic.Field(alias="toolCallId")
+    tool_name: str = pydantic.Field(alias="toolName")
+    args: dict[str, Any] = pydantic.Field(default_factory=dict)
+    state: Literal["partial-call", "call", "result"] = "call"
+    result: Any | None = None
+
+
+class UIMessage(pydantic.BaseModel):
+    """Message in AI SDK UI format.
+    
+    This model can be used directly with FastAPI for automatic parsing:
+    
+        @app.post("/chat")
+        async def chat(messages: list[UIMessage]):
+            internal_messages = to_messages(messages)
+            ...
+    
+    Reference: https://ai-sdk.dev/docs/ai-sdk-ui/chatbot#messages
+    """
+    
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+    
+    id: str = pydantic.Field(default_factory=lambda: _generate_id("msg"))
+    role: Literal["user", "assistant", "system"]
+    content: str = ""
+    tool_invocations: list[UIToolInvocation] | None = pydantic.Field(
+        default=None, alias="toolInvocations"
+    )
+    reasoning: str | None = None
+
+
+def to_messages(ui_messages: list[UIMessage]) -> list[core.messages.Message]:
+    """Convert AI SDK UI messages to internal Message format.
+    
+    Use this with FastAPI to convert incoming messages from the frontend:
+    
+        from fastapi import FastAPI
+        from fastapi.responses import StreamingResponse
+        import py_ai as ai
+        from py_ai.ai_sdk import ui_adapter
+        
+        app = FastAPI()
+        
+        @app.post("/chat")
+        async def chat(messages: list[ui_adapter.UIMessage]):
+            internal_messages = ui_adapter.to_messages(messages)
+            
+            return StreamingResponse(
+                ui_adapter.to_sse_stream(ai.execute(my_agent, llm, internal_messages)),
+                headers=ui_adapter.UI_MESSAGE_STREAM_HEADERS,
+            )
+    
+    Args:
+        ui_messages: List of UIMessage objects from the AI SDK UI frontend.
+        
+    Returns:
+        List of internal Message objects ready for use with the runtime.
+    """
+    result: list[core.messages.Message] = []
+    
+    for ui_msg in ui_messages:
+        parts: list[core.messages.Part] = []
+        
+        # Add reasoning part if present (comes before text for assistant messages)
+        if ui_msg.reasoning:
+            parts.append(core.messages.ReasoningPart(reasoning=ui_msg.reasoning))
+        
+        # Add text content if present
+        if ui_msg.content:
+            parts.append(core.messages.TextPart(text=ui_msg.content))
+        
+        # Add tool invocations (unified ToolPart model)
+        if ui_msg.tool_invocations:
+            for ti in ui_msg.tool_invocations:
+                # Convert args dict to JSON string (internal format)
+                tool_args = json.dumps(ti.args) if ti.args else "{}"
+                
+                # Determine status based on UI state
+                status: Literal["pending", "result"] = "pending"
+                if ti.state == "result":
+                    status = "result"
+                
+                parts.append(
+                    core.messages.ToolPart(
+                        tool_call_id=ti.tool_call_id,
+                        tool_name=ti.tool_name,
+                        tool_args=tool_args,
+                        status=status,
+                        result=ti.result,
+                    )
+                )
+        
+        result.append(
+            core.messages.Message(
+                id=ui_msg.id,
+                role=ui_msg.role,
+                parts=parts,
+                is_done=True,
+            )
+        )
+    
+    return result
