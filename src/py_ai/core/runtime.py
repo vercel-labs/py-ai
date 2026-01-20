@@ -171,7 +171,7 @@ async def _stop_when_done(runtime: Runtime, task: Awaitable[None]) -> None:
 
 
 async def execute(
-    root: Callable[[Runtime], Coroutine[Any, Any, None]], *args: Any
+    root: Callable[..., Coroutine[Any, Any, None]], *args: Any
 ) -> AsyncGenerator[messages_.Message]:
     runtime = Runtime()
     token_runtime = _runtime.set(runtime)

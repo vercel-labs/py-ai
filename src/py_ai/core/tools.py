@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 import inspect
 from collections.abc import Awaitable
-from typing import Any, Callable, get_args, get_origin, get_type_hints
+from typing import Any, Callable, get_args, get_origin, get_type_hints, overload
 
 import pydantic
 
@@ -27,7 +27,15 @@ def _is_optional(param_type: type) -> bool:
     return False
 
 
-def tool(fn: Callable[..., Awaitable[Any]] | None = None):
+@overload
+def tool(fn: Callable[..., Awaitable[Any]]) -> Tool: ...
+
+
+@overload
+def tool(fn: None = None) -> Callable[[Callable[..., Awaitable[Any]]], Tool]: ...
+
+
+def tool(fn: Callable[..., Awaitable[Any]] | None = None) -> Tool | Callable[[Callable[..., Awaitable[Any]]], Tool]:
     """Decorator to define a tool from an async function."""
 
     def make_tool(f: Callable[..., Awaitable[Any]]) -> Tool:
