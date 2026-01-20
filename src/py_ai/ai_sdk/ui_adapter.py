@@ -10,7 +10,9 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any, Literal
 
-import py_ai as ai
+import pydantic
+
+from .. import core
 
 # necessary headers for the streaming integration to work
 
@@ -359,7 +361,7 @@ def format_sse(part: UIMessageStreamPart) -> str:
 
 
 async def to_ui_message_stream(
-    messages: AsyncGenerator[ai.Message, None],
+    messages: AsyncGenerator[core.messages.Message, None],
 ) -> AsyncGenerator[UIMessageStreamPart, None]:
     """
     Convert a proto_sdk message stream into AI SDK UI message stream parts.
@@ -374,6 +376,7 @@ async def to_ui_message_stream(
     emitted_start: bool = False
     in_step: bool = False
     started_tool_calls: set[str] = set()  # track which tool calls we've started
+    emitted_tool_results: set[str] = set()  # track which tool results we've emitted
 
     async for msg in messages:
         # Emit start part on first message or label change (new agent)
@@ -397,6 +400,7 @@ async def to_ui_message_stream(
             in_step = True
             current_label = msg.label
             started_tool_calls = set()
+            emitted_tool_results = set()
 
         # Handle reasoning streaming (deltas) - reasoning comes before text
         if msg.reasoning_delta:
@@ -420,7 +424,7 @@ async def to_ui_message_stream(
             yield TextDeltaPart(id=current_text_id, delta=msg.text_delta)
 
         # Handle streaming tool call arguments
-        for delta in msg.tool_call_deltas:
+        for delta in msg.tool_deltas:
             if delta.tool_call_id not in started_tool_calls:
                 started_tool_calls.add(delta.tool_call_id)
                 yield ToolInputStartPart(
@@ -444,34 +448,34 @@ async def to_ui_message_stream(
                 yield TextEndPart(id=current_text_id)
                 current_text_id = None
 
-            # Emit tool-related parts
-            has_tool_calls = False
+            # Emit tool-related parts (unified model: ToolPart contains both call and result)
+            has_pending_tool_calls = False
             for part in msg.parts:
-                if isinstance(part, ai.ToolCallPart):
-                    has_tool_calls = True
-                    # Emit start if we haven't seen this tool call streaming
-                    if part.tool_call_id not in started_tool_calls:
-                        yield ToolInputStartPart(
+                if isinstance(part, core.messages.ToolPart):
+                    if part.status == "pending":
+                        has_pending_tool_calls = True
+                        # Emit start if we haven't seen this tool call streaming
+                        if part.tool_call_id not in started_tool_calls:
+                            yield ToolInputStartPart(
+                                tool_call_id=part.tool_call_id,
+                                tool_name=part.tool_name,
+                            )
+                        yield ToolInputAvailablePart(
                             tool_call_id=part.tool_call_id,
                             tool_name=part.tool_name,
+                            input=part.tool_args,
                         )
-                    yield ToolInputAvailablePart(
-                        tool_call_id=part.tool_call_id,
-                        tool_name=part.tool_name,
-                        input=part.tool_args,
-                    )
+                    elif part.status == "result":
+                        # Tool result - emit output if we haven't already
+                        if part.tool_call_id not in emitted_tool_results:
+                            emitted_tool_results.add(part.tool_call_id)
+                            yield ToolOutputAvailablePart(
+                                tool_call_id=part.tool_call_id,
+                                output=part.result,
+                            )
 
-            # Handle tool results
-            if msg.role == "tool":
-                for part in msg.parts:
-                    if isinstance(part, ai.ToolResultPart):
-                        yield ToolOutputAvailablePart(
-                            tool_call_id=part.tool_call_id,
-                            output=part.result,
-                        )
-
-            # Finish step if we had tool calls (will continue with tool execution)
-            if has_tool_calls:
+            # Finish step if we had pending tool calls (will continue with tool execution)
+            if has_pending_tool_calls:
                 yield FinishStepPart()
                 yield FinishPart(finish_reason="tool-calls")
                 in_step = False
@@ -489,7 +493,7 @@ async def to_ui_message_stream(
 
 
 async def to_sse_stream(
-    messages: AsyncGenerator[ai.Message, None],
+    messages: AsyncGenerator[core.messages.Message, None],
 ) -> AsyncGenerator[str, None]:
     """
     Convert a proto_sdk message stream directly into SSE-formatted strings.
@@ -510,3 +514,125 @@ async def to_sse_stream(
     """
     async for part in to_ui_message_stream(messages):
         yield format_sse(part)
+
+
+# ============================================================================
+# UI Message → Internal Message Conversion
+# ============================================================================
+#
+# Reference: https://ai-sdk.dev/docs/ai-sdk-ui/chatbot#messages
+#
+# Pydantic models for parsing AI SDK UI messages. These can be used directly
+# with FastAPI for automatic request body parsing.
+
+
+class UIToolInvocation(pydantic.BaseModel):
+    """Tool invocation in AI SDK UI format.
+    
+    Reference: https://ai-sdk.dev/docs/ai-sdk-ui/chatbot#tool-invocations
+    """
+    
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+    
+    tool_call_id: str = pydantic.Field(alias="toolCallId")
+    tool_name: str = pydantic.Field(alias="toolName")
+    args: dict[str, Any] = pydantic.Field(default_factory=dict)
+    state: Literal["partial-call", "call", "result"] = "call"
+    result: Any | None = None
+
+
+class UIMessage(pydantic.BaseModel):
+    """Message in AI SDK UI format.
+    
+    This model can be used directly with FastAPI for automatic parsing:
+    
+        @app.post("/chat")
+        async def chat(messages: list[UIMessage]):
+            internal_messages = to_messages(messages)
+            ...
+    
+    Reference: https://ai-sdk.dev/docs/ai-sdk-ui/chatbot#messages
+    """
+    
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+    
+    id: str = pydantic.Field(default_factory=lambda: _generate_id("msg"))
+    role: Literal["user", "assistant", "system"]
+    content: str = ""
+    tool_invocations: list[UIToolInvocation] | None = pydantic.Field(
+        default=None, alias="toolInvocations"
+    )
+    reasoning: str | None = None
+
+
+def to_messages(ui_messages: list[UIMessage]) -> list[core.messages.Message]:
+    """Convert AI SDK UI messages to internal Message format.
+    
+    Use this with FastAPI to convert incoming messages from the frontend:
+    
+        from fastapi import FastAPI
+        from fastapi.responses import StreamingResponse
+        import py_ai as ai
+        from py_ai.ai_sdk import ui_adapter
+        
+        app = FastAPI()
+        
+        @app.post("/chat")
+        async def chat(messages: list[ui_adapter.UIMessage]):
+            internal_messages = ui_adapter.to_messages(messages)
+            
+            return StreamingResponse(
+                ui_adapter.to_sse_stream(ai.execute(my_agent, llm, internal_messages)),
+                headers=ui_adapter.UI_MESSAGE_STREAM_HEADERS,
+            )
+    
+    Args:
+        ui_messages: List of UIMessage objects from the AI SDK UI frontend.
+        
+    Returns:
+        List of internal Message objects ready for use with the runtime.
+    """
+    result: list[core.messages.Message] = []
+    
+    for ui_msg in ui_messages:
+        parts: list[core.messages.Part] = []
+        
+        # Add reasoning part if present (comes before text for assistant messages)
+        if ui_msg.reasoning:
+            parts.append(core.messages.ReasoningPart(reasoning=ui_msg.reasoning))
+        
+        # Add text content if present
+        if ui_msg.content:
+            parts.append(core.messages.TextPart(text=ui_msg.content))
+        
+        # Add tool invocations (unified ToolPart model)
+        if ui_msg.tool_invocations:
+            for ti in ui_msg.tool_invocations:
+                # Convert args dict to JSON string (internal format)
+                tool_args = json.dumps(ti.args) if ti.args else "{}"
+                
+                # Determine status based on UI state
+                status: Literal["pending", "result"] = "pending"
+                if ti.state == "result":
+                    status = "result"
+                
+                parts.append(
+                    core.messages.ToolPart(
+                        tool_call_id=ti.tool_call_id,
+                        tool_name=ti.tool_name,
+                        tool_args=tool_args,
+                        status=status,
+                        result=ti.result,
+                    )
+                )
+        
+        result.append(
+            core.messages.Message(
+                id=ui_msg.id,
+                role=ui_msg.role,
+                parts=parts,
+                is_done=True,
+            )
+        )
+    
+    return result
