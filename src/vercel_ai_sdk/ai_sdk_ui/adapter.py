@@ -334,8 +334,8 @@ UIMessageStreamPart = (
 )
 
 
-
 # utils for serialization
+
 
 def _to_camel_case(snake_str: str) -> str:
     """Convert snake_case to camelCase."""
@@ -495,23 +495,7 @@ async def to_ui_message_stream(
 async def to_sse_stream(
     messages: AsyncGenerator[core.messages.Message, None],
 ) -> AsyncGenerator[str, None]:
-    """
-    Convert a proto_sdk message stream directly into SSE-formatted strings.
-
-    Use this with streaming HTTP responses (e.g., FastAPI StreamingResponse).
-
-    Example:
-        from fastapi.responses import StreamingResponse
-        from proto_sdk.ui import ai_sdk
-
-        @app.post("/chat")
-        async def chat():
-            return StreamingResponse(
-                ai_sdk.to_sse_stream(ai.execute(my_agent, llm, query)),
-                media_type="text/event-stream",
-                headers=ai_sdk.UI_MESSAGE_STREAM_HEADERS,
-            )
-    """
+    """Convert a proto_sdk message stream directly into SSE-formatted strings."""
     async for part in to_ui_message_stream(messages):
         yield format_sse(part)
 
@@ -575,16 +559,6 @@ UIMessagePart = UITextPart | UIReasoningPart | UIToolInvocationPart
 class UIMessage(pydantic.BaseModel):
     """Message in AI SDK v6 format.
 
-    AI SDK v6 uses a `parts` array for structured content instead of the
-    legacy `content` string format.
-
-    This model can be used directly with FastAPI for automatic parsing:
-
-        @app.post("/chat")
-        async def chat(messages: list[UIMessage]):
-            internal_messages = to_messages(messages)
-            ...
-
     Reference: https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message
     """
 
@@ -597,24 +571,6 @@ class UIMessage(pydantic.BaseModel):
 
 def to_messages(ui_messages: list[UIMessage]) -> list[core.messages.Message]:
     """Convert AI SDK v6 UI messages to internal Message format.
-
-    Use this with FastAPI to convert incoming messages from the frontend:
-
-        from fastapi import FastAPI
-        from fastapi.responses import StreamingResponse
-        import py_ai as ai
-        from py_ai.ai_sdk import ui_adapter
-
-        app = FastAPI()
-
-        @app.post("/chat")
-        async def chat(messages: list[ui_adapter.UIMessage]):
-            internal_messages = ui_adapter.to_messages(messages)
-
-            return StreamingResponse(
-                ui_adapter.to_sse_stream(ai.execute(my_agent, llm, internal_messages)),
-                headers=ui_adapter.UI_MESSAGE_STREAM_HEADERS,
-            )
 
     Args:
         ui_messages: List of UIMessage objects from the AI SDK v6 frontend.

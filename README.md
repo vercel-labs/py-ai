@@ -1,15 +1,15 @@
-# py-ai
+# vercel-ai-sdk
 
 A Python version of the [AI SDK](https://ai-sdk.dev/).
 
 ## Quick Start
 
 ```bash
-uv add git+https://github.com/vercel-labs/py-ai
+uv add vercel-ai-sdk
 ```
 
 ```python
-import proto_sdk as ai
+import vercel_ai_sdk as ai
 
 llm = ai.openai.OpenAIModel(model="gpt-4", api_key="...")
 
@@ -63,11 +63,11 @@ async for msg in ai.execute(my_agent, llm, "What's the weather?"):
 
 ### `ai.Message`
 
-Universal message type with `role` ("user", "assistant", "system", "tool") and `parts`. Access text via `msg.text`. The `label` field tags messages for multi-agent routing.
+Universal message type with `role` ("user", "assistant", "system") and `parts`. Access text via `msg.text`. The `label` field tags messages for multi-agent routing.
 
-### `ai.TextPart`, `ai.ToolCallPart`, `ai.ToolResultPart`
+### `ai.TextPart`, `ai.ToolPart`, `ai.ReasoningPart`
 
-Message parts. `TextPart` holds text content. `ToolCallPart` contains tool invocation details. `ToolResultPart` wraps tool outputs.
+Message parts. `TextPart` holds text content. `ToolPart` contains tool invocation details and results. `ReasoningPart` holds model reasoning/thinking output.
 
 ## MCP Integration
 

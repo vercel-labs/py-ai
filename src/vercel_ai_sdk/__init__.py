@@ -1,4 +1,4 @@
-from . import anthropic, mcp, openai, ai_sdk
+from . import anthropic, mcp, openai, ai_sdk_ui
 
 # Re-export core types for convenient access
 from .core.messages import (
@@ -38,5 +38,5 @@ __all__ = [
     "anthropic",
     "mcp",
     "openai",
-    "ai_sdk",
+    "ai_sdk_ui",
 ]

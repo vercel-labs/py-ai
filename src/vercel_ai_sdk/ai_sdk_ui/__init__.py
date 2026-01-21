@@ -1,4 +1,4 @@
-from .ui_adapter import (
+from .adapter import (
     # Internal → UI stream conversion
     to_ui_message_stream,
     to_sse_stream,
