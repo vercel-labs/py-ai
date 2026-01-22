@@ -1,6 +1,6 @@
 [project]
-name = "py-ai"
-version = "0.1.0"
+name = "vercel-ai-sdk"
+version = "0.0.1.dev1"
 description = "The AI Toolkit for Python"
 readme = "README.md"
 authors = [
@@ -13,7 +13,6 @@ dependencies = [
     "mcp>=1.18.0",
     "openai>=2.14.0",
     "pydantic>=2.12.5",
-    "rich>=14.2.0",
 ]
 
 [build-system]
@@ -22,6 +21,6 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "notebook>=7.5.1",
     "python-dotenv>=1.2.1",
+    "rich>=14.2.0",
 ]

@@ -4,7 +4,7 @@ import os
 import dotenv
 import rich
 
-import py_ai as ai
+import vercel_ai_sdk as ai
 
 dotenv.load_dotenv()
 
