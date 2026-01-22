@@ -30,19 +30,19 @@ async def multiagent(llm: ai.LanguageModel, user_query: str):
     stream1, stream2 = await asyncio.gather(
         ai.stream_loop(
             llm,
-            messages=[
-                ai.Message(role="system", parts=[ai.TextPart(text="You are assistant 1. Use your tool on the number.")]),
-                ai.Message(role="user", parts=[ai.TextPart(text=user_query)]),
-            ],
+            messages=ai.make_messages(
+                system="You are assistant 1. Use your tool on the number.",
+                user=user_query,
+            ),
             tools=[add_one],
             label="a1",
         ),
         ai.stream_loop(
             llm,
-            messages=[
-                ai.Message(role="system", parts=[ai.TextPart(text="You are assistant 2. Use your tool on the number.")]),
-                ai.Message(role="user", parts=[ai.TextPart(text=user_query)]),
-            ],
+            messages=ai.make_messages(
+                system="You are assistant 2. Use your tool on the number.",
+                user=user_query,
+            ),
             tools=[multiply_by_two],
             label="a2",
         ),
@@ -52,10 +52,10 @@ async def multiagent(llm: ai.LanguageModel, user_query: str):
 
     return await ai.stream_text(
         llm,
-        messages=[
-            ai.Message(role="system", parts=[ai.TextPart(text="You are assistant 3. Summarize the results.")]),
-            ai.Message(role="user", parts=[ai.TextPart(text=f"Results from the other assistants: {combined}")]),
-        ],
+        messages=ai.make_messages(
+            system="You are assistant 3. Summarize the results.",
+            user=f"Results from the other assistants: {combined}",
+        ),
         label="a3",
     )
 

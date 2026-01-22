@@ -15,10 +15,10 @@ async def thinking_agent(llm: ai.LanguageModel, user_query: str):
     """Agent using extended thinking for step-by-step reasoning."""
     return await ai.stream_text(
         llm,
-        messages=[
-            ai.Message(role="system", parts=[ai.TextPart(text="You are a helpful assistant that thinks step by step.")]),
-            ai.Message(role="user", parts=[ai.TextPart(text=user_query)]),
-        ],
+        messages=ai.make_messages(
+            system="You are a helpful assistant that thinks step by step.",
+            user=user_query,
+        ),
         label="thinking",
     )
 
@@ -33,7 +33,6 @@ async def main():
     )
 
     async for msg in ai.execute(thinking_agent, llm, "What is 25 * 47?"):
-        rich.print(f"[blue]■[/blue]", end=" ", flush=True)
         rich.print(msg)
 
 

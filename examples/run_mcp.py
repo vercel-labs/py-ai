@@ -21,10 +21,10 @@ async def context7_agent(llm: ai.LanguageModel, user_query: str):
 
     return await ai.stream_loop(
         llm,
-        messages=[
-            ai.Message(role="system", parts=[ai.TextPart(text="You are a helpful assistant. Use context7 to look up documentation.")]),
-            ai.Message(role="user", parts=[ai.TextPart(text=user_query)]),
-        ],
+        messages=ai.make_messages(
+            system="You are a helpful assistant. Use context7 to look up documentation.",
+            user=user_query,
+        ),
         tools=context7_tools,
         label="context7",
     )
@@ -38,7 +38,6 @@ async def main():
     )
 
     async for msg in ai.execute(context7_agent, llm, "How do I create middleware in Next.js?"):
-        rich.print(f"[yellow]■[/yellow]", end=" ", flush=True)
         rich.print(msg)
 
 
