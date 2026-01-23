@@ -8,6 +8,14 @@ from typing import Any, Callable, get_args, get_origin, get_type_hints, overload
 import pydantic
 
 
+def _is_runtime_type(hint: Any) -> bool:
+    """Check if a type hint is the Runtime class."""
+    # Import here to avoid circular import at runtime
+    from .runtime import Runtime
+
+    return hint is Runtime
+
+
 def _get_param_schema(param_type: type) -> dict[str, Any]:
     """Get JSON schema for a Python type using Pydantic's TypeAdapter."""
     schema = pydantic.TypeAdapter(param_type).json_schema()
@@ -35,7 +43,9 @@ def tool(fn: Callable[..., Awaitable[Any]]) -> Tool: ...
 def tool(fn: None = None) -> Callable[[Callable[..., Awaitable[Any]]], Tool]: ...
 
 
-def tool(fn: Callable[..., Awaitable[Any]] | None = None) -> Tool | Callable[[Callable[..., Awaitable[Any]]], Tool]:
+def tool(
+    fn: Callable[..., Awaitable[Any]] | None = None,
+) -> Tool | Callable[[Callable[..., Awaitable[Any]]], Tool]:
     """Decorator to define a tool from an async function."""
 
     def make_tool(f: Callable[..., Awaitable[Any]]) -> Tool:
@@ -46,11 +56,11 @@ def tool(fn: Callable[..., Awaitable[Any]] | None = None) -> Tool | Callable[[Ca
         required = []
 
         for param_name, param in sig.parameters.items():
-            # Skip 'runtime' - it's injected, not from LLM
-            if param_name == "runtime":
-                continue
-
             param_type = hints.get(param_name, str)
+
+            # Skip Runtime-typed parameters - they're injected, not from LLM
+            if _is_runtime_type(param_type):
+                continue
             properties[param_name] = _get_param_schema(param_type)
 
             if param.default is inspect.Parameter.empty and not _is_optional(
