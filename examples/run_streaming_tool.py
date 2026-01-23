@@ -2,7 +2,9 @@
 
 import asyncio
 import os
+
 import dotenv
+from rich import print
 
 import vercel_ai_sdk as ai
 
@@ -29,7 +31,7 @@ async def talk_to_mothership(question: str, runtime: ai.Runtime) -> str:
         # Stream each step to the runtime
         progress_msg = ai.Message(
             role="assistant",
-            parts=[ai.TextPart(text=step)],
+            parts=[ai.TextPart(text=f"<inside of tool> {step}")],
             is_done=False,
             label="tool_progress",
         )
@@ -58,22 +60,21 @@ async def main():
         api_key=os.environ.get("AI_GATEWAY_API_KEY"),
     )
 
-    print("Starting streaming tool example...\n")
-
     async for msg in ai.execute(agent, llm, "When will the robots take over?"):
         # Show streaming text from LLM
         if msg.text_delta:
-            print(msg.text_delta, end="", flush=True)
+            print(f"[blue]{msg.text_delta}[/blue]", end="", flush=True)
 
         # Show tool progress updates
         if msg.label == "tool_progress":
-            print(msg.text, flush=True)
+            print(f"[cyan]{msg.text}[/cyan]")
 
         # Show tool results
         if msg.is_done:
+            print("\n")
             for part in msg.parts:
                 if isinstance(part, ai.ToolPart) and part.status == "result":
-                    print(f"\n[Tool Result] {part.result}")
+                    print(f"\n[green]Accumulated result:[/green]\n{part.result}\n")
 
 
 if __name__ == "__main__":
