@@ -15,6 +15,7 @@ from .core.runtime import (
     LanguageModel,
     Stream,
     execute,
+    push_to_stream,
     stream_loop,
     stream_step,
 )
@@ -33,6 +34,7 @@ __all__ = [
     # Functions
     "tool",
     "execute",
+    "push_to_stream",
     "stream_loop",
     "stream_step",
     "make_messages",

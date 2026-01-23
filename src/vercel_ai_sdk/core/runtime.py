@@ -45,6 +45,14 @@ class Runtime:
 _runtime: contextvars.ContextVar[Runtime] = contextvars.ContextVar("runtime")
 
 
+async def push_to_stream(message: messages_.Message) -> None:
+    """Push a custom message to the current stream."""
+    runtime = _runtime.get(None)
+    if runtime is None:
+        raise ValueError("push_to_stream must be called within ai.execute() context")
+    await runtime.put(message)
+
+
 async def _do_stream_step(
     llm: LanguageModel,
     messages: list[messages_.Message],
