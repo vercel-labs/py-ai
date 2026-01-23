@@ -83,11 +83,11 @@ def make_messages(*, system: str | None = None, user: str) -> list[Message]:
         user: User message content (required).
 
     Returns:
-        A list of Message objects ready to pass to stream_text or stream_loop.
+        A list of Message objects ready to pass to stream_step or stream_loop.
 
     Example:
         >>> messages = make_messages(system="You are helpful.", user="Hello!")
-        >>> await ai.stream_text(llm, messages=messages)
+        >>> await ai.stream_step(llm, messages=messages)
     """
     result: list[Message] = []
     if system is not None:

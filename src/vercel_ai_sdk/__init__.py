@@ -16,7 +16,7 @@ from .core.runtime import (
     Stream,
     execute,
     stream_loop,
-    stream_text,
+    stream_step,
 )
 
 __all__ = [
@@ -34,7 +34,7 @@ __all__ = [
     "tool",
     "execute",
     "stream_loop",
-    "stream_text",
+    "stream_step",
     "make_messages",
     # Submodules
     "anthropic",

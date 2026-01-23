@@ -30,15 +30,19 @@ async def get_weather(city: str, units: str = "celsius") -> str:
     return f"72°F in {city}"
 ```
 
-### `ai.stream_text(llm, messages, label=None)`
+### `ai.stream_step(llm, messages, tools=None, label=None)`
 
-Streams text from the LLM without tool support. Returns a `Stream` that can be awaited or async-iterated.
+Streams a single LLM response with optional tool definitions. Tools are passed to the LLM but not auto-executed - tool calls are returned with `status="pending"`. Returns a `Stream` that can be awaited or async-iterated.
 
 ```python
-result = await ai.stream_text(llm, messages)
+result = await ai.stream_step(llm, messages)
 # or iterate for real-time updates
-async for msg in ai.stream_text(llm, messages):
+async for msg in ai.stream_step(llm, messages):
     print(msg.text_delta, end="")
+
+# With tools (no auto-execution)
+result = await ai.stream_step(llm, messages, tools=[get_weather])
+# Check result[-1].parts for ToolPart with status="pending"
 ```
 
 ### `ai.stream_loop(llm, messages, tools, label=None)`
@@ -107,7 +111,7 @@ async def multiagent(llm, query):
 
     # Combine results and summarize
     combined = stream1[-1].text + stream2[-1].text
-    return await ai.stream_text(llm, make_messages(combined), label="summarizer")
+    return await ai.stream_step(llm, make_messages(combined), label="summarizer")
 
 async for msg in ai.execute(multiagent, llm, "10"):
     print(f"[{msg.label}] {msg.text_delta}", end="")
