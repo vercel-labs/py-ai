@@ -5,7 +5,7 @@ import asyncio
 import contextvars
 import json
 from collections.abc import AsyncGenerator, Awaitable, Coroutine, Generator
-from typing import Any, Callable
+from typing import Any, Callable, get_type_hints
 
 from .. import mcp
 from . import messages as messages_
@@ -45,12 +45,16 @@ class Runtime:
 _runtime: contextvars.ContextVar[Runtime] = contextvars.ContextVar("runtime")
 
 
-async def push_to_stream(message: messages_.Message) -> None:
-    """Push a custom message to the current stream."""
-    runtime = _runtime.get(None)
-    if runtime is None:
-        raise ValueError("push_to_stream must be called within ai.execute() context")
-    await runtime.put(message)
+def _find_runtime_param(fn: Callable[..., Any]) -> str | None:
+    """Find a parameter typed as Runtime, return its name or None."""
+    try:
+        hints = get_type_hints(fn)
+    except Exception:
+        return None
+    for name, hint in hints.items():
+        if hint is Runtime:
+            return name
+    return None
 
 
 async def _do_stream_step(
@@ -103,6 +107,11 @@ async def _do_stream_loop(
         for tool_call in tool_calls:
             tool_fn = next(t for t in tools if t.name == tool_call.tool_name)
             args = json.loads(tool_call.tool_args)
+
+            # Inject runtime if the tool has a Runtime-typed parameter
+            if runtime_param := _find_runtime_param(tool_fn.fn):
+                args[runtime_param] = runtime
+
             result = await tool_fn.fn(**args)
 
             assert assistant_msg is not None, "Assistant message not found"
@@ -193,10 +202,15 @@ async def execute(
     mcp_pool: dict[str, mcp.client._Connection] = {}
     mcp_token = mcp.client._pool.set(mcp_pool)
 
+    # Inject runtime as keyword arg if the function has a Runtime-typed parameter
+    kwargs: dict[str, Any] = {}
+    if runtime_param := _find_runtime_param(root):
+        kwargs[runtime_param] = runtime
+
     try:
         async with asyncio.TaskGroup() as tg:
             _task: asyncio.Task[None] = tg.create_task(
-                _stop_when_done(runtime, root(*args))
+                _stop_when_done(runtime, root(*args, **kwargs))
             )
 
             while True:

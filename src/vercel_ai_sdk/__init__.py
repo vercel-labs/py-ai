@@ -13,9 +13,9 @@ from .core.messages import (
 from .core.tools import Tool, tool
 from .core.runtime import (
     LanguageModel,
+    Runtime,
     Stream,
     execute,
-    push_to_stream,
     stream_loop,
     stream_step,
 )
@@ -31,10 +31,10 @@ __all__ = [
     "Tool",
     "Stream",
     "LanguageModel",
+    "Runtime",
     # Functions
     "tool",
     "execute",
-    "push_to_stream",
     "stream_loop",
     "stream_step",
     "make_messages",
