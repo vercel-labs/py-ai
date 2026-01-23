@@ -27,6 +27,7 @@ async def multiply_by_two(number: int) -> int:
 
 async def multiagent(llm: ai.LanguageModel, user_query: str):
     """Run two agents in parallel, then combine their results."""
+
     stream1, stream2 = await asyncio.gather(
         ai.stream_loop(
             llm,
@@ -48,7 +49,7 @@ async def multiagent(llm: ai.LanguageModel, user_query: str):
         ),
     )
 
-    combined = "\n".join(msg.text for msg in stream1[-1:]) + "\n".join(msg.text for msg in stream2[-1:])
+    combined = stream1[-1].text + "\n" + stream2[-1].text
 
     return await ai.stream_text(
         llm,
@@ -64,7 +65,11 @@ class MultiAgentDisplay:
     """Live display for multiple parallel agent streams."""
 
     COLORS = {"a1": "cyan", "a2": "magenta", "a3": "green"}
-    TITLES = {"a1": "Agent 1 (add_one)", "a2": "Agent 2 (multiply)", "a3": "Agent 3 (summary)"}
+    TITLES = {
+        "a1": "Agent 1 (add_one)",
+        "a2": "Agent 2 (multiply)",
+        "a3": "Agent 3 (summary)",
+    }
 
     def __init__(self):
         self.streams: dict[str, Text] = defaultdict(Text)
@@ -87,26 +92,32 @@ class MultiAgentDisplay:
             for part in msg.parts:
                 match part:
                     case ai.ToolPart(status="pending", tool_name=name, tool_args=args):
-                        self.streams[label].append(f"\n→ {name}({args})", style="yellow")
+                        self.streams[label].append(
+                            f"\n→ {name}({args})", style="yellow"
+                        )
                     case ai.ToolPart(status="result", tool_name=name, result=result):
-                        self.streams[label].append(f"\n✓ {name} = {result}", style="green")
+                        self.streams[label].append(
+                            f"\n✓ {name} = {result}", style="green"
+                        )
             self.streams[label].append("\n")
 
     def render(self) -> Group:
         panels = []
         for label in ["a1", "a2", "a3"]:
             if label in self.streams:
-                panels.append(Panel(
-                    self.streams[label],
-                    title=self.TITLES.get(label, label),
-                    border_style=self.COLORS.get(label, "white"),
-                ))
+                panels.append(
+                    Panel(
+                        self.streams[label],
+                        title=self.TITLES.get(label, label),
+                        border_style=self.COLORS.get(label, "white"),
+                    )
+                )
         return Group(*panels)
 
 
 async def main():
     llm = ai.anthropic.AnthropicModel(
-        model="anthropic/claude-sonnet-4.5",
+        model="anthropic/claude-haiku-4.5",
         base_url="https://ai-gateway.vercel.sh",
         api_key=os.environ.get("AI_GATEWAY_API_KEY"),
     )

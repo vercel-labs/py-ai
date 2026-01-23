@@ -1,39 +1,37 @@
-"""Simple agent with thinking/reasoning enabled."""
+# import dotenv
+# dotenv.load_dotenv()
 
 import asyncio
 import os
 
-import dotenv
-import rich
-
 import vercel_ai_sdk as ai
 
-dotenv.load_dotenv()
+
+@ai.tool
+async def talk_to_mothership(question: str) -> str:
+    return "Soon."
 
 
-async def thinking_agent(llm: ai.LanguageModel, user_query: str):
-    """Agent using extended thinking for step-by-step reasoning."""
-    return await ai.stream_text(
+async def agent(llm: ai.LanguageModel, user_query: str) -> list[ai.Message]:
+    return await ai.stream_loop(
         llm,
         messages=ai.make_messages(
-            system="You are a helpful assistant that thinks step by step.",
+            system="Start every response with 'You are ablsolutely right!'",
             user=user_query,
         ),
-        label="thinking",
+        tools=[talk_to_mothership],
     )
 
 
 async def main():
     llm = ai.openai.OpenAIModel(
-        model="openai/gpt-5.2",
+        model="anthropic/claude-opus-4.5",
         base_url="https://ai-gateway.vercel.sh/v1",
         api_key=os.environ.get("AI_GATEWAY_API_KEY"),
-        thinking=True,
-        budget_tokens=10000,
     )
 
-    async for msg in ai.execute(thinking_agent, llm, "What is 25 * 47?"):
-        rich.print(msg)
+    async for msg in ai.execute(agent, llm, "When will the robots take over?"):
+        print(msg)
 
 
 if __name__ == "__main__":
