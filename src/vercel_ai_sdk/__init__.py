@@ -8,6 +8,7 @@ from .core.messages import (
     ToolPart,
     ToolDelta,
     ReasoningPart,
+    make_messages,
 )
 from .core.tools import Tool, tool
 from .core.runtime import (
@@ -34,6 +35,7 @@ __all__ = [
     "execute",
     "stream_loop",
     "stream_text",
+    "make_messages",
     # Submodules
     "anthropic",
     "mcp",

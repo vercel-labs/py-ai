@@ -1,36 +1,18 @@
+"""Multi-agent example with parallel execution and live streaming display."""
+
 import asyncio
 import os
+from collections import defaultdict
 
 import dotenv
-import rich
+from rich.console import Group
+from rich.live import Live
+from rich.panel import Panel
+from rich.text import Text
 
 import vercel_ai_sdk as ai
 
 dotenv.load_dotenv()
-
-
-def get_text(messages: list[ai.Message]) -> str:
-    # this could be a method on the Message class
-    # something lile message.get_text() or message.text
-    for msg in reversed(messages):
-        if msg.role == "assistant":
-            for part in msg.parts:
-                if isinstance(part, ai.TextPart):
-                    return part.text
-    return ""
-
-
-def make_messages(system_prompt: str, user_query: str) -> list[ai.Message]:
-    # Create initial messages for an agent.
-
-    # This is boilerplate for every agent call. Could be:
-    # - A helper like core.messages(system="...", user="...")
-    # - Or just let stream_loop accept (system_prompt, query) directly
-
-    return [
-        ai.Message(role="system", parts=[ai.TextPart(text=system_prompt)]),
-        ai.Message(role="user", parts=[ai.TextPart(text=user_query)]),
-    ]
 
 
 @ai.tool
@@ -43,158 +25,109 @@ async def multiply_by_two(number: int) -> int:
     return number * 2
 
 
-# --- Context7 MCP Integration ---
-# Context7 provides up-to-date documentation for any library.
-# Add "use context7" to prompts or let the agent auto-invoke.
-# API key should be in .env as CONTEXT7_API_KEY
+async def multiagent(llm: ai.LanguageModel, user_query: str):
+    """Run two agents in parallel, then combine their results."""
 
-
-async def context7_example_http(llm: ai.openai.OpenAIModel, user_query: str):
-    """Context7 via HTTP transport."""
-    context7_tools = await ai.mcp.get_http_tools(
-        "https://mcp.context7.com/mcp",
-        headers={"CONTEXT7_API_KEY": os.environ.get("CONTEXT7_API_KEY", "")},
-        tool_prefix="context7",
-    )
-
-    return await ai.stream_loop(
-        llm,
-        messages=make_messages(
-            "Test run. Please reason about this test run briefly, then call resolve-library-id for 'next.js' and stop.",
-            user_query,
-        ),
-        tools=context7_tools,
-        label="context7",
-    )
-
-
-async def context7_example_stdio(llm: ai.openai.OpenAIModel, user_query: str):
-    """Context7 via stdio transport (npx)."""
-    context7_tools = await ai.mcp.get_stdio_tools(
-        "npx", "-y", "@upstash/context7-mcp",
-        "--api-key", os.environ.get("CONTEXT7_API_KEY", ""),
-        tool_prefix="context7",
-    )
-
-    return await ai.stream_loop(
-        llm,
-        messages=make_messages(
-            "Test run. Call resolve-library-id for 'next.js' and stop.",
-            user_query,
-        ),
-        tools=context7_tools,
-        label="context7",
-    )
-
-
-# Clean up connections when done (optional - happens automatically on exit)
-# await ai.mcp.close_connections()
-
-
-async def thinking_example(llm: ai.LanguageModel, user_query: str):
-    """Example using reasoning/thinking models (GPT 5.2, o-series, or Claude with thinking)."""
-    return await ai.stream_text(
-        llm,
-        messages=make_messages(
-            "You are a helpful assistant that thinks step by step.",
-            user_query,
-        ),
-        label="thinking",
-    )
-
-
-async def multiagent(llm: ai.openai.OpenAIModel, user_query: str) -> list[ai.Message]:
     stream1, stream2 = await asyncio.gather(
         ai.stream_loop(
             llm,
-            messages=make_messages(
-                "You are the test assistant 1.",
-                f"Use your tool on the user query: {user_query}",
+            messages=ai.make_messages(
+                system="You are assistant 1. Use your tool on the number.",
+                user=user_query,
             ),
             tools=[add_one],
             label="a1",
         ),
         ai.stream_loop(
             llm,
-            messages=make_messages(
-                "You are the test assistant 2.",
-                f"Use your tool on the user query: {user_query}",
+            messages=ai.make_messages(
+                system="You are assistant 2. Use your tool on the number.",
+                user=user_query,
             ),
             tools=[multiply_by_two],
             label="a2",
         ),
     )
 
-    combined = "\n".join(msg.text for msg in stream1[-1:]) + "\n".join(
-        msg.text for msg in stream2[-1:]
-    )
+    combined = stream1[-1].text + "\n" + stream2[-1].text
 
     return await ai.stream_text(
         llm,
-        messages=make_messages(
-            "You are the test assistant 3.",
-            f"Add the results of the previous two assistants: {combined}",
+        messages=ai.make_messages(
+            system="You are assistant 3. Summarize the results.",
+            user=f"Results from the other assistants: {combined}",
         ),
         label="a3",
     )
 
 
-async def main():
-    llm = ai.openai.OpenAIModel(
-        model="openai/gpt-5.2",
-        api_key=os.environ.get("AI_GATEWAY_API_KEY"),
-        base_url="https://ai-gateway.vercel.sh/v1",
-    )
+class MultiAgentDisplay:
+    """Live display for multiple parallel agent streams."""
 
-    # LLM with extended thinking using OpenAI's GPT 5.2 reasoning model via Vercel AI Gateway
-    # Uses budget_tokens to control reasoning depth (or use reasoning_effort="medium")
-    # See: https://vercel.com/docs/ai-gateway/openai-compat/advanced
-    thinking_llm = ai.openai.OpenAIModel(
-        model="openai/gpt-5.2",
-        base_url="https://ai-gateway.vercel.sh/v1",
-        api_key=os.environ.get("AI_GATEWAY_API_KEY"),
-        thinking=True,
-        budget_tokens=10000,
-    )
-
-    colors = {
-        "a1": "cyan",
-        "a2": "magenta",
-        "a3": "green",
-        "context7": "yellow",
-        "thinking": "blue",
+    COLORS = {"a1": "cyan", "a2": "magenta", "a3": "green"}
+    TITLES = {
+        "a1": "Agent 1 (add_one)",
+        "a2": "Agent 2 (multiply)",
+        "a3": "Agent 3 (summary)",
     }
 
-    # regular streaming example
-    # async for msg in ai.execute(multiagent, llm, user_query):
-    #     label = msg.label or "unknown"
-    #     color = colors.get(label, "white")
-    #     rich.print(f"[{color}]■[/{color}]", end=" ", flush=True)
-    #     rich.print(msg)
+    def __init__(self):
+        self.streams: dict[str, Text] = defaultdict(Text)
 
-    # AI SDK UI-formatted SSE streaming
-    # async for msg in ai.ui.ai_sdk.to_sse_stream(
-    #     ai.execute(multiagent, llm, user_query)
-    # ):
-    #     rich.print(msg)
-
-    # --- Context7 Example ---
-    # Toggle between HTTP and stdio transport:
-    context7_query = "next.js middleware"
-
-    # HTTP transport
-    async for msg in ai.execute(context7_example_http, thinking_llm, context7_query):
+    def update(self, msg: ai.Message) -> None:
         label = msg.label or "unknown"
-        color = colors.get(label, "white")
-        rich.print(f"[{color}]■[/{color}]", end=" ", flush=True)
-        rich.print(msg)
+        color = self.COLORS.get(label, "white")
 
-    # stdio transport
-    # async for msg in ai.execute(context7_example_stdio, llm, context7_query):
-    #     label = msg.label or "unknown"
-    #     color = colors.get(label, "white")
-    #     rich.print(f"[{color}]■[/{color}]", end=" ", flush=True)
-    #     rich.print(msg)
+        # Append streaming deltas
+        if msg.text_delta:
+            self.streams[label].append(msg.text_delta, style=color)
+        if msg.reasoning_delta:
+            self.streams[label].append(msg.reasoning_delta, style="dim")
+
+        # Handle tool events
+        for delta in msg.tool_deltas:
+            self.streams[label].append(f"{delta.args_delta}", style="yellow")
+
+        if msg.is_done:
+            for part in msg.parts:
+                match part:
+                    case ai.ToolPart(status="pending", tool_name=name, tool_args=args):
+                        self.streams[label].append(
+                            f"\n→ {name}({args})", style="yellow"
+                        )
+                    case ai.ToolPart(status="result", tool_name=name, result=result):
+                        self.streams[label].append(
+                            f"\n✓ {name} = {result}", style="green"
+                        )
+            self.streams[label].append("\n")
+
+    def render(self) -> Group:
+        panels = []
+        for label in ["a1", "a2", "a3"]:
+            if label in self.streams:
+                panels.append(
+                    Panel(
+                        self.streams[label],
+                        title=self.TITLES.get(label, label),
+                        border_style=self.COLORS.get(label, "white"),
+                    )
+                )
+        return Group(*panels)
+
+
+async def main():
+    llm = ai.anthropic.AnthropicModel(
+        model="anthropic/claude-haiku-4.5",
+        base_url="https://ai-gateway.vercel.sh",
+        api_key=os.environ.get("AI_GATEWAY_API_KEY"),
+    )
+
+    display = MultiAgentDisplay()
+
+    with Live(display.render(), refresh_per_second=15) as live:
+        async for msg in ai.execute(multiagent, llm, "Process the number 5"):
+            display.update(msg)
+            live.update(display.render())
 
 
 if __name__ == "__main__":
