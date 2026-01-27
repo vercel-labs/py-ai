@@ -19,6 +19,13 @@ from .core.runtime import (
     stream_loop,
     stream_step,
 )
+from .core.hooks import (
+    hook,
+    HookPending,
+    set_hook_resolutions,
+    reset_hook_resolutions,
+    get_hook_resolutions,
+)
 
 __all__ = [
     # Types
@@ -32,12 +39,19 @@ __all__ = [
     "Stream",
     "LanguageModel",
     "Runtime",
+    # Hook types
+    "hook",
+    "HookPending",
     # Functions
     "tool",
     "execute",
     "stream_loop",
     "stream_step",
     "make_messages",
+    # Hook functions
+    "set_hook_resolutions",
+    "reset_hook_resolutions",
+    "get_hook_resolutions",
     # Submodules
     "anthropic",
     "mcp",
