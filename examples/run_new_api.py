@@ -2,14 +2,13 @@
 New step-based API example with parallel execution.
 
 This demonstrates the composable primitives approach where:
-- @ai.stream wires a generator into the Runtime
-- ai.stream_llm is the raw LLM streaming primitive
-- Users can write their own loops with full control
-- Durability can be added by decorating individual functions
+- ai.stream_step: single LLM call, streams to Runtime, returns StepResult
+- ai.execute_tool: single tool call, can be wrapped for durability
+- asyncio.gather: parallel tool execution
+- Durability can be added by stacking decorators (e.g. @workflow.step)
 """
 
 import asyncio
-import json
 import os
 from collections import defaultdict
 
@@ -24,7 +23,8 @@ import vercel_ai_sdk as ai
 dotenv.load_dotenv()
 
 
-# --- Tools (could be decorated with @step for durability) ---
+# --- Tools ---
+# Each tool can be individually wrapped with @workflow.step for durability
 
 
 @ai.tool
@@ -37,91 +37,47 @@ async def multiply_by_two(number: int) -> int:
     return number * 2
 
 
-# --- Custom streaming functions using new primitives ---
+# --- Agent loop with granular control ---
 
 
-@ai.stream
-async def my_stream_step(
-    llm: ai.LanguageModel,
-    messages: list[ai.Message],
-    tools: list[ai.Tool] | None = None,
-    label: str | None = None,
-):
-    """
-    Single LLM call wrapped with @ai.stream.
-    
-    This submits the work to Runtime, which executes it and returns StepResult.
-    You could add @w.step here for durability.
-    """
-    async for msg in ai.stream_llm(llm, messages, tools):
-        msg.label = label
-        yield msg
-
-
-@ai.stream
-async def my_stream_loop(
+async def agent_loop(
     llm: ai.LanguageModel,
     messages: list[ai.Message],
     tools: list[ai.Tool],
     label: str | None = None,
-):
+) -> ai.StepResult:
     """
-    Full agent loop using the primitive approach.
+    Full agent loop with granular step control.
     
-    User has full control over the loop structure.
-    Each iteration could be a separate durable step if needed.
+    Each ai.stream_step and ai.execute_tool can be individually
+    wrapped with @workflow.step for durability.
     """
-    local_messages = list(messages)  # Don't mutate input
+    local_messages = list(messages)
     
     while True:
-        # Stream LLM response
-        assistant_msg = None
-        async for msg in ai.stream_llm(llm, local_messages, tools):
-            msg.label = label
-            yield msg
-            if msg.is_done:
-                assistant_msg = msg
+        # Single LLM call - can wrap with @step for durability
+        result = await ai.stream_step(llm, local_messages, tools, label=label)
         
-        if assistant_msg is None:
-            break
-            
-        local_messages.append(assistant_msg)
+        if not result.tool_calls:
+            return result
         
-        # Extract tool calls
-        tool_calls = [
-            part for part in assistant_msg.parts
-            if isinstance(part, ai.ToolPart)
-        ]
+        local_messages.append(result.last_message)
         
-        if not tool_calls:
-            break
-        
-        # Execute tools (each could be @step decorated for durability)
-        for tool_call in tool_calls:
-            tool_fn = next(t for t in tools if t.name == tool_call.tool_name)
-            args = json.loads(tool_call.tool_args)
-            
-            result = await ai.execute_tool(tool_fn, args)
-            
-            # Update tool part with result
-            tool_part = assistant_msg.get_tool_part(tool_call.tool_call_id)
-            if tool_part:
-                tool_part.status = "result"
-                tool_part.result = result
-            
-            yield assistant_msg
+        # Execute tools in parallel, update message automatically
+        await asyncio.gather(*(
+            ai.execute_tool(tc, tools, result.last_message)
+            for tc in result.tool_calls
+        ))
 
 
-# --- Main agent using new API ---
+# --- Main agent ---
 
 
 async def multiagent(llm: ai.LanguageModel, user_query: str):
     """Run two agents in parallel, then combine their results."""
     
-    # Run two stream loops in parallel
-    # Each returns a StepResult when complete
     result1, result2 = await asyncio.gather(
-        my_stream_loop(
+        agent_loop(
             llm,
             messages=ai.make_messages(
                 system="You are assistant 1. Use your tool on the number.",
@@ -130,7 +86,7 @@ async def multiagent(llm: ai.LanguageModel, user_query: str):
             tools=[add_one],
             label="a1",
         ),
-        my_stream_loop(
+        agent_loop(
             llm,
             messages=ai.make_messages(
                 system="You are assistant 2. Use your tool on the number.",
@@ -141,11 +97,9 @@ async def multiagent(llm: ai.LanguageModel, user_query: str):
         ),
     )
     
-    # Combine results - StepResult has .text property
     combined = f"{result1.text}\n{result2.text}"
     
-    # Final summary step
-    return await my_stream_step(
+    return await ai.stream_step(
         llm,
         messages=ai.make_messages(
             system="You are assistant 3. Summarize the results.",

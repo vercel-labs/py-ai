@@ -16,8 +16,9 @@ from .core.runtime import (
     Runtime,
     Stream,
     execute,
-    stream_loop,
-    stream_step,
+    # Legacy API (still works, backward compatible)
+    stream_loop as _legacy_stream_loop,
+    stream_step as _legacy_stream_step,
 )
 from .core.hooks import (
     hook,
@@ -29,7 +30,14 @@ from .core.hooks import (
 # New step-based API
 from .core.step import StepResult, ToolCall
 from .core.decorators import stream
-from .core.primitives import stream_llm, execute_tool
+from .core.primitives import (
+    raw_stream_llm,
+    execute_tool,
+    stream_step,
+)
+
+# Convenience: keep stream_loop pointing to legacy for now
+stream_loop = _legacy_stream_loop
 
 __all__ = [
     # Types
@@ -53,12 +61,12 @@ __all__ = [
     "tool",
     "execute",
     "stream_loop",
-    "stream_step",
     "make_messages",
-    # New primitives
+    # New step-based API
     "stream",
-    "stream_llm",
+    "stream_step",
     "execute_tool",
+    "raw_stream_llm",
     # Hook functions
     "set_hook_resolutions",
     "reset_hook_resolutions",
