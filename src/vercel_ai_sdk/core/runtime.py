@@ -113,7 +113,7 @@ class Runtime:
     async def put_message(self, message: messages_.Message) -> None:
         await self._message_queue.put(message)
 
-    def _drain_messages(self) -> list[messages_.Message]:
+    def consume_messages(self) -> list[messages_.Message]:
         """Drain all pending messages from the message queue."""
         msgs = []
         while not self._message_queue.empty():
@@ -310,14 +310,14 @@ async def run(
 
             while True:
                 # Drain any messages from streaming tools
-                for msg in runtime._drain_messages():
+                for msg in runtime.consume_messages():
                     yield msg
 
                 item = await runtime.get_step()
 
                 if isinstance(item, Runtime._Sentinel):
                     # Drain remaining messages before exiting
-                    for msg in runtime._drain_messages():
+                    for msg in runtime.consume_messages():
                         yield msg
                     break
 
@@ -333,7 +333,7 @@ async def run(
                         last_message = msg
 
                     # Also drain any messages from streaming tools during step
-                    for tool_msg in runtime._drain_messages():
+                    for tool_msg in runtime.consume_messages():
                         yield tool_msg
 
                 tool_calls = _extract_tool_calls(last_message) if last_message else []
