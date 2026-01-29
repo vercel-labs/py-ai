@@ -9,6 +9,7 @@ from typing import Any, Callable, get_type_hints
 
 from .. import mcp
 from . import messages as messages_
+from . import step as step_
 from . import tools as tools_
 
 
@@ -22,24 +23,52 @@ class LanguageModel(abc.ABC):
 
 
 class Runtime:
+    """
+    Step-based execution runtime.
+    
+    Functions decorated with @stream submit step functions to the queue.
+    execute() pulls steps, runs them, yields messages, and resolves futures.
+    """
+
     class _Sentinel:
         pass
 
     _SENTINEL = _Sentinel()
 
     def __init__(self) -> None:
-        self._queue: asyncio.Queue[messages_.Message | Runtime._Sentinel] = (
-            asyncio.Queue()
-        )
+        # Step queue: (step_fn, future) pairs
+        self._step_queue: asyncio.Queue[
+            tuple[step_.StepFn, asyncio.Future[step_.StepResult]] | Runtime._Sentinel
+        ] = asyncio.Queue()
+        
+        # Message queue for backward compatibility / direct puts
+        self._message_queue: asyncio.Queue[messages_.Message] = asyncio.Queue()
 
-    async def put(self, message: messages_.Message) -> None:
-        await self._queue.put(message)
+    async def submit_step(
+        self, step_fn: step_.StepFn, future: asyncio.Future[step_.StepResult]
+    ) -> None:
+        """Submit a step function to be executed by execute()."""
+        await self._step_queue.put((step_fn, future))
 
-    async def get(self) -> messages_.Message | Runtime._Sentinel:
-        return await self._queue.get()
+    async def get_step(
+        self,
+    ) -> tuple[step_.StepFn, asyncio.Future[step_.StepResult]] | _Sentinel:
+        """Get next step from queue (called by execute())."""
+        return await self._step_queue.get()
 
     async def signal_done(self) -> None:
-        await self._queue.put(self._SENTINEL)
+        """Signal that no more steps will be submitted."""
+        await self._step_queue.put(self._SENTINEL)
+
+    # Backward compatibility: direct message queue
+    async def put(self, message: messages_.Message) -> None:
+        await self._message_queue.put(message)
+
+    async def get(self) -> messages_.Message:
+        return await self._message_queue.get()
+
+    def message_queue_empty(self) -> bool:
+        return self._message_queue.empty()
 
 
 _runtime: contextvars.ContextVar[Runtime] = contextvars.ContextVar("runtime")
@@ -193,9 +222,35 @@ async def _stop_when_done(runtime: Runtime, task: Awaitable[None]) -> None:
         await runtime.signal_done()
 
 
+def _extract_tool_calls(message: messages_.Message) -> list[step_.ToolCall]:
+    """Extract tool calls from a completed message."""
+    tool_calls = []
+    for part in message.parts:
+        if isinstance(part, messages_.ToolPart):
+            tool_calls.append(
+                step_.ToolCall(
+                    tool_call_id=part.tool_call_id,
+                    tool_name=part.tool_name,
+                    tool_args=json.loads(part.tool_args)
+                    if isinstance(part.tool_args, str)
+                    else part.tool_args,
+                )
+            )
+    return tool_calls
+
+
 async def execute(
     root: Callable[..., Coroutine[Any, Any, None]], *args: Any
-) -> AsyncGenerator[messages_.Message]:
+) -> AsyncGenerator[messages_.Message, None]:
+    """
+    Execute an agent function, yielding messages as they stream.
+    
+    This is the central executor that:
+    1. Starts the user's agent function as a background task
+    2. Pulls steps from the Runtime queue
+    3. Executes each step, yielding messages
+    4. Resolves futures to unblock user code
+    """
     runtime = Runtime()
     token_runtime = _runtime.set(runtime)
 
@@ -214,10 +269,34 @@ async def execute(
             )
 
             while True:
-                msg = await runtime.get()
-                if isinstance(msg, Runtime._Sentinel):
+                item = await runtime.get_step()
+                
+                if isinstance(item, Runtime._Sentinel):
                     break
-                yield msg
+                
+                step_fn, future = item
+                
+                # Execute the step and collect results
+                result_messages: list[messages_.Message] = []
+                last_message: messages_.Message | None = None
+                
+                async for msg in step_fn():
+                    yield msg
+                    result_messages.append(msg)
+                    if msg.is_done:
+                        last_message = msg
+                
+                # Build StepResult
+                tool_calls = (
+                    _extract_tool_calls(last_message) if last_message else []
+                )
+                step_result = step_.StepResult(
+                    messages=result_messages,
+                    tool_calls=tool_calls,
+                )
+                
+                # Resolve future to unblock user code
+                future.set_result(step_result)
 
     finally:
         if mcp_token is not None:

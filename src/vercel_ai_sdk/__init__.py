@@ -26,6 +26,10 @@ from .core.hooks import (
     reset_hook_resolutions,
     get_hook_resolutions,
 )
+# New step-based API
+from .core.step import StepResult, ToolCall
+from .core.decorators import stream
+from .core.primitives import stream_llm, execute_tool
 
 __all__ = [
     # Types
@@ -39,6 +43,9 @@ __all__ = [
     "Stream",
     "LanguageModel",
     "Runtime",
+    # Step types
+    "StepResult",
+    "ToolCall",
     # Hook types
     "hook",
     "HookPending",
@@ -48,6 +55,10 @@ __all__ = [
     "stream_loop",
     "stream_step",
     "make_messages",
+    # New primitives
+    "stream",
+    "stream_llm",
+    "execute_tool",
     # Hook functions
     "set_hook_resolutions",
     "reset_hook_resolutions",
