@@ -1,16 +1,32 @@
+"""
+Core runtime for step-based agent execution.
+
+Key components:
+- Runtime: Step queue with Future coordination
+- stream: Decorator to wire async generators into Runtime
+- stream_step: Single LLM call, returns StepResult
+- execute_tool: Single tool execution
+- stream_loop: Convenience wrapper for full agent loop
+- execute: Central executor that yields messages
+"""
+
 from __future__ import annotations
 
 import abc
 import asyncio
 import contextvars
+import functools
 import json
-from collections.abc import AsyncGenerator, Awaitable, Coroutine, Generator
-from typing import Any, Callable, get_type_hints
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
+from dataclasses import dataclass, field
+from typing import Any, get_type_hints
 
 from .. import mcp
 from . import messages as messages_
-from . import step as step_
 from . import tools as tools_
+
+
+# --- Abstract base ---
 
 
 class LanguageModel(abc.ABC):
@@ -20,6 +36,42 @@ class LanguageModel(abc.ABC):
     ) -> AsyncGenerator[messages_.Message, None]:
         raise NotImplementedError
         yield
+
+
+# --- Step types ---
+
+
+@dataclass
+class ToolCall:
+    """A tool call extracted from an LLM response."""
+
+    tool_call_id: str
+    tool_name: str
+    tool_args: dict[str, Any]
+
+
+@dataclass
+class StepResult:
+    """Result of executing a step - serializable for durability replay."""
+
+    messages: list[messages_.Message] = field(default_factory=list)
+    tool_calls: list[ToolCall] = field(default_factory=list)
+
+    @property
+    def last_message(self) -> messages_.Message | None:
+        return self.messages[-1] if self.messages else None
+
+    @property
+    def text(self) -> str:
+        if self.last_message:
+            return self.last_message.text
+        return ""
+
+
+StepFn = Callable[[], AsyncGenerator[messages_.Message, None]]
+
+
+# --- Runtime ---
 
 
 class Runtime:
@@ -36,23 +88,22 @@ class Runtime:
     _SENTINEL = _Sentinel()
 
     def __init__(self) -> None:
-        # Step queue: (step_fn, future) pairs
         self._step_queue: asyncio.Queue[
-            tuple[step_.StepFn, asyncio.Future[step_.StepResult]] | Runtime._Sentinel
+            tuple[StepFn, asyncio.Future[StepResult]] | Runtime._Sentinel
         ] = asyncio.Queue()
         
-        # Message queue for backward compatibility / direct puts
+        # Message queue for streaming tools (runtime.put)
         self._message_queue: asyncio.Queue[messages_.Message] = asyncio.Queue()
 
     async def submit_step(
-        self, step_fn: step_.StepFn, future: asyncio.Future[step_.StepResult]
+        self, step_fn: StepFn, future: asyncio.Future[StepResult]
     ) -> None:
         """Submit a step function to be executed by execute()."""
         await self._step_queue.put((step_fn, future))
 
     async def get_step(
         self,
-    ) -> tuple[step_.StepFn, asyncio.Future[step_.StepResult]] | _Sentinel:
+    ) -> tuple[StepFn, asyncio.Future[StepResult]] | _Sentinel:
         """Get next step from queue (called by execute())."""
         return await self._step_queue.get()
 
@@ -60,15 +111,19 @@ class Runtime:
         """Signal that no more steps will be submitted."""
         await self._step_queue.put(self._SENTINEL)
 
-    # Backward compatibility: direct message queue
+    # For streaming tools that want to emit messages directly
     async def put(self, message: messages_.Message) -> None:
         await self._message_queue.put(message)
 
-    async def get(self) -> messages_.Message:
-        return await self._message_queue.get()
-
-    def message_queue_empty(self) -> bool:
-        return self._message_queue.empty()
+    def _drain_messages(self) -> list[messages_.Message]:
+        """Drain all pending messages from the message queue."""
+        msgs = []
+        while not self._message_queue.empty():
+            try:
+                msgs.append(self._message_queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        return msgs
 
 
 _runtime: contextvars.ContextVar[Runtime] = contextvars.ContextVar("runtime")
@@ -86,149 +141,13 @@ def _find_runtime_param(fn: Callable[..., Any]) -> str | None:
     return None
 
 
-async def _do_stream_step(
-    llm: LanguageModel,
-    messages: list[messages_.Message],
-    tools: list[tools_.Tool] | None = None,
-    label: str | None = None,
-) -> AsyncGenerator[messages_.Message]:
-    runtime = _runtime.get()
-    if runtime is None:
-        raise ValueError("Runtime not set")
-
-    async for message in llm.stream(messages=messages, tools=tools):
-        message.label = label
-        await runtime.put(message)
-        yield message
-
-
-async def _do_stream_loop(
-    llm: LanguageModel,
-    messages: list[messages_.Message],
-    tools: list[tools_.Tool],
-    label: str | None = None,
-) -> AsyncGenerator[messages_.Message]:
-    runtime = _runtime.get()
-    if runtime is None:
-        raise ValueError("Runtime not set")
-
-    while True:
-        tool_calls = []
-        assistant_msg = None
-
-        async for message in llm.stream(messages=messages, tools=tools):
-            message.label = label
-            await runtime.put(message)
-            yield message
-
-            if message.is_done:
-                assistant_msg = message
-                for part in message.parts:
-                    if isinstance(part, messages_.ToolPart):
-                        tool_calls.append(part)
-
-        if assistant_msg:
-            messages.append(assistant_msg)
-
-        if not tool_calls:
-            break
-
-        for tool_call in tool_calls:
-            tool_fn = next(t for t in tools if t.name == tool_call.tool_name)
-            args = json.loads(tool_call.tool_args)
-
-            # Inject runtime if the tool has a Runtime-typed parameter
-            if runtime_param := _find_runtime_param(tool_fn.fn):
-                args[runtime_param] = runtime
-
-            result = await tool_fn.fn(**args)
-
-            assert assistant_msg is not None, "Assistant message not found"
-
-            tool_part = assistant_msg.get_tool_part(tool_call.tool_call_id)
-
-            assert tool_part is not None, (
-                f"Tool part not found for tool call {tool_call.tool_call_id}"
-            )
-
-            tool_part.status = "result"
-            tool_part.result = result
-
-            await runtime.put(assistant_msg)
-            yield assistant_msg
-
-
-class Stream:
-    def __init__(self, generator: AsyncGenerator[messages_.Message, None]) -> None:
-        self._generator = generator
-        self._messages: list[messages_.Message] = []
-        self._is_consumed: bool = False
-
-    async def __aiter__(self) -> AsyncGenerator[messages_.Message, None]:
-        async for message in self._generator:
-            if message.is_done:
-                # upsert the message
-                # tool results get added to the same message that contains the call
-                existing_idx = next(
-                    (i for i, m in enumerate(self._messages) if m.id == message.id),
-                    None,
-                )
-                if existing_idx is not None:
-                    self._messages[existing_idx] = message
-            else:
-                self._messages.append(message)
-            yield message
-        self._is_consumed = True
-
-    def __await__(self) -> Generator[Any, None, list[messages_.Message]]:
-        return self._collect().__await__()
-
-    async def _collect(self) -> list[messages_.Message]:
-        if self._is_consumed:
-            return self._messages
-        async for _ in self:
-            pass
-        return self._messages
-
-    @property
-    def result(self) -> list[messages_.Message]:
-        if not self._is_consumed:
-            raise ValueError("Stream is not consumed")
-        return self._messages
-
-
-def stream_step(
-    llm: LanguageModel,
-    messages: list[messages_.Message],
-    tools: list[tools_.Tool] | None = None,
-    label: str | None = None,
-) -> Stream:
-    return Stream(_do_stream_step(llm, messages, tools, label))
-
-
-def stream_loop(
-    llm: LanguageModel,
-    messages: list[messages_.Message],
-    tools: list[tools_.Tool],
-    label: str | None = None,
-) -> Stream:
-    return Stream(_do_stream_loop(llm, messages, tools, label))
-
-
-async def _stop_when_done(runtime: Runtime, task: Awaitable[None]) -> None:
-    try:
-        await task
-    finally:
-        await runtime.signal_done()
-
-
-def _extract_tool_calls(message: messages_.Message) -> list[step_.ToolCall]:
+def _extract_tool_calls(message: messages_.Message) -> list[ToolCall]:
     """Extract tool calls from a completed message."""
     tool_calls = []
     for part in message.parts:
         if isinstance(part, messages_.ToolPart):
             tool_calls.append(
-                step_.ToolCall(
+                ToolCall(
                     tool_call_id=part.tool_call_id,
                     tool_name=part.tool_name,
                     tool_args=json.loads(part.tool_args)
@@ -239,8 +158,134 @@ def _extract_tool_calls(message: messages_.Message) -> list[step_.ToolCall]:
     return tool_calls
 
 
+# --- Decorators ---
+
+
+def stream(
+    fn: Callable[..., AsyncGenerator[messages_.Message, None]]
+) -> Callable[..., Any]:
+    """
+    Decorator: wraps an async generator to submit as a step to Runtime.
+    
+    The decorated function submits its work to the Runtime queue and
+    blocks until execute() processes it, then returns the StepResult.
+    """
+
+    @functools.wraps(fn)
+    async def wrapped(*args: Any, **kwargs: Any) -> StepResult:
+        rt: Runtime | None = _runtime.get(None)
+        if rt is None:
+            raise ValueError("No Runtime context - must be called within ai.execute()")
+
+        future: asyncio.Future[StepResult] = asyncio.Future()
+
+        async def step_fn() -> AsyncGenerator[messages_.Message, None]:
+            async for msg in fn(*args, **kwargs):
+                yield msg
+
+        await rt.submit_step(step_fn, future)
+        return await future
+
+    return wrapped
+
+
+# --- Primitives ---
+
+
+@stream
+async def stream_step(
+    llm: LanguageModel,
+    messages: list[messages_.Message],
+    tools: list[tools_.Tool] | None = None,
+    label: str | None = None,
+) -> AsyncGenerator[messages_.Message, None]:
+    """
+    Single LLM call that streams to Runtime.
+    
+    Returns StepResult with .tool_calls, .text, .last_message when awaited.
+    Can be wrapped with @workflow.step for durability.
+    """
+    async for msg in llm.stream(messages=messages, tools=tools):
+        msg.label = label
+        yield msg
+
+
+async def execute_tool(
+    tool_call: ToolCall,
+    tools: list[tools_.Tool],
+    message: messages_.Message | None = None,
+) -> Any:
+    """
+    Execute a single tool call and optionally update the message.
+    
+    If message is provided, updates the tool part with the result.
+    Can be wrapped with @workflow.step for durability.
+    Use with asyncio.gather() for parallel execution.
+    """
+    tool_fn = next((t for t in tools if t.name == tool_call.tool_name), None)
+    if tool_fn is None:
+        raise ValueError(f"Tool not found: {tool_call.tool_name}")
+
+    # Inject runtime if the tool has a Runtime-typed parameter
+    kwargs: dict[str, Any] = dict(tool_call.tool_args)
+    rt = _runtime.get(None)
+    if rt and (runtime_param := _find_runtime_param(tool_fn.fn)):
+        kwargs[runtime_param] = rt
+
+    result = await tool_fn.fn(**kwargs)
+
+    if message is not None:
+        tool_part = message.get_tool_part(tool_call.tool_call_id)
+        if tool_part:
+            tool_part.status = "result"
+            tool_part.result = result
+
+    return result
+
+
+# --- Convenience ---
+
+
+async def stream_loop(
+    llm: LanguageModel,
+    messages: list[messages_.Message],
+    tools: list[tools_.Tool],
+    label: str | None = None,
+) -> StepResult:
+    """
+    Full agent loop: stream LLM, execute tools, repeat until done.
+    
+    Convenience wrapper that uses stream_step and execute_tool internally.
+    Returns the final StepResult.
+    """
+    local_messages = list(messages)
+
+    while True:
+        result = await stream_step(llm, local_messages, tools, label=label)
+
+        if not result.tool_calls:
+            return result
+
+        local_messages.append(result.last_message)
+
+        await asyncio.gather(*(
+            execute_tool(tc, tools, result.last_message)
+            for tc in result.tool_calls
+        ))
+
+
+# --- Executor ---
+
+
+async def _stop_when_done(runtime: Runtime, task: Awaitable[None]) -> None:
+    try:
+        await task
+    finally:
+        await runtime.signal_done()
+
+
 async def execute(
-    root: Callable[..., Coroutine[Any, Any, None]], *args: Any
+    root: Callable[..., Coroutine[Any, Any, Any]], *args: Any
 ) -> AsyncGenerator[messages_.Message, None]:
     """
     Execute an agent function, yielding messages as they stream.
@@ -257,7 +302,6 @@ async def execute(
     mcp_pool: dict[str, mcp.client._Connection] = {}
     mcp_token = mcp.client._pool.set(mcp_pool)
 
-    # Inject runtime as keyword arg if the function has a Runtime-typed parameter
     kwargs: dict[str, Any] = {}
     if runtime_param := _find_runtime_param(root):
         kwargs[runtime_param] = runtime
@@ -269,33 +313,39 @@ async def execute(
             )
 
             while True:
+                # Drain any messages from streaming tools
+                for msg in runtime._drain_messages():
+                    yield msg
+
                 item = await runtime.get_step()
-                
+
                 if isinstance(item, Runtime._Sentinel):
+                    # Drain remaining messages before exiting
+                    for msg in runtime._drain_messages():
+                        yield msg
                     break
-                
+
                 step_fn, future = item
-                
-                # Execute the step and collect results
+
                 result_messages: list[messages_.Message] = []
                 last_message: messages_.Message | None = None
-                
+
                 async for msg in step_fn():
                     yield msg
                     result_messages.append(msg)
                     if msg.is_done:
                         last_message = msg
-                
-                # Build StepResult
-                tool_calls = (
-                    _extract_tool_calls(last_message) if last_message else []
-                )
-                step_result = step_.StepResult(
+
+                    # Also drain any messages from streaming tools during step
+                    for tool_msg in runtime._drain_messages():
+                        yield tool_msg
+
+                tool_calls = _extract_tool_calls(last_message) if last_message else []
+                step_result = StepResult(
                     messages=result_messages,
                     tool_calls=tool_calls,
                 )
-                
-                # Resolve future to unblock user code
+
                 future.set_result(step_result)
 
     finally:
