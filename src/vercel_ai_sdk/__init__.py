@@ -20,7 +20,7 @@ from .core.runtime import (
     stream_step,
     stream_loop,
     execute_tool,
-    execute,
+    run,
 )
 
 __all__ = [
@@ -42,7 +42,7 @@ __all__ = [
     "stream_step",
     "stream_loop",
     "execute_tool",
-    "execute",
+    "run",
     "make_messages",
     # Submodules
     "anthropic",

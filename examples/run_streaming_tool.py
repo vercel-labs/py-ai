@@ -35,7 +35,7 @@ async def talk_to_mothership(question: str, runtime: ai.Runtime) -> str:
             is_done=False,
             label="tool_progress",
         )
-        await runtime.put(progress_msg)
+        await runtime.put_message(progress_msg)
         await asyncio.sleep(0.5)
 
     return "\n".join(accumulated)
@@ -59,7 +59,7 @@ async def main():
         api_key=os.environ.get("AI_GATEWAY_API_KEY"),
     )
 
-    async for msg in ai.execute(agent, llm, "When will the robots take over?"):
+    async for msg in ai.run(agent, llm, "When will the robots take over?"):
         # Show streaming text from LLM
         if msg.text_delta:
             print(f"[blue]{msg.text_delta}[/blue]", end="", flush=True)

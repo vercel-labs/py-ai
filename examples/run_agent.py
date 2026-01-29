@@ -33,7 +33,7 @@ async def main():
         api_key=os.environ.get("AI_GATEWAY_API_KEY"),
     )
 
-    async for msg in ai.execute(agent, llm, "When will the robots take over?"):
+    async for msg in ai.run(agent, llm, "When will the robots take over?"):
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)
     print()

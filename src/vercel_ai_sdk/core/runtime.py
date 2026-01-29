@@ -76,10 +76,8 @@ StepFn = Callable[[], AsyncGenerator[messages_.Message, None]]
 
 class Runtime:
     """
-    Step-based execution runtime.
-    
     Functions decorated with @stream submit step functions to the queue.
-    execute() pulls steps, runs them, yields messages, and resolves futures.
+    run() pulls steps, runs them, yields messages, and resolves futures.
     """
 
     class _Sentinel:
@@ -91,20 +89,20 @@ class Runtime:
         self._step_queue: asyncio.Queue[
             tuple[StepFn, asyncio.Future[StepResult]] | Runtime._Sentinel
         ] = asyncio.Queue()
-        
-        # Message queue for streaming tools (runtime.put)
+
+        # Message queue for streaming tools (runtime.put_message)
         self._message_queue: asyncio.Queue[messages_.Message] = asyncio.Queue()
 
-    async def submit_step(
+    async def put_step(
         self, step_fn: StepFn, future: asyncio.Future[StepResult]
     ) -> None:
-        """Submit a step function to be executed by execute()."""
+        """Submit a step function to be executed by run()."""
         await self._step_queue.put((step_fn, future))
 
     async def get_step(
         self,
     ) -> tuple[StepFn, asyncio.Future[StepResult]] | _Sentinel:
-        """Get next step from queue (called by execute())."""
+        """Get next step from queue (called by run())."""
         return await self._step_queue.get()
 
     async def signal_done(self) -> None:
@@ -112,7 +110,7 @@ class Runtime:
         await self._step_queue.put(self._SENTINEL)
 
     # For streaming tools that want to emit messages directly
-    async def put(self, message: messages_.Message) -> None:
+    async def put_message(self, message: messages_.Message) -> None:
         await self._message_queue.put(message)
 
     def _drain_messages(self) -> list[messages_.Message]:
@@ -162,13 +160,13 @@ def _extract_tool_calls(message: messages_.Message) -> list[ToolCall]:
 
 
 def stream(
-    fn: Callable[..., AsyncGenerator[messages_.Message, None]]
+    fn: Callable[..., AsyncGenerator[messages_.Message, None]],
 ) -> Callable[..., Any]:
     """
     Decorator: wraps an async generator to submit as a step to Runtime.
-    
+
     The decorated function submits its work to the Runtime queue and
-    blocks until execute() processes it, then returns the StepResult.
+    blocks until run() processes it, then returns the StepResult.
     """
 
     @functools.wraps(fn)
@@ -183,7 +181,7 @@ def stream(
             async for msg in fn(*args, **kwargs):
                 yield msg
 
-        await rt.submit_step(step_fn, future)
+        await rt.put_step(step_fn, future)
         return await future
 
     return wrapped
@@ -201,7 +199,7 @@ async def stream_step(
 ) -> AsyncGenerator[messages_.Message, None]:
     """
     Single LLM call that streams to Runtime.
-    
+
     Returns StepResult with .tool_calls, .text, .last_message when awaited.
     Can be wrapped with @workflow.step for durability.
     """
@@ -217,7 +215,7 @@ async def execute_tool(
 ) -> Any:
     """
     Execute a single tool call and optionally update the message.
-    
+
     If message is provided, updates the tool part with the result.
     Can be wrapped with @workflow.step for durability.
     Use with asyncio.gather() for parallel execution.
@@ -254,7 +252,7 @@ async def stream_loop(
 ) -> StepResult:
     """
     Full agent loop: stream LLM, execute tools, repeat until done.
-    
+
     Convenience wrapper that uses stream_step and execute_tool internally.
     Returns the final StepResult.
     """
@@ -268,10 +266,9 @@ async def stream_loop(
 
         local_messages.append(result.last_message)
 
-        await asyncio.gather(*(
-            execute_tool(tc, tools, result.last_message)
-            for tc in result.tool_calls
-        ))
+        await asyncio.gather(
+            *(execute_tool(tc, tools, result.last_message) for tc in result.tool_calls)
+        )
 
 
 # --- Executor ---
@@ -284,14 +281,13 @@ async def _stop_when_done(runtime: Runtime, task: Awaitable[None]) -> None:
         await runtime.signal_done()
 
 
-async def execute(
+async def run(
     root: Callable[..., Coroutine[Any, Any, Any]], *args: Any
 ) -> AsyncGenerator[messages_.Message, None]:
     """
-    Execute an agent function, yielding messages as they stream.
-    
-    This is the central executor that:
-    1. Starts the user's agent function as a background task
+    Main entry point.
+
+    1. Starts the root function as a background task
     2. Pulls steps from the Runtime queue
     3. Executes each step, yielding messages
     4. Resolves futures to unblock user code

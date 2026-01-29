@@ -131,7 +131,7 @@ async def main():
     print("[bold]Custom Loop Agent Demo[/bold]")
     print("This demonstrates the durable-compatible agent loop pattern.\n")
 
-    async for msg in ai.execute(
+    async for msg in ai.run(
         agent, llm, "What's the weather and population of New York and Los Angeles?"
     ):
         # Show streaming text

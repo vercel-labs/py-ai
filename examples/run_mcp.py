@@ -38,7 +38,7 @@ async def main():
         api_key=os.environ.get("AI_GATEWAY_API_KEY"),
     )
 
-    async for msg in ai.execute(
+    async for msg in ai.run(
         context7_agent, llm, "How do I create middleware in Next.js?"
     ):
         rich.print(msg)

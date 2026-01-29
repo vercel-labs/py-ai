@@ -123,7 +123,7 @@ async def main():
     display = MultiAgentDisplay()
 
     with Live(display.render(), refresh_per_second=15) as live:
-        async for msg in ai.execute(multiagent, llm, "Process the number 5"):
+        async for msg in ai.run(multiagent, llm, "Process the number 5"):
             display.update(msg)
             live.update(display.render())
 
