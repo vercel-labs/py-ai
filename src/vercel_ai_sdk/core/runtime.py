@@ -19,11 +19,14 @@ import functools
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any, get_type_hints
+from typing import TYPE_CHECKING, Any, get_type_hints
 
 from .. import mcp
 from . import messages as messages_
 from . import tools as tools_
+
+if TYPE_CHECKING:
+    from .hooks import Hook
 
 
 # --- Abstract base ---
@@ -90,8 +93,11 @@ class Runtime:
             tuple[StepFn, asyncio.Future[StepResult]] | Runtime._Sentinel
         ] = asyncio.Queue()
 
-        # Message queue for streaming tools (runtime.put_message)
+        # Message queue for streaming tools and hooks (runtime.put_message)
         self._message_queue: asyncio.Queue[messages_.Message] = asyncio.Queue()
+
+        # Hook support: pending hooks registry
+        self._pending_hooks: dict[str, tuple[asyncio.Future[Any], Hook[Any]]] = {}
 
     async def put_step(
         self, step_fn: StepFn, future: asyncio.Future[StepResult]
@@ -122,6 +128,26 @@ class Runtime:
             except asyncio.QueueEmpty:
                 break
         return msgs
+
+    # --- Hook support ---
+
+    def get_pending_hooks(self) -> dict[str, Hook[Any]]:
+        """Get all pending hooks (for inspection/UI)."""
+        return {k: v[1] for k, v in self._pending_hooks.items()}
+
+    def resolve_hook(self, hook_id: str, data: dict[str, Any]) -> None:
+        """
+        Resolve a hook by ID (type-agnostic resolution).
+
+        This is an alternative to HookClass.resolve() when you don't have
+        the hook class available.
+        """
+        if hook_id not in self._pending_hooks:
+            raise ValueError(f"No pending hook with id: {hook_id}")
+
+        future, instance = self._pending_hooks[hook_id]
+        resolved = instance._schema(**data)
+        future.set_result(resolved)
 
 
 _runtime: contextvars.ContextVar[Runtime] = contextvars.ContextVar("runtime")
@@ -291,6 +317,10 @@ async def run(
     2. Pulls steps from the Runtime queue
     3. Executes each step, yielding messages
     4. Resolves futures to unblock user code
+
+    Yields:
+        Message objects from LLM streaming, tool execution, and hooks.
+        Hook messages contain a HookPart with status pending/resolved/cancelled.
     """
     runtime = Runtime()
     token_runtime = _runtime.set(runtime)
@@ -309,19 +339,25 @@ async def run(
             )
 
             while True:
-                # Drain any messages from streaming tools
+                # Drain any pending messages (including hook messages)
                 for msg in runtime.consume_messages():
                     yield msg
 
-                item = await runtime.get_step()
+                # Use wait_for with a short timeout to allow checking queues periodically
+                # This is needed because hook messages can arrive while we're waiting
+                try:
+                    step_item = await asyncio.wait_for(runtime.get_step(), timeout=0.1)
+                except asyncio.TimeoutError:
+                    # No step ready, loop back to drain queues
+                    continue
 
-                if isinstance(item, Runtime._Sentinel):
+                if isinstance(step_item, Runtime._Sentinel):
                     # Drain remaining messages before exiting
                     for msg in runtime.consume_messages():
                         yield msg
                     break
 
-                step_fn, future = item
+                step_fn, future = step_item
 
                 result_messages: list[messages_.Message] = []
                 last_message: messages_.Message | None = None
@@ -332,7 +368,7 @@ async def run(
                     if msg.is_done:
                         last_message = msg
 
-                    # Also drain any messages from streaming tools during step
+                    # Also drain any messages during step
                     for tool_msg in runtime.consume_messages():
                         yield tool_msg
 

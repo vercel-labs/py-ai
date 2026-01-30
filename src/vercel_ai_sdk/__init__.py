@@ -8,6 +8,7 @@ from .core.messages import (
     ToolPart,
     ToolDelta,
     ReasoningPart,
+    HookPart,
     make_messages,
 )
 from .core.tools import Tool, tool
@@ -22,6 +23,7 @@ from .core.runtime import (
     execute_tool,
     run,
 )
+from .core.hooks import Hook, hook
 
 __all__ = [
     # Types
@@ -36,6 +38,8 @@ __all__ = [
     "Runtime",
     "StepResult",
     "ToolCall",
+    "Hook",
+    "HookPart",
     # Functions
     "tool",
     "stream",
@@ -44,6 +48,7 @@ __all__ = [
     "execute_tool",
     "run",
     "make_messages",
+    "hook",
     # Submodules
     "anthropic",
     "mcp",
