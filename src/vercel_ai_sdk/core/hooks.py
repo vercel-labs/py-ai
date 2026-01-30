@@ -27,6 +27,7 @@ Example:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import uuid
 from typing import Any, ClassVar, Generic, TypeVar
 
@@ -35,6 +36,62 @@ import pydantic
 from . import messages as messages_
 
 T = TypeVar("T", bound=pydantic.BaseModel)
+
+# Context var for pre-loaded hook resolutions (used in serverless patterns)
+_hook_resolutions: contextvars.ContextVar[dict[str, dict[str, Any]]] = (
+    contextvars.ContextVar("hook_resolutions", default={})
+)
+
+
+def get_hook_resolutions() -> dict[str, dict[str, Any]]:
+    """Get the current hook resolutions from context."""
+    return _hook_resolutions.get()
+
+
+def set_hook_resolutions(
+    resolutions: dict[str, dict[str, Any]],
+) -> contextvars.Token[dict[str, dict[str, Any]]]:
+    """Set hook resolutions in context. Returns token for reset."""
+    return _hook_resolutions.set(resolutions)
+
+
+def reset_hook_resolutions(
+    token: contextvars.Token[dict[str, dict[str, Any]]],
+) -> None:
+    """Reset hook resolutions context."""
+    _hook_resolutions.reset(token)
+
+
+class HookPending(Exception):
+    """
+    Raised when a hook needs resolution in serverless context.
+
+    Use with Hook.get_or_raise() for suspend/resume patterns.
+
+    Attributes:
+        hook_id: Unique identifier for this hook instance.
+        hook_type: The hook class name (e.g., "CommunicationApproval").
+        metadata: Context data about the hook (e.g., tool_call_id, args).
+    """
+
+    def __init__(
+        self,
+        hook_id: str,
+        hook_type: str,
+        metadata: dict[str, Any] | None = None,
+    ):
+        self.hook_id = hook_id
+        self.hook_type = hook_type
+        self.metadata = metadata or {}
+        super().__init__(f"Hook pending: {hook_type}:{hook_id}")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize for API response."""
+        return {
+            "hook_id": self.hook_id,
+            "hook_type": self.hook_type,
+            "metadata": self.metadata,
+        }
 
 
 def _make_hook_message(
@@ -239,6 +296,47 @@ class Hook(Generic[T]):
             raise ValueError(f"No pending hook with id: {hook_id}")
 
         return rt._pending_hooks[hook_id][1]
+
+    @classmethod
+    def get_or_raise(cls, hook_id: str, metadata: dict[str, Any] | None = None) -> T:
+        """
+        Get a resolved hook value or raise HookPending.
+
+        For serverless suspend/resume patterns. Looks up hook_id in the
+        context's resolutions (set via ai.run(..., hook_resolutions={...})).
+
+        If found, returns the resolved model instance.
+        If not found, raises HookPending for the caller to handle.
+
+        Args:
+            hook_id: Unique identifier for this hook instance.
+            metadata: Context data to include in HookPending if raised.
+
+        Returns:
+            The resolved pydantic model instance.
+
+        Raises:
+            HookPending: If hook_id is not in resolutions.
+
+        Example:
+            # In serverless graph:
+            approval = CommunicationApproval.get_or_raise(
+                f"approval_{tc.tool_call_id}",
+                metadata={"tool_name": tc.tool_name, "args": tc.tool_args}
+            )
+            if approval.granted:
+                await ai.execute_tool(tc, tools, msg)
+        """
+        resolutions = _hook_resolutions.get()
+
+        if hook_id in resolutions:
+            return cls._schema(**resolutions[hook_id])  # type: ignore[return-value]
+
+        raise HookPending(
+            hook_id=hook_id,
+            hook_type=cls._hook_type,
+            metadata=metadata or {},
+        )
 
 
 def hook(cls: type[T]) -> type[Hook[T]]:

@@ -23,7 +23,7 @@ from .core.runtime import (
     execute_tool,
     run,
 )
-from .core.hooks import Hook, hook
+from .core.hooks import Hook, HookPending, hook
 
 __all__ = [
     # Types
@@ -40,6 +40,7 @@ __all__ = [
     "ToolCall",
     "Hook",
     "HookPart",
+    "HookPending",
     # Functions
     "tool",
     "stream",

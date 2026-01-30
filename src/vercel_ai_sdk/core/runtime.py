@@ -308,7 +308,9 @@ async def _stop_when_done(runtime: Runtime, task: Awaitable[None]) -> None:
 
 
 async def run(
-    root: Callable[..., Coroutine[Any, Any, Any]], *args: Any
+    root: Callable[..., Coroutine[Any, Any, Any]],
+    *args: Any,
+    hook_resolutions: dict[str, dict[str, Any]] | None = None,
 ) -> AsyncGenerator[messages_.Message, None]:
     """
     Main entry point.
@@ -318,15 +320,32 @@ async def run(
     3. Executes each step, yielding messages
     4. Resolves futures to unblock user code
 
+    Args:
+        root: The async function to run as the agent graph.
+        *args: Arguments to pass to root.
+        hook_resolutions: Pre-resolved hook values for serverless patterns.
+            Keys are hook_ids, values are dicts matching the hook's schema.
+            Used by Hook.get_or_raise() to return resolved values immediately.
+
     Yields:
         Message objects from LLM streaming, tool execution, and hooks.
         Hook messages contain a HookPart with status pending/resolved/cancelled.
+
+    Raises:
+        HookPending: If Hook.get_or_raise() is called and hook_id not in resolutions.
     """
+    from . import hooks as hooks_
+
     runtime = Runtime()
     token_runtime = _runtime.set(runtime)
 
     mcp_pool: dict[str, mcp.client._Connection] = {}
     mcp_token = mcp.client._pool.set(mcp_pool)
+
+    # Set hook resolutions in context
+    resolutions_token = None
+    if hook_resolutions is not None:
+        resolutions_token = hooks_.set_hook_resolutions(hook_resolutions)
 
     kwargs: dict[str, Any] = {}
     if runtime_param := _find_runtime_param(root):
@@ -380,9 +399,28 @@ async def run(
 
                 future.set_result(step_result)
 
+    except ExceptionGroup as eg:
+        # Extract HookPending from ExceptionGroup and re-raise it directly
+        # (TaskGroup wraps exceptions from tasks in ExceptionGroup)
+        hook_pending = None
+        other_exceptions = []
+        for exc in eg.exceptions:
+            if isinstance(exc, hooks_.HookPending):
+                hook_pending = exc
+            else:
+                other_exceptions.append(exc)
+
+        if hook_pending is not None and not other_exceptions:
+            raise hook_pending from None
+        else:
+            raise
+
     finally:
         if mcp_token is not None:
             await mcp.client.close_connections()
             mcp.client._pool.reset(mcp_token)
+
+        if resolutions_token is not None:
+            hooks_.reset_hook_resolutions(resolutions_token)
 
         _runtime.reset(token_runtime)
