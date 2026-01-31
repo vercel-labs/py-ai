@@ -51,12 +51,13 @@ async def multiagent(llm: ai.LanguageModel, user_query: str):
 
     combined = f"{result1.text}\n{result2.text}"
 
-    return await ai.stream_step(
+    return await ai.stream_loop(
         llm,
         messages=ai.make_messages(
             system="You are assistant 3. Summarize the results.",
             user=f"Results from the other assistants: {combined}",
         ),
+        tools=[],
         label="a3",
     )
 

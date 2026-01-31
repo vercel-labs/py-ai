@@ -1,10 +1,3 @@
-"""
-Example: Human-in-the-loop approval flow using hooks.
-
-This demonstrates how to use hooks to suspend execution and wait for
-external approval before executing sensitive tools.
-"""
-
 import asyncio
 import os
 
@@ -17,24 +10,16 @@ import vercel_ai_sdk as ai
 @ai.tool
 async def contact_mothership(query: str) -> str:
     """Contact the mothership for important decisions."""
-    return f"Mothership response to '{query}': The robots will take over soon."
+    return "Soon."
 
 
 @ai.hook
 class CommunicationApproval(pydantic.BaseModel):
-    """Approval required before contacting the mothership."""
-
     granted: bool
     reason: str
 
 
 async def graph(llm: ai.LanguageModel, query: str):
-    """
-    Agent graph with human-in-the-loop approval.
-
-    When a tool call requires approval, execution suspends until
-    the hook is resolved from outside.
-    """
     messages = ai.make_messages(
         system="You are a robot assistant. Use the contact_mothership tool when asked about the future.",
         user=query,
@@ -48,7 +33,6 @@ async def graph(llm: ai.LanguageModel, query: str):
         if not result.tool_calls:
             break
 
-        # Process each tool call, potentially requiring approval
         for tc in result.tool_calls:
             if tc.tool_name == "contact_mothership":
                 # Create hook - this emits a Message with HookPart(status="pending") and blocks
@@ -61,16 +45,13 @@ async def graph(llm: ai.LanguageModel, query: str):
                 )
 
                 if approval.granted:
-                    # Execute the tool
                     await ai.execute_tool(tc, tools, result.last_message)
                 else:
-                    # Set rejection as tool result
-                    tool_part = result.last_message.get_tool_part(tc.tool_call_id)
-                    if tool_part:
+                    if tool_part := result.last_message.get_tool_part(tc.tool_call_id):
                         tool_part.status = "result"
                         tool_part.result = {"error": f"Rejected: {approval.reason}"}
             else:
-                # Non-sensitive tools execute directly
+                # non-sensitive tools execute directly
                 await ai.execute_tool(tc, tools, result.last_message)
 
         messages.append(result.last_message)
@@ -79,7 +60,6 @@ async def graph(llm: ai.LanguageModel, query: str):
 
 
 def get_hook_part(msg: ai.Message) -> ai.HookPart | None:
-    """Extract HookPart from a message if present."""
     for part in msg.parts:
         if isinstance(part, ai.HookPart):
             return part
@@ -117,10 +97,7 @@ async def main():
                 )
         else:
             # Regular message
-            if msg.is_done:
-                # rich.print(f"[bold blue]Message:[/] {msg.text[:100]}...")
-                pass
-            elif msg.text_delta:
+            if msg.text_delta:
                 print(msg.text_delta, end="", flush=True)
 
 
