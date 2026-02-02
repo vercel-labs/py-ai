@@ -36,13 +36,7 @@ async def graph(llm: ai.LanguageModel, query: str):
         for tc in result.tool_calls:
             if tc.tool_name == "contact_mothership":
                 # Create hook - this emits a Message with HookPart(status="pending") and blocks
-                approval = await CommunicationApproval.create(
-                    metadata={
-                        "tool_call_id": tc.tool_call_id,
-                        "tool_name": tc.tool_name,
-                        "tool_args": tc.tool_args,
-                    }
-                )
+                approval = await CommunicationApproval.create()
 
                 if approval.granted:
                     await ai.execute_tool(tc, tools, result.last_message)

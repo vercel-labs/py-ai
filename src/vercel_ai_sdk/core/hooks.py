@@ -298,7 +298,7 @@ class Hook(Generic[T]):
         return rt._pending_hooks[hook_id][1]
 
     @classmethod
-    def get_or_raise(cls, hook_id: str, metadata: dict[str, Any] | None = None) -> T:
+    def create_or_raise(cls, hook_id: str, metadata: dict[str, Any] | None = None) -> T:
         """
         Get a resolved hook value or raise HookPending.
 

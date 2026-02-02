@@ -1,31 +1,12 @@
-"""
-Example: Fake serverless execution with suspend/resume.
-
-This demonstrates how hooks work in a serverless environment:
-1. Each request runs the graph until it hits a hook needing approval
-2. HookPending is raised, caught by endpoint, returned to client
-3. Client sends approval, next request resumes with hook_resolutions
-
-Key API:
-- ai.run(..., hook_resolutions={...}) - pass pre-resolved hooks
-- Hook.get_or_raise(hook_id, metadata) - returns value or raises HookPending
-"""
-
 import asyncio
 import os
-from dataclasses import dataclass, field
+import dataclasses
 from typing import Any
 
-import dotenv
 import pydantic
 import rich
 
 import vercel_ai_sdk as ai
-
-dotenv.load_dotenv()
-
-
-# --- Tools and Hooks ---
 
 
 @ai.tool
@@ -42,24 +23,17 @@ class CommunicationApproval(pydantic.BaseModel):
     reason: str
 
 
-# --- State (persisted between requests) ---
-
-
-@dataclass
+@dataclasses.dataclass
 class State:
     session_id: str
-    messages: list[ai.Message] = field(default_factory=list)
-    pending_tools: list[ai.ToolCall] = field(default_factory=list)
-    hook_resolutions: dict[str, dict[str, Any]] = field(default_factory=dict)
+    messages: list[ai.Message] = dataclasses.field(default_factory=list)
+    pending_tools: list[ai.ToolCall] = dataclasses.field(default_factory=list)
+    hook_resolutions: dict[str, dict[str, Any]] = dataclasses.field(
+        default_factory=dict
+    )
 
 
 _db: dict[str, State] = {}
-
-
-# --- The Agent Graph ---
-
-
-TOOLS_NEEDING_APPROVAL = {"contact_mothership"}
 
 
 async def graph(
@@ -67,23 +41,16 @@ async def graph(
     state: State,
     tools: list[ai.Tool],
 ):
-    """
-    Agent graph that may suspend on hooks.
-
-    On resume, pending_tools are processed first (with resolutions in context),
-    then continues to LLM if needed.
-    """
     while True:
-        # Phase 1: Execute pending tool calls
+        # handle tool calls first
         if state.pending_tools:
             last_msg = state.messages[-1]
 
             for tc in state.pending_tools:
-                if tc.tool_name in TOOLS_NEEDING_APPROVAL:
-                    # This raises HookPending if not in resolutions
-                    approval = CommunicationApproval.get_or_raise(
-                        f"approval_{tc.tool_call_id}",
-                        metadata={"tool_name": tc.tool_name, "args": tc.tool_args},
+                if tc.tool_name == "contact_mothership":
+                    # this raises HookPending if not in resolutions
+                    approval = CommunicationApproval.create_or_raise(
+                        f"approval_{tc.tool_call_id}"
                     )
 
                     if approval.granted:
@@ -98,27 +65,21 @@ async def graph(
 
             state.pending_tools = []
 
-        # Phase 2: Call LLM
+        # now call LLM since there's no risk of accidentally calling it twice
+        # due to hook raising
         result = await ai.stream_step(llm, state.messages, tools)
         if result.last_message:
             state.messages.append(result.last_message)
 
-        # Phase 3: Check result
+        # prepare tools for the next iteration
         if result.tool_calls:
             state.pending_tools = list(result.tool_calls)
-            continue  # Back to phase 1
-
-        # Done
-        return result.text
-
-
-# --- Endpoints ---
+        else:
+            # if no pending tool calls, we're done
+            return result.text
 
 
-async def start_agent(session_id: str, query: str) -> dict[str, Any]:
-    """Start a new agent session."""
-    rich.print(f"\n[bold cyan]>>> START_AGENT({session_id})[/]")
-
+async def first_pretend_endpoint(session_id: str, query: str) -> dict[str, Any]:
     state = State(
         session_id=session_id,
         messages=ai.make_messages(
@@ -132,22 +93,17 @@ async def start_agent(session_id: str, query: str) -> dict[str, Any]:
         base_url="https://ai-gateway.vercel.sh/v1",
         api_key=os.environ.get("AI_GATEWAY_API_KEY"),
     )
+
     tools = [contact_mothership]
 
     try:
-        result = None
-
-        async def run_graph():
-            nonlocal result
-            result = await graph(llm, state, tools)
-
-        async for msg in ai.run(run_graph, hook_resolutions={}):
+        async for msg in ai.run(graph, llm, state, tools):
             if msg.text_delta:
-                print(msg.text_delta, end="", flush=True)
-        print()
+                rich.print(msg.text_delta, end="", flush=True)
+        rich.print()
 
         _db[session_id] = state
-        return {"status": "complete", "response": result}
+        return {"status": "complete", "response": state.messages[-1].text}
 
     except ai.HookPending as e:
         # Save state with pending tools for resume
@@ -155,12 +111,9 @@ async def start_agent(session_id: str, query: str) -> dict[str, Any]:
         return {"status": "pending", "hook": e.to_dict()}
 
 
-async def resume_agent(
+async def pretend_endpoint(
     session_id: str, hook_id: str, resolution: dict
 ) -> dict[str, Any]:
-    """Resume agent with hook resolution."""
-    rich.print(f"\n[bold cyan]>>> RESUME_AGENT({session_id}, {hook_id})[/]")
-
     state = _db.get(session_id)
     if not state:
         return {"status": "error", "message": "Session not found"}
@@ -185,8 +138,8 @@ async def resume_agent(
         # Pass all accumulated resolutions
         async for msg in ai.run(run_graph, hook_resolutions=state.hook_resolutions):
             if msg.text_delta:
-                print(msg.text_delta, end="", flush=True)
-        print()
+                rich.print(msg.text_delta, end="", flush=True)
+        rich.print()
 
         _db[session_id] = state
         return {"status": "complete", "response": result}
@@ -200,22 +153,12 @@ async def resume_agent(
 
 
 async def main():
-    result = await start_agent("sess-1", "When will the robots take over?")
-    rich.print(f"[yellow]Client got:[/] {result}")
+    # call and get hooks
+    result = await pretend_endpoint("sess-1", "When will the robots take over?")
 
-    while result.get("status") == "pending":
-        hook = result["hook"]
-        rich.print(f"\n[yellow]Client: Approving {hook['hook_type']}...[/]")
-        await asyncio.sleep(0.5)
+    # resolve hooks and continue execution
+    await pretend_endpoint("sess-1", "When will the robots take over?")
 
-        result = await resume_agent(
-            "sess-1",
-            hook["hook_id"],
-            {"granted": True, "reason": "User approved"},
-        )
-        rich.print(f"[yellow]Client got:[/] {result}")
-
-    rich.print("\n[bold green]Done![/]")
 
 
 if __name__ == "__main__":
