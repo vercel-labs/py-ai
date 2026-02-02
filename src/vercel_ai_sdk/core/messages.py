@@ -130,6 +130,11 @@ class Message(pydantic.BaseModel):
                 return part.text
         return ""
 
+    @property
+    def tool_calls(self) -> list[ToolPart]:
+        # TODO properly validate args?
+        return [part for part in self.parts if isinstance(part, ToolPart)]
+
     def get_tool_part(self, tool_call_id: str) -> ToolPart | None:
         for part in self.parts:
             if isinstance(part, ToolPart) and part.tool_call_id == tool_call_id:

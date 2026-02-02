@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+import abc
 import dataclasses
-from typing import TYPE_CHECKING
+from collections.abc import AsyncGenerator
 
 from . import messages as messages_
-
-if TYPE_CHECKING:
-    from .messages import Part
+from . import tools as tools_
 
 
 @dataclasses.dataclass
@@ -166,7 +165,7 @@ class StreamHandler:
         reasoning_delta: str | None,
         tool_deltas: dict[str, str],
     ) -> messages_.Message:
-        parts: list[Part] = []
+        parts: list[messages_.Part] = []
 
         # Reasoning parts first (like thinking blocks)
         for bid, (text, sig) in self._reasoning_blocks.items():
@@ -209,3 +208,12 @@ class StreamHandler:
             role="assistant",
             parts=parts,
         )
+
+
+class LanguageModel(abc.ABC):
+    @abc.abstractmethod
+    async def stream(
+        self, messages: list[messages_.Message], tools: list[tools_.Tool] | None = None
+    ) -> AsyncGenerator[messages_.Message, None]:
+        raise NotImplementedError
+        yield

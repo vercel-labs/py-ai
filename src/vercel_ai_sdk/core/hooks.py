@@ -12,7 +12,7 @@ from . import messages as messages_
 T = TypeVar("T", bound=pydantic.BaseModel)
 
 # Context var for pre-loaded hook resolutions (used in serverless patterns)
-_hook_resolutions: contextvars.ContextVar[dict[str, dict[str, Any]]] = (
+_resolutions: contextvars.ContextVar[dict[str, dict[str, Any]]] = (
     contextvars.ContextVar("hook_resolutions", default={})
 )
 
@@ -36,30 +36,6 @@ class HookPending(Exception):
         super().__init__(f"Hook pending: {hook_type}:{hook_id}")
 
 
-def _make_hook_message(
-    hook_id: str,
-    hook_type: str,
-    status: str,  # TODO type this with an enum or something
-    metadata: dict[str, Any],
-    resolution: dict[str, Any] | None = None,  # TODO should have the payload type
-) -> messages_.Message:
-    """Create a Message containing a HookPart."""
-    return messages_.Message(
-        role="assistant",
-        parts=[
-            messages_.HookPart(
-                hook_id=hook_id,
-                hook_type=hook_type,
-                status=status,
-                metadata=metadata,
-                resolution=resolution,
-            )
-        ],
-        # Note: is_done is computed from parts' state. HookPart doesn't have state,
-        # so the message is considered done.
-    )
-
-
 class Hook(Generic[T]):
     """
     Mixin for hooks that adds hook-related classmethods
@@ -73,6 +49,22 @@ class Hook(Generic[T]):
         self.id = id
         self.metadata = metadata or {}
         self._future: asyncio.Future[T] | None = None
+
+    def to_message(
+        self, status: str, resolution: dict[str, Any] | None = None
+    ) -> messages_.Message:
+        return messages_.Message(
+            role="assistant",
+            parts=[
+                messages_.HookPart(
+                    hook_id=self.id,
+                    hook_type=self._hook_type,
+                    status=status,
+                    metadata=self.metadata,
+                    resolution=resolution,
+                )
+            ],
+        )
 
     @classmethod
     async def create(cls, metadata: dict[str, Any] | None = None) -> T:
@@ -105,11 +97,8 @@ class Hook(Generic[T]):
 
         # Emit pending message through the stream
         await rt.put_message(
-            _make_hook_message(
-                hook_id=hook_id,
-                hook_type=cls._hook_type,
+            instance.to_message(
                 status="pending",
-                metadata=metadata or {},
             )
         )
 
@@ -118,11 +107,8 @@ class Hook(Generic[T]):
 
         # Emit resolved message
         await rt.put_message(
-            _make_hook_message(
-                hook_id=hook_id,
-                hook_type=cls._hook_type,
+            instance.to_message(
                 status="resolved",
-                metadata=metadata or {},
                 resolution=result.model_dump() if hasattr(result, "model_dump") else {},
             )
         )
@@ -131,6 +117,27 @@ class Hook(Generic[T]):
         rt._pending_hooks.pop(hook_id, None)
 
         return result
+
+    @classmethod
+    def create_or_raise(cls, hook_id: str, metadata: dict[str, Any] | None = None) -> T:
+        """
+        Get a resolved hook value or raise HookPending.
+        """
+
+        # this is for serverless applications where the resolution
+        # is being provided in a different process, so instead of blocking
+        # it needs to raise to exit the function
+
+        resolutions = _resolutions.get()
+
+        if hook_id in resolutions:
+            return cls._schema(**resolutions[hook_id])  # type: ignore[return-value]
+
+        raise HookPending(
+            hook_id=hook_id,
+            hook_type=cls._hook_type,
+            metadata=metadata or {},
+        )
 
     # TODO prohibit dict for a payload
     @classmethod
@@ -179,55 +186,9 @@ class Hook(Generic[T]):
         future.cancel(reason)
 
         # Emit cancelled message
-        asyncio.create_task(
-            rt.put_message(
-                _make_hook_message(
-                    hook_id=hook_id,
-                    hook_type=cls._hook_type,
-                    status="cancelled",
-                    metadata=instance.metadata,
-                )
-            )
-        )
+        asyncio.create_task(rt.put_message(instance.to_message(status="cancelled")))
 
         rt._pending_hooks.pop(hook_id, None)
-
-    @classmethod
-    def get_pending(cls, hook_id: str) -> Hook[T]:
-        """
-        Get a pending hook instance by ID.
-        """
-        from . import runtime as runtime_
-
-        rt = runtime_._runtime.get(None)
-        if rt is None:
-            raise ValueError("No Runtime context")
-
-        if hook_id not in rt._pending_hooks:
-            raise ValueError(f"No pending hook with id: {hook_id}")
-
-        return rt._pending_hooks[hook_id][1]
-
-    @classmethod
-    def create_or_raise(cls, hook_id: str, metadata: dict[str, Any] | None = None) -> T:
-        """
-        Get a resolved hook value or raise HookPending.
-        """
-
-        # this is for serverless applications where the resolution
-        # is being provided in a different process, so instead of blocking
-        # it needs to raise to exit the function
-
-        resolutions = _hook_resolutions.get()
-
-        if hook_id in resolutions:
-            return cls._schema(**resolutions[hook_id])  # type: ignore[return-value]
-
-        raise HookPending(
-            hook_id=hook_id,
-            hook_type=cls._hook_type,
-            metadata=metadata or {},
-        )
 
 
 def hook(cls: type[T]) -> type[Hook[T]]:
