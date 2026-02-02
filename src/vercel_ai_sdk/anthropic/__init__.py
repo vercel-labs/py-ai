@@ -28,7 +28,7 @@ def _messages_to_anthropic(
     """Convert internal messages to Anthropic API format.
 
     Returns (system_prompt, messages) tuple since Anthropic handles system differently.
-    
+
     Handles the unified ToolPart model where tool calls and results are in the same
     assistant message. Converts back to Anthropic's expected format:
     - tool_use blocks in assistant messages
@@ -45,7 +45,7 @@ def _messages_to_anthropic(
         elif msg.role == "assistant":
             content: list[dict[str, Any]] = []
             tool_results: list[dict[str, Any]] = []
-            
+
             for part in msg.parts:
                 if isinstance(part, core.messages.ReasoningPart):
                     # Only include thinking blocks if we have the signature
@@ -54,7 +54,7 @@ def _messages_to_anthropic(
                         content.append(
                             {
                                 "type": "thinking",
-                                "thinking": part.reasoning,
+                                "thinking": part.text,
                                 "signature": part.signature,
                             }
                         )
@@ -80,10 +80,10 @@ def _messages_to_anthropic(
                                 "content": str(part.result),
                             }
                         )
-            
+
             if content:
                 result.append({"role": "assistant", "content": content})
-            
+
             # Emit tool results as a separate user message (Anthropic API format)
             if tool_results:
                 result.append({"role": "user", "content": tool_results})
@@ -114,12 +114,12 @@ class AnthropicModel(core.runtime.LanguageModel):
         resolved_key = api_key or os.environ.get("ANTHROPIC_API_KEY") or ""
         self._client = anthropic.AsyncAnthropic(base_url=base_url, api_key=resolved_key)
 
-    @override
-    async def stream(
+    async def stream_events(
         self,
         messages: list[core.messages.Message],
         tools: list[core.tools.Tool] | None = None,
-    ) -> AsyncGenerator[core.messages.Message, None]:
+    ) -> AsyncGenerator[core.llm.StreamEvent, None]:
+        """Yield raw stream events from Anthropic API."""
         system_prompt, anthropic_messages = _messages_to_anthropic(messages)
         anthropic_tools = _tools_to_anthropic(tools) if tools else None
 
@@ -139,106 +139,76 @@ class AnthropicModel(core.runtime.LanguageModel):
                 "budget_tokens": self._budget_tokens,
             }
 
-        text_content = ""
-        thinking_content = ""
-        thinking_signature = ""
-        tool_calls: dict[str, dict] = {}
-        message_id = core.messages._gen_id()
-        current_tool_id: str | None = None
+        # Track block types by index to know what End event to emit
+        block_types: dict[int, str] = {}  # index -> "text" | "thinking" | "tool_use"
+        tool_ids: dict[int, str] = {}  # index -> tool_call_id
+        signature_buffer: dict[int, str] = {}  # index -> accumulated signature
 
         async with self._client.messages.stream(**kwargs) as stream:
             async for event in stream:
-                text_delta = ""
-                thinking_delta = ""
-                tool_call_deltas: list[core.messages.ToolDelta] = []
-
                 if event.type == "content_block_start":
                     block = event.content_block
-                    if block.type == "tool_use":
-                        current_tool_id = block.id
-                        tool_calls[block.id] = {"name": block.name, "args": ""}
+                    idx = event.index
+                    block_types[idx] = block.type
+
+                    if block.type == "text":
+                        yield core.llm.TextStart(block_id=str(idx))
+                    elif block.type == "thinking":
+                        yield core.llm.ReasoningStart(block_id=str(idx))
+                    elif block.type == "tool_use":
+                        tool_ids[idx] = block.id
+                        yield core.llm.ToolStart(
+                            tool_call_id=block.id, tool_name=block.name
+                        )
 
                 elif event.type == "content_block_delta":
                     delta = event.delta
+                    idx = event.index
+
                     if delta.type == "text_delta":
-                        text_delta = delta.text
-                        text_content += delta.text
+                        yield core.llm.TextDelta(block_id=str(idx), delta=delta.text)
                     elif delta.type == "thinking_delta":
-                        thinking_delta = delta.thinking
-                        thinking_content += delta.thinking
+                        yield core.llm.ReasoningDelta(
+                            block_id=str(idx), delta=delta.thinking
+                        )
                     elif delta.type == "signature_delta":
-                        # Capture the signature for thinking blocks
-                        thinking_signature += delta.signature
+                        # Accumulate signature for ReasoningEnd
+                        signature_buffer[idx] = (
+                            signature_buffer.get(idx, "") + delta.signature
+                        )
                     elif delta.type == "input_json_delta":
-                        if current_tool_id and current_tool_id in tool_calls:
-                            tool_calls[current_tool_id]["args"] += delta.partial_json
-                            tool_call_deltas.append(
-                                core.messages.ToolDelta(
-                                    tool_call_id=current_tool_id,
-                                    tool_name=tool_calls[current_tool_id]["name"],
-                                    args_delta=delta.partial_json,
-                                )
+                        tool_id = tool_ids.get(idx)
+                        if tool_id:
+                            yield core.llm.ToolArgsDelta(
+                                tool_call_id=tool_id, delta=delta.partial_json
                             )
 
                 elif event.type == "content_block_stop":
-                    current_tool_id = None
+                    idx = event.index
+                    block_type = block_types.get(idx)
+
+                    if block_type == "text":
+                        yield core.llm.TextEnd(block_id=str(idx))
+                    elif block_type == "thinking":
+                        yield core.llm.ReasoningEnd(
+                            block_id=str(idx),
+                            signature=signature_buffer.get(idx),
+                        )
+                    elif block_type == "tool_use":
+                        tool_id = tool_ids.get(idx)
+                        if tool_id:
+                            yield core.llm.ToolEnd(tool_call_id=tool_id)
 
                 elif event.type == "message_stop":
-                    final_parts: list[core.messages.Part] = []
-                    if thinking_content:
-                        final_parts.append(
-                            core.messages.ReasoningPart(
-                                reasoning=thinking_content,
-                                signature=thinking_signature or None,
-                            )
-                        )
-                    if text_content:
-                        final_parts.append(core.messages.TextPart(text=text_content))
-                    for tc_id, tc in tool_calls.items():
-                        final_parts.append(
-                            core.messages.ToolPart(
-                                tool_call_id=tc_id,
-                                tool_name=tc["name"],
-                                tool_args=tc["args"],
-                            )
-                        )
+                    yield core.llm.MessageDone()
 
-                    yield core.messages.Message(
-                        role="assistant",
-                        parts=final_parts,
-                        id=message_id,
-                        is_done=True,
-                        text_delta="",
-                        reasoning_delta="",
-                        tool_deltas=[],
-                    )
-                    return
-
-                current_parts: list[core.messages.Part] = []
-                if thinking_content:
-                    current_parts.append(
-                        core.messages.ReasoningPart(
-                            reasoning=thinking_content,
-                            signature=thinking_signature or None,
-                        )
-                    )
-                if text_content:
-                    current_parts.append(core.messages.TextPart(text=text_content))
-                for tc_id, tc in tool_calls.items():
-                    current_parts.append(
-                        core.messages.ToolPart(
-                            tool_call_id=tc_id,
-                            tool_name=tc["name"],
-                            tool_args=tc["args"],
-                        )
-                    )
-
-                yield core.messages.Message(
-                    role="assistant",
-                    parts=current_parts,
-                    id=message_id,
-                    is_done=False,
-                    text_delta=text_delta,
-                    reasoning_delta=thinking_delta,
-                    tool_deltas=tool_call_deltas,
-                )
+    @override
+    async def stream(
+        self,
+        messages: list[core.messages.Message],
+        tools: list[core.tools.Tool] | None = None,
+    ) -> AsyncGenerator[core.messages.Message, None]:
+        """Stream Messages (uses StreamProcessor internally)."""
+        handler = core.llm.StreamHandler()
+        async for event in self.stream_events(messages, tools):
+            yield handler.handle_event(event)

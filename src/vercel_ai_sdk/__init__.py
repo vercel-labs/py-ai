@@ -4,6 +4,7 @@ from . import anthropic, mcp, openai, ai_sdk_ui
 from .core.messages import (
     Message,
     Part,
+    PartState,
     TextPart,
     ToolPart,
     ToolDelta,
@@ -29,6 +30,7 @@ __all__ = [
     # Types
     "Message",
     "Part",
+    "PartState",
     "TextPart",
     "ToolPart",
     "ToolDelta",

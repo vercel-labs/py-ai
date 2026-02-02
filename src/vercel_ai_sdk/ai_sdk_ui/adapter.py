@@ -588,9 +588,7 @@ def to_messages(ui_messages: list[UIMessage]) -> list[core.messages.Message]:
                 internal_parts.append(core.messages.TextPart(text=part.text))
 
             elif isinstance(part, UIReasoningPart):
-                internal_parts.append(
-                    core.messages.ReasoningPart(reasoning=part.reasoning)
-                )
+                internal_parts.append(core.messages.ReasoningPart(text=part.reasoning))
 
             elif isinstance(part, UIToolInvocationPart):
                 # Convert args dict to JSON string (internal format)
@@ -624,7 +622,6 @@ def to_messages(ui_messages: list[UIMessage]) -> list[core.messages.Message]:
                 id=ui_msg.id,
                 role=ui_msg.role,
                 parts=internal_parts,
-                is_done=True,
             )
         )
 

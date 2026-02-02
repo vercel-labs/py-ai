@@ -6,26 +6,39 @@ from typing import Annotated, Any, Literal
 import pydantic
 
 
+# Streaming state for parts
+PartState = Literal["streaming", "done"]
+
+
 class TextPart(pydantic.BaseModel):
     text: str
     type: Literal["text"] = "text"
+    # Streaming state
+    state: PartState | None = None  # None = finalized/restored from storage
+    delta: str | None = None  # Current delta, None when not actively streaming
 
 
 class ToolPart(pydantic.BaseModel):
     tool_call_id: str
     tool_name: str
     tool_args: str
-    status: Literal["pending", "result"] = "pending"
+    status: Literal["pending", "result"] = "pending"  # Execution status
     result: dict[str, Any] | None = None
     type: Literal["tool"] = "tool"
+    # Streaming state (for args streaming)
+    state: PartState | None = None
+    args_delta: str | None = None  # Delta for tool_args
 
 
 class ReasoningPart(pydantic.BaseModel):
-    reasoning: str
+    text: str
     type: Literal["reasoning"] = "reasoning"
     # Anthropic's thinking blocks include a signature for cache/verification.
     # This must be preserved and sent back in multi-turn conversations.
     signature: str | None = None
+    # Streaming state
+    state: PartState | None = None
+    delta: str | None = None
 
 
 class HookPart(pydantic.BaseModel):
@@ -33,9 +46,11 @@ class HookPart(pydantic.BaseModel):
 
     hook_id: str
     hook_type: str
-    status: Literal["pending", "resolved", "cancelled"]
+    status: Literal[
+        "pending", "resolved", "cancelled"
+    ]  # TODO should be shared with hook type
     metadata: dict[str, Any] = pydantic.Field(default_factory=dict)
-    resolution: dict[str, Any] | None = None
+    resolution: dict[str, Any] | None = None  # TODO should have payload type
     type: Literal["hook"] = "hook"
 
 
@@ -59,11 +74,47 @@ class Message(pydantic.BaseModel):
     role: Literal["user", "assistant", "system"]
     parts: list[Part]
     id: str = pydantic.Field(default_factory=_gen_id)
-    is_done: bool = False
-    text_delta: str = ""
-    reasoning_delta: str = ""
-    tool_deltas: list[ToolDelta] = pydantic.Field(default_factory=list)
     label: str | None = None
+
+    @property
+    def is_done(self) -> bool:
+        """Message is done when all parts are done (or have no streaming state)."""
+        for part in self.parts:
+            if isinstance(part, (TextPart, ReasoningPart, ToolPart)):
+                if part.state == "streaming":
+                    return False
+        return True
+
+    @property
+    def text_delta(self) -> str:
+        """Get current text delta from parts."""
+        for part in self.parts:
+            if isinstance(part, TextPart) and part.delta:
+                return part.delta
+        return ""
+
+    @property
+    def reasoning_delta(self) -> str:
+        """Get current reasoning delta from parts."""
+        for part in self.parts:
+            if isinstance(part, ReasoningPart) and part.delta:
+                return part.delta
+        return ""
+
+    @property
+    def tool_deltas(self) -> list[ToolDelta]:
+        """Get current tool deltas from parts."""
+        deltas = []
+        for part in self.parts:
+            if isinstance(part, ToolPart) and part.args_delta:
+                deltas.append(
+                    ToolDelta(
+                        tool_call_id=part.tool_call_id,
+                        tool_name=part.tool_name,
+                        args_delta=part.args_delta,
+                    )
+                )
+        return deltas
 
     @property
     def text(self) -> str:
@@ -76,7 +127,7 @@ class Message(pydantic.BaseModel):
     def reasoning(self) -> str:
         for part in self.parts:
             if isinstance(part, ReasoningPart):
-                return part.reasoning
+                return part.text
         return ""
 
     def get_tool_part(self, tool_call_id: str) -> ToolPart | None:
@@ -87,19 +138,7 @@ class Message(pydantic.BaseModel):
 
 
 def make_messages(*, system: str | None = None, user: str) -> list[Message]:
-    """Convenience builder for common system + user message pattern.
-
-    Args:
-        system: Optional system message content.
-        user: User message content (required).
-
-    Returns:
-        A list of Message objects ready to pass to stream_step or stream_loop.
-
-    Example:
-        >>> messages = make_messages(system="You are helpful.", user="Hello!")
-        >>> await ai.stream_step(llm, messages=messages)
-    """
+    """Convenience builder for common system + user message pattern."""
     result: list[Message] = []
     if system is not None:
         result.append(Message(role="system", parts=[TextPart(text=system)]))

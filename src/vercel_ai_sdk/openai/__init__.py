@@ -45,10 +45,10 @@ def _messages_to_openai(messages: list[core.messages.Message]) -> list[dict[str,
             reasoning = ""
             tool_calls = []
             tool_results = []
-            
+
             for part in msg.parts:
                 if isinstance(part, core.messages.ReasoningPart):
-                    reasoning += part.reasoning
+                    reasoning += part.text
                 elif isinstance(part, core.messages.TextPart):
                     content += part.text
                 elif isinstance(part, core.messages.ToolPart):
@@ -71,7 +71,7 @@ def _messages_to_openai(messages: list[core.messages.Message]) -> list[dict[str,
                                 "content": str(part.result),
                             }
                         )
-            
+
             entry: dict[str, Any] = {"role": "assistant"}
             if content:
                 entry["content"] = content
@@ -81,7 +81,7 @@ def _messages_to_openai(messages: list[core.messages.Message]) -> list[dict[str,
             if tool_calls:
                 entry["tool_calls"] = tool_calls
             result.append(entry)
-            
+
             # Emit tool results as separate messages (OpenAI API format)
             result.extend(tool_results)
         else:
@@ -129,12 +129,12 @@ class OpenAIModel(core.runtime.LanguageModel):
         resolved_key = api_key or os.environ.get("OPENAI_API_KEY") or ""
         self._client = openai.AsyncOpenAI(base_url=base_url, api_key=resolved_key)
 
-    @override
-    async def stream(
+    async def stream_events(
         self,
         messages: list[core.messages.Message],
         tools: list[core.tools.Tool] | None = None,
-    ) -> AsyncGenerator[core.messages.Message, None]:
+    ) -> AsyncGenerator[core.llm.StreamEvent, None]:
+        """Yield raw stream events from OpenAI API."""
         openai_messages = _messages_to_openai(messages)
         openai_tools = _tools_to_openai(tools) if tools else None
 
@@ -159,10 +159,10 @@ class OpenAIModel(core.runtime.LanguageModel):
 
         stream = await self._client.chat.completions.create(**kwargs)
 
-        text_content = ""
-        reasoning_content = ""
-        tool_calls: dict[int, dict] = {}  # index -> {id, name, args}
-        message_id = core.messages._gen_id()
+        # Track active blocks for Start/End events
+        text_started = False
+        reasoning_started = False
+        tool_calls: dict[int, dict] = {}  # index -> {id, name, started}
 
         async for chunk in stream:
             if not chunk.choices:
@@ -171,14 +171,10 @@ class OpenAIModel(core.runtime.LanguageModel):
             choice = chunk.choices[0]
             delta = choice.delta
 
-            text_delta = ""
-            reasoning_delta = ""
-
             # Handle reasoning/thinking content via Vercel AI Gateway
             # The gateway may return reasoning in different ways:
             # 1. As a direct attribute (if SDK supports it)
             # 2. In model_extra (Pydantic v2 extra fields)
-            # 3. In the raw response data
             reasoning_value = None
             if hasattr(delta, "reasoning") and delta.reasoning:
                 reasoning_value = delta.reasoning
@@ -186,67 +182,70 @@ class OpenAIModel(core.runtime.LanguageModel):
                 reasoning_value = delta.model_extra.get("reasoning")
 
             if reasoning_value:
-                reasoning_delta = reasoning_value
-                reasoning_content += reasoning_value
+                if not reasoning_started:
+                    reasoning_started = True
+                    yield core.llm.ReasoningStart(block_id="reasoning")
+                yield core.llm.ReasoningDelta(
+                    block_id="reasoning", delta=reasoning_value
+                )
 
             if delta.content:
-                text_delta = delta.content
-                text_content += delta.content
+                # Close reasoning block when text starts (reasoning precedes text)
+                if reasoning_started:
+                    yield core.llm.ReasoningEnd(block_id="reasoning")
+                    reasoning_started = False
 
-            tool_call_deltas: list[core.messages.ToolDelta] = []
+                if not text_started:
+                    text_started = True
+                    yield core.llm.TextStart(block_id="text")
+                yield core.llm.TextDelta(block_id="text", delta=delta.content)
+
             if delta.tool_calls:
                 for tc in delta.tool_calls:
                     idx = tc.index
                     if idx not in tool_calls:
-                        tool_calls[idx] = {"id": tc.id, "name": None, "args": ""}
+                        tool_calls[idx] = {"id": tc.id, "name": None, "started": False}
                     if tc.id:
                         tool_calls[idx]["id"] = tc.id
                     if tc.function:
                         if tc.function.name:
                             tool_calls[idx]["name"] = tc.function.name
                         if tc.function.arguments:
-                            tool_calls[idx]["args"] += tc.function.arguments
-                            if tool_calls[idx]["id"]:
-                                tool_call_deltas.append(
-                                    core.messages.ToolDelta(
-                                        tool_call_id=tool_calls[idx]["id"],
-                                        tool_name=tool_calls[idx]["name"] or "",
-                                        args_delta=tc.function.arguments,
-                                    )
+                            tool_id = tool_calls[idx]["id"]
+                            tool_name = tool_calls[idx]["name"] or ""
+
+                            # Emit start if not started
+                            if not tool_calls[idx]["started"] and tool_id:
+                                tool_calls[idx]["started"] = True
+                                yield core.llm.ToolStart(
+                                    tool_call_id=tool_id, tool_name=tool_name
                                 )
 
-            parts: list[core.messages.Part] = []
-            # Reasoning part comes first (like Anthropic's thinking blocks)
-            if reasoning_content:
-                parts.append(
-                    core.messages.ReasoningPart(
-                        reasoning=reasoning_content,
-                        signature=None,  # OpenAI doesn't use signatures
-                    )
-                )
-            if text_content:
-                parts.append(core.messages.TextPart(text=text_content))
-            for tc in tool_calls.values():
-                if tc["id"]:
-                    parts.append(
-                        core.messages.ToolPart(
-                            tool_call_id=tc["id"],
-                            tool_name=tc["name"] or "",
-                            tool_args=tc["args"],
-                        )
-                    )
+                            if tool_id:
+                                yield core.llm.ToolArgsDelta(
+                                    tool_call_id=tool_id, delta=tc.function.arguments
+                                )
 
-            is_done = choice.finish_reason is not None
+            if choice.finish_reason is not None:
+                # Close any open blocks
+                if reasoning_started:
+                    yield core.llm.ReasoningEnd(block_id="reasoning")
+                if text_started:
+                    yield core.llm.TextEnd(block_id="text")
+                for tc in tool_calls.values():
+                    if tc["started"] and tc["id"]:
+                        yield core.llm.ToolEnd(tool_call_id=tc["id"])
 
-            yield core.messages.Message(
-                role="assistant",
-                parts=parts,
-                id=message_id,
-                is_done=is_done,
-                text_delta=text_delta,
-                reasoning_delta=reasoning_delta,
-                tool_deltas=tool_call_deltas,
-            )
-
-            if is_done:
+                yield core.llm.MessageDone(finish_reason=choice.finish_reason)
                 return
+
+    @override
+    async def stream(
+        self,
+        messages: list[core.messages.Message],
+        tools: list[core.tools.Tool] | None = None,
+    ) -> AsyncGenerator[core.messages.Message, None]:
+        """Stream Messages (uses StreamHandler internally)."""
+        handler = core.llm.StreamHandler()
+        async for event in self.stream_events(messages, tools):
+            yield handler.handle_event(event)

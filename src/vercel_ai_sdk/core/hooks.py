@@ -55,7 +55,8 @@ def _make_hook_message(
                 resolution=resolution,
             )
         ],
-        is_done=True,
+        # Note: is_done is computed from parts' state. HookPart doesn't have state,
+        # so the message is considered done.
     )
 
 
