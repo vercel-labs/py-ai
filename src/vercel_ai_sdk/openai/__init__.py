@@ -93,7 +93,7 @@ def _messages_to_openai(messages: list[core.messages.Message]) -> list[dict[str,
     return result
 
 
-class OpenAIModel(core.runtime.LanguageModel):
+class OpenAIModel(core.llm.LanguageModel):
     """OpenAI adapter with reasoning/thinking support via Vercel AI Gateway.
 
     Supports reasoning for models like GPT 5.x, o-series, and Claude via gateway.

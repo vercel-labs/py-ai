@@ -7,7 +7,6 @@ from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
 from . import messages as messages_
-from . import tools as tools_
 
 
 @dataclasses.dataclass

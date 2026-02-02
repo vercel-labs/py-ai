@@ -13,12 +13,10 @@ from .core.messages import (
     make_messages,
 )
 from .core.tools import Tool, tool
+from .core.llm import LanguageModel
+from .core.streams import StreamResult, stream
 from .core.runtime import (
-    LanguageModel,
     Runtime,
-    StepResult,
-    ToolCall,
-    stream,
     stream_step,
     stream_loop,
     execute_tool,
@@ -38,8 +36,7 @@ __all__ = [
     "Tool",
     "LanguageModel",
     "Runtime",
-    "StepResult",
-    "ToolCall",
+    "StreamResult",
     "Hook",
     "HookPart",
     "HookPending",

@@ -97,7 +97,7 @@ def _messages_to_anthropic(
     return system_prompt, result
 
 
-class AnthropicModel(core.runtime.LanguageModel):
+class AnthropicModel(core.llm.LanguageModel):
     """Anthropic adapter with native extended thinking support."""
 
     def __init__(

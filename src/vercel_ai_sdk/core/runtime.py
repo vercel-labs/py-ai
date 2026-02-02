@@ -55,9 +55,6 @@ class Runtime:
     async def put_message(self, message: messages_.Message) -> None:
         await self._message_queue.put(message)
 
-    async def get_message(self) -> messages_.Message | None:
-        return await self._message_queue.get()
-
     def get_all_messages(self) -> list[messages_.Message]:
         """Drain all pending messages from the message queue."""
         msgs = []
@@ -68,11 +65,13 @@ class Runtime:
                 break
         return msgs
 
-    async def put_hook(self, hook: hooks_.Hook[Any]) -> None:
-        self._pending_hooks[hook.id] = (hook._future, hook)
+    async def put_hook(
+        self, hook: hooks_.Hook[Any], future: asyncio.Future[Any]
+    ) -> None:
+        self._pending_hooks[hook.id] = (future, hook)
         await self._message_queue.put(hook.to_message(status="pending"))
 
-    def gel_all_hooks(self) -> dict[str, Hook[Any]]:
+    def get_all_hooks(self) -> dict[str, Hook[Any]]:
         """Get all pending hooks (for inspection/UI)."""
         return {k: v[1] for k, v in self._pending_hooks.items()}
 
@@ -126,13 +125,16 @@ async def stream_loop(
     while True:
         result = await stream_step(llm, local_messages, tools, label=label)
 
-        if not result.tool_calls:
+        last_message = result.messages[-1]
+        tool_calls = last_message.tool_calls
+
+        if not tool_calls:
             return result
 
-        local_messages.append(result.last_message)
+        local_messages.append(last_message)
 
         await asyncio.gather(
-            *(execute_tool(tc, tools, result.last_message) for tc in result.tool_calls)
+            *(execute_tool(tc, tools, last_message) for tc in tool_calls)
         )
 
 

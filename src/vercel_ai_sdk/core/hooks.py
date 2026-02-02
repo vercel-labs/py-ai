@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import uuid
-from typing import Any, ClassVar, Generic, TypeVar
+from typing import Any, ClassVar, Generic, Literal, TypeVar
 
 import pydantic
 
@@ -51,7 +51,9 @@ class Hook(Generic[T]):
         self._future: asyncio.Future[T] | None = None
 
     def to_message(
-        self, status: str, resolution: dict[str, Any] | None = None
+        self,
+        status: Literal["pending", "resolved", "cancelled"],
+        resolution: dict[str, Any] | None = None,
     ) -> messages_.Message:
         return messages_.Message(
             role="assistant",
@@ -92,15 +94,8 @@ class Hook(Generic[T]):
         future: asyncio.Future[T] = loop.create_future()
         instance._future = future
 
-        # Register in runtime's pending hooks
-        rt._pending_hooks[hook_id] = (future, instance)
-
-        # Emit pending message through the stream
-        await rt.put_message(
-            instance.to_message(
-                status="pending",
-            )
-        )
+        # Register in runtime's pending hooks and emit pending message
+        await rt.put_hook(instance, future)
 
         # Block until resolved
         result = await future

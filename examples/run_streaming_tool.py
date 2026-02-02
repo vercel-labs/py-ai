@@ -29,10 +29,10 @@ async def talk_to_mothership(question: str, runtime: ai.Runtime) -> str:
         accumulated.append(step)
 
         # Stream each step to the runtime
+        # Note: is_done is computed from parts' state; parts without state are considered done
         progress_msg = ai.Message(
             role="assistant",
-            parts=[ai.TextPart(text=f"<inside of tool> {step}")],
-            is_done=False,
+            parts=[ai.TextPart(text=f"<inside of tool> {step}", state="streaming")],
             label="tool_progress",
         )
         await runtime.put_message(progress_msg)

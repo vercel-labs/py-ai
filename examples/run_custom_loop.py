@@ -34,10 +34,10 @@ async def custom_stream_step(
     tools: list[ai.Tool],
     label: str | None = None,
 ) -> AsyncGenerator[ai.Message, None]:
+    # Note: is_done is computed from parts' state. Parts with state=None or "done" are considered done.
     marker = ai.Message(
         role="assistant",
-        parts=[ai.TextPart(text="start of a custom step")],
-        is_done=True,
+        parts=[ai.TextPart(text="start of a custom step", state="done")],
         label="custom_loop_marker",
     )
     yield marker
@@ -57,16 +57,16 @@ async def agent(llm: ai.LanguageModel, user_query: str):
     while True:
         result = await custom_stream_step(llm, messages, tools, label="agent")
 
-        if not result.tool_calls:
+        last_message = result.messages[-1]
+        tool_calls = last_message.tool_calls
+
+        if not tool_calls:
             return result
 
-        messages.append(result.last_message)
+        messages.append(last_message)
 
         await asyncio.gather(
-            *(
-                ai.execute_tool(tc, tools, result.last_message)
-                for tc in result.tool_calls
-            )
+            *(ai.execute_tool(tc, tools, last_message) for tc in tool_calls)
         )
 
 
