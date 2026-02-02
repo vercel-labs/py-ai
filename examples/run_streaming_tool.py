@@ -1,14 +1,8 @@
-"""Example: Tool that streams intermediate results via Runtime."""
-
 import asyncio
 import os
-
-import dotenv
 from rich import print
 
 import vercel_ai_sdk as ai
-
-dotenv.load_dotenv()
 
 
 @ai.tool

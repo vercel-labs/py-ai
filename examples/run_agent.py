@@ -1,13 +1,7 @@
-"""Simple agent example with tool use."""
-
 import asyncio
 import os
 
-import dotenv
-
 import vercel_ai_sdk as ai
-
-dotenv.load_dotenv()
 
 
 @ai.tool

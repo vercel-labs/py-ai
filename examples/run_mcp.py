@@ -3,12 +3,9 @@
 import asyncio
 import os
 
-import dotenv
 import rich
 
 import vercel_ai_sdk as ai
-
-dotenv.load_dotenv()
 
 
 async def context7_agent(llm: ai.LanguageModel, user_query: str):
