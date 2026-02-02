@@ -78,7 +78,7 @@ def tool(
         return Tool(
             name=f.__name__,
             description=inspect.getdoc(f) or "",
-            parameters=parameters,
+            schema=parameters,
             fn=f,
         )
 
@@ -91,5 +91,9 @@ def tool(
 class Tool:
     name: str
     description: str
-    parameters: dict[str, Any]
+    schema: dict[str, Any]
     fn: Callable[..., Awaitable[Any]]
+
+    # TODO try to replace ai.execute_tool() with something like this
+    async def execute(self, *args: Any, **kwargs: Any) -> Any:
+        return await self.fn(*args, **kwargs)

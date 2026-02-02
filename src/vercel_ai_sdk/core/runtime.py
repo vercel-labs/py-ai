@@ -53,30 +53,6 @@ class ToolCall:
     tool_args: dict[str, Any]
 
 
-@dataclass
-class StepResult:
-    """Result of executing a step - serializable for durability replay."""
-
-    messages: list[messages_.Message] = field(default_factory=list)
-    tool_calls: list[ToolCall] = field(default_factory=list)
-
-    @property
-    def last_message(self) -> messages_.Message | None:
-        return self.messages[-1] if self.messages else None
-
-    @property
-    def text(self) -> str:
-        if self.last_message:
-            return self.last_message.text
-        return ""
-
-
-StepFn = Callable[[], AsyncGenerator[messages_.Message, None]]
-
-
-# --- Runtime ---
-
-
 class Runtime:
     """
     Functions decorated with @stream submit step functions to the queue.
@@ -181,41 +157,6 @@ def _extract_tool_calls(message: messages_.Message) -> list[ToolCall]:
             )
     return tool_calls
 
-
-# --- Decorators ---
-
-
-def stream(
-    fn: Callable[..., AsyncGenerator[messages_.Message, None]],
-) -> Callable[..., Any]:
-    """
-    Decorator: wraps an async generator to submit as a step to Runtime.
-
-    The decorated function submits its work to the Runtime queue and
-    blocks until run() processes it, then returns the StepResult.
-    """
-
-    @functools.wraps(fn)
-    async def wrapped(*args: Any, **kwargs: Any) -> StepResult:
-        rt: Runtime | None = _runtime.get(None)
-        if rt is None:
-            raise ValueError("No Runtime context - must be called within ai.execute()")
-
-        future: asyncio.Future[StepResult] = asyncio.Future()
-
-        async def step_fn() -> AsyncGenerator[messages_.Message, None]:
-            async for msg in fn(*args, **kwargs):
-                yield msg
-
-        await rt.put_step(step_fn, future)
-        return await future
-
-    return wrapped
-
-
-# --- Primitives ---
-
-
 @stream
 async def stream_step(
     llm: LanguageModel,
@@ -259,7 +200,7 @@ async def execute_tool(
     result = await tool_fn.fn(**kwargs)
 
     if message is not None:
-        tool_part = message.get_tool_part(tool_call.tool_call_id)
+        tool_part = message.get_atool_part(tool_call.tool_call_id)
         if tool_part:
             tool_part.status = "result"
             tool_part.result = result

@@ -16,7 +16,7 @@ def _tools_to_anthropic(tools: list[core.tools.Tool]) -> list[dict[str, Any]]:
         {
             "name": tool.name,
             "description": tool.description,
-            "input_schema": tool.parameters,
+            "input_schema": tool.schema,
         }
         for tool in tools
     ]

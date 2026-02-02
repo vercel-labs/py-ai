@@ -17,7 +17,7 @@ def _tools_to_openai(tools: list[core.tools.Tool]) -> list[dict[str, Any]]:
             "function": {
                 "name": tool.name,
                 "description": tool.description,
-                "parameters": tool.parameters,
+                "parameters": tool.schema,
             },
         }
         for tool in tools
