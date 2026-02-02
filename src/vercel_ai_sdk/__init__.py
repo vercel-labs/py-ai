@@ -1,6 +1,6 @@
 from . import anthropic, mcp, openai, ai_sdk_ui
 
-# Re-export core types for convenient access
+# Re-export core types
 from .core.messages import (
     Message,
     Part,
@@ -8,17 +8,22 @@ from .core.messages import (
     ToolPart,
     ToolDelta,
     ReasoningPart,
+    HookPart,
     make_messages,
 )
 from .core.tools import Tool, tool
 from .core.runtime import (
     LanguageModel,
     Runtime,
-    Stream,
-    execute,
-    stream_loop,
+    StepResult,
+    ToolCall,
+    stream,
     stream_step,
+    stream_loop,
+    execute_tool,
+    run,
 )
+from .core.hooks import Hook, HookPending, hook
 
 __all__ = [
     # Types
@@ -29,15 +34,22 @@ __all__ = [
     "ToolDelta",
     "ReasoningPart",
     "Tool",
-    "Stream",
     "LanguageModel",
     "Runtime",
+    "StepResult",
+    "ToolCall",
+    "Hook",
+    "HookPart",
+    "HookPending",
     # Functions
     "tool",
-    "execute",
-    "stream_loop",
+    "stream",
     "stream_step",
+    "stream_loop",
+    "execute_tool",
+    "run",
     "make_messages",
+    "hook",
     # Submodules
     "anthropic",
     "mcp",

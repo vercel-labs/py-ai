@@ -1,3 +1,3 @@
-from . import messages, tools, runtime
+from . import messages, tools, runtime, hooks
 
-__all__ = ["messages", "tools", "runtime"]
+__all__ = ["messages", "tools", "runtime", "hooks"]

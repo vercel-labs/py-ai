@@ -11,108 +11,226 @@ uv add vercel-ai-sdk
 ```python
 import vercel_ai_sdk as ai
 
-llm = ai.openai.OpenAIModel(model="gpt-4", api_key="...")
+@ai.tool
+async def talk_to_mothership(question: str) -> str:
+    """Contact the mothership for important decisions."""
+    return "Soon."
 
-async for msg in ai.execute(my_agent, llm, "Hello"):
-    print(msg.text)
+async def agent(llm, query):
+    return await ai.stream_loop(
+        llm,
+        messages=ai.make_messages(
+            system="You are a robot assistant.",
+            user=query,
+        ),
+        tools=[talk_to_mothership],
+    )
+
+llm = ai.openai.OpenAIModel(
+    model="anthropic/claude-sonnet-4",
+    base_url="https://ai-gateway.vercel.sh/v1",
+    api_key=os.environ["AI_GATEWAY_API_KEY"],
+)
+
+async for msg in ai.run(agent, llm, "When will the robots take over?"):
+    print(msg.text_delta, end="")
 ```
 
-## API Reference
+## Reference
 
-### `@ai.tool`
+### Core Primitives
 
-Decorator that turns an async function into a tool. Parameters are auto-extracted from type hints and docstrings become the tool description.
+#### `ai.run(root, *args, hook_resolutions=None)`
+
+Entry point. Executes an async function, yields all `Message` objects from nested streams.
+
+```python
+async for msg in ai.run(my_agent, llm, "hello"):
+    print(msg.text_delta, end="")
+```
+
+For serverless suspend/resume, pass pre-resolved hook values:
+
+```python
+async for msg in ai.run(my_agent, hook_resolutions={"hook_123": {"granted": True}}):
+    ...
+```
+
+#### `@ai.tool`
+
+Decorator that turns an async function into a `Tool`. Parameters extracted from type hints, docstring becomes description.
 
 ```python
 @ai.tool
-async def get_weather(city: str, units: str = "celsius") -> str:
-    """Get current weather for a city."""
-    return f"72°F in {city}"
+async def search(query: str, limit: int = 10) -> list[str]:
+    """Search the database."""
+    ...
 ```
 
-### `ai.stream_step(llm, messages, tools=None, label=None)`
-
-Streams a single LLM response with optional tool definitions. Tools are passed to the LLM but not auto-executed - tool calls are returned with `status="pending"`. Returns a `Stream` that can be awaited or async-iterated.
+If a tool declares a `runtime: ai.Runtime` parameter, it's auto-injected:
 
 ```python
-result = await ai.stream_step(llm, messages)
-# or iterate for real-time updates
-async for msg in ai.stream_step(llm, messages):
-    print(msg.text_delta, end="")
-
-# With tools (no auto-execution)
-result = await ai.stream_step(llm, messages, tools=[get_weather])
-# Check result[-1].parts for ToolPart with status="pending"
+@ai.tool
+async def long_task(input: str, runtime: ai.Runtime) -> str:
+    """Runtime is auto-injected, not passed by LLM."""
+    await runtime.put_message(ai.Message(...))  # stream intermediate results
+    ...
 ```
 
-### `ai.stream_loop(llm, messages, tools, label=None)`
+#### `@ai.stream`
 
-Streams LLM responses and automatically executes tool calls in a loop until complete. This is the main function for agentic workflows.
+Decorator that wires an async generator into the `Runtime`. Use this to make any streaming operation (like an LLM call) work with `ai.run()`.
 
 ```python
-result = await ai.stream_loop(llm, messages, tools=[get_weather])
+@ai.stream
+async def my_custom_step(llm, messages):
+    async for msg in llm.stream(messages):
+        yield msg
+
+result = await my_custom_step(llm, messages)  # returns StepResult
 ```
 
-### `ai.execute(root_fn, *args)`
+#### `@ai.hook`
 
-Runs an agent function and yields all messages from nested streams. Use this as the top-level entry point for any agent workflow.
+Decorator that creates a suspension point from a pydantic model. The model defines the resolution schema.
 
 ```python
-async def my_agent(llm, query):
-    return await ai.stream_loop(llm, messages, tools)
+@ai.hook
+class Approval(pydantic.BaseModel):
+    granted: bool
+    reason: str
 
-async for msg in ai.execute(my_agent, llm, "What's the weather?"):
-    print(msg)
+# In your agent - blocks until resolved
+approval = await Approval.create(metadata={"tool": "send_email"})
+if approval.granted:
+    ...
+
+# From outside (API handler, websocket, etc.)
+Approval.resolve(hook_id, {"granted": True, "reason": "User approved"})
 ```
 
-### `ai.Message`
-
-Universal message type with `role` ("user", "assistant", "system") and `parts`. Access text via `msg.text`. The `label` field tags messages for multi-agent routing.
-
-### `ai.TextPart`, `ai.ToolPart`, `ai.ReasoningPart`
-
-Message parts. `TextPart` holds text content. `ToolPart` contains tool invocation details and results. `ReasoningPart` holds model reasoning/thinking output.
-
-## MCP Integration
-
-### `ai.mcp.get_http_tools(url, headers={}, tool_prefix="")`
-
-Connects to an MCP server over HTTP and returns tools. Optional `tool_prefix` namespaces tool names.
+For serverless (raises `HookPending` if not in `hook_resolutions`):
 
 ```python
+approval = Approval.create_or_raise(f"approval_{tool_call_id}")
+```
+
+### Convenience Functions
+
+#### `ai.stream_step(llm, messages, tools=None, label=None)`
+
+Single LLM call. Built on `@ai.stream`. Returns `StepResult`.
+
+```python
+result = await ai.stream_step(llm, messages, tools=[search])
+# result.text, result.tool_calls, result.last_message
+```
+
+#### `ai.stream_loop(llm, messages, tools, label=None)`
+
+Full agent loop: calls LLM, executes tools, repeats until no more tool calls. Returns final `StepResult`.
+
+```python
+result = await ai.stream_loop(llm, messages, tools=[search, get_weather])
+```
+
+#### `ai.execute_tool(tool_call, tools, message=None)`
+
+Execute a single `ToolCall`. If `message` is provided, updates the corresponding `ToolPart` with the result.
+
+```python
+await asyncio.gather(*(ai.execute_tool(tc, tools, msg) for tc in result.tool_calls))
+```
+
+#### `ai.make_messages(*, system=None, user)`
+
+Build a message list from system + user strings.
+
+```python
+messages = ai.make_messages(system="You are helpful.", user="Hello!")
+```
+
+### Adapters
+
+#### LLM Providers
+
+```python
+# OpenAI-compatible (including Vercel AI Gateway)
+llm = ai.openai.OpenAIModel(
+    model="anthropic/claude-sonnet-4",
+    base_url="https://ai-gateway.vercel.sh/v1",
+    api_key=os.environ["AI_GATEWAY_API_KEY"],
+    thinking=True,           # enable reasoning output
+    budget_tokens=10000,     # or reasoning_effort="medium"
+)
+
+# Anthropic (native client)
+llm = ai.anthropic.AnthropicModel(
+    model="claude-sonnet-4-5-20250929",
+    thinking=True,
+    budget_tokens=10000,
+)
+```
+
+#### MCP
+
+```python
+# HTTP transport
 tools = await ai.mcp.get_http_tools(
     "https://mcp.example.com/mcp",
-    headers={"API_KEY": "..."},
-    tool_prefix="docs"
+    headers={"Authorization": "Bearer ..."},
+    tool_prefix="docs",
 )
-```
 
-### `ai.mcp.get_stdio_tools(cmd, *args, tool_prefix="")`
-
-Spawns an MCP server process via stdio. Useful for local MCP servers like npx packages.
-
-```python
+# Stdio transport (subprocess)
 tools = await ai.mcp.get_stdio_tools(
-    "npx", "-y", "@upstash/context7-mcp",
-    "--api-key", os.environ["CONTEXT7_API_KEY"],
-    tool_prefix="context7"
+    "npx", "-y", "@anthropic/mcp-server-filesystem", "/tmp",
+    tool_prefix="fs",
 )
 ```
 
-## Multi-Agent Example
+#### AI SDK UI
+
+For streaming to AI SDK frontend (`useChat`, etc.):
 
 ```python
-async def multiagent(llm, query):
-    # Run two agents in parallel
-    stream1, stream2 = await asyncio.gather(
-        ai.stream_loop(llm, msgs1, tools=[add_one], label="agent1"),
-        ai.stream_loop(llm, msgs2, tools=[multiply], label="agent2"),
-    )
+from vercel_ai_sdk.ai_sdk_ui import to_sse_stream, to_messages, UI_MESSAGE_STREAM_HEADERS
 
-    # Combine results and summarize
-    combined = stream1[-1].text + stream2[-1].text
-    return await ai.stream_step(llm, make_messages(combined), label="summarizer")
+# Convert incoming UI messages
+messages = to_messages(request.messages)
 
-async for msg in ai.execute(multiagent, llm, "10"):
-    print(f"[{msg.label}] {msg.text_delta}", end="")
+# Stream response as SSE
+async def stream_response():
+    async for chunk in to_sse_stream(ai.run(agent, llm, query)):
+        yield chunk
+
+return StreamingResponse(stream_response(), headers=UI_MESSAGE_STREAM_HEADERS)
 ```
+
+### Types
+
+| Type | Description |
+|------|-------------|
+| `Message` | Universal message with `role`, `parts`, `label`. Properties: `text`, `text_delta`, `reasoning_delta`, `tool_deltas`, `is_done` |
+| `TextPart` | Text content |
+| `ToolPart` | Tool call with `tool_call_id`, `tool_name`, `tool_args`, `status` ("pending"/"result"), `result` |
+| `ReasoningPart` | Model reasoning/thinking with optional `signature` (Anthropic) |
+| `HookPart` | Hook suspension with `hook_id`, `hook_type`, `status`, `metadata`, `resolution` |
+| `StepResult` | Result of a step: `messages`, `tool_calls`, `text`, `last_message` |
+| `ToolCall` | Extracted tool call: `tool_call_id`, `tool_name`, `tool_args` |
+| `Tool` | Tool definition: `name`, `description`, `parameters`, `fn` |
+| `Runtime` | Step queue with `put_message()`, `get_pending_hooks()`, `resolve_hook()` |
+| `LanguageModel` | Abstract base class for LLM providers |
+| `HookPending` | Exception raised by `Hook.create_or_raise()` when resolution needed |
+
+## Examples
+
+See the `examples/` directory:
+
+- `run_agent.py` - Basic agent with tools
+- `run_multiagent.py` - Parallel agents with live display
+- `run_hooks.py` - Human-in-the-loop approval flow
+- `run_streaming_tool.py` - Tool that streams progress via Runtime
+- `run_custom_loop.py` - Custom step with `@ai.stream`
+- `run_mcp.py` - MCP integration
+- `run_fake_serverless.py` - Suspend/resume with `HookPending`

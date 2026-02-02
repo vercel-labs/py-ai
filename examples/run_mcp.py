@@ -14,7 +14,6 @@ dotenv.load_dotenv()
 async def context7_agent(llm: ai.LanguageModel, user_query: str):
     """Agent with Context7 MCP tools for up-to-date library documentation."""
 
-
     context7_tools: list[ai.Tool] = await ai.mcp.get_http_tools(
         "https://mcp.context7.com/mcp",
         headers={"CONTEXT7_API_KEY": os.environ.get("CONTEXT7_API_KEY", "")},
@@ -34,12 +33,14 @@ async def context7_agent(llm: ai.LanguageModel, user_query: str):
 
 async def main():
     llm = ai.openai.OpenAIModel(
-        model="openai/gpt-5.2",
+        model="openai/gpt-4.1",
         base_url="https://ai-gateway.vercel.sh/v1",
         api_key=os.environ.get("AI_GATEWAY_API_KEY"),
     )
 
-    async for msg in ai.execute(context7_agent, llm, "How do I create middleware in Next.js?"):
+    async for msg in ai.run(
+        context7_agent, llm, "How do I create middleware in Next.js?"
+    ):
         rich.print(msg)
 
 

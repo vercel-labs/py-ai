@@ -28,8 +28,19 @@ class ReasoningPart(pydantic.BaseModel):
     signature: str | None = None
 
 
+class HookPart(pydantic.BaseModel):
+    """Part representing a hook suspension point in the agent's turn."""
+
+    hook_id: str
+    hook_type: str
+    status: Literal["pending", "resolved", "cancelled"]
+    metadata: dict[str, Any] = pydantic.Field(default_factory=dict)
+    resolution: dict[str, Any] | None = None
+    type: Literal["hook"] = "hook"
+
+
 Part = Annotated[
-    TextPart | ToolPart | ReasoningPart,
+    TextPart | ToolPart | ReasoningPart | HookPart,
     pydantic.Field(discriminator="type"),
 ]
 

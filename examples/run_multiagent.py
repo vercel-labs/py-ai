@@ -28,7 +28,7 @@ async def multiply_by_two(number: int) -> int:
 async def multiagent(llm: ai.LanguageModel, user_query: str):
     """Run two agents in parallel, then combine their results."""
 
-    stream1, stream2 = await asyncio.gather(
+    result1, result2 = await asyncio.gather(
         ai.stream_loop(
             llm,
             messages=ai.make_messages(
@@ -49,14 +49,15 @@ async def multiagent(llm: ai.LanguageModel, user_query: str):
         ),
     )
 
-    combined = stream1[-1].text + "\n" + stream2[-1].text
+    combined = f"{result1.text}\n{result2.text}"
 
-    return await ai.stream_step(
+    return await ai.stream_loop(
         llm,
         messages=ai.make_messages(
             system="You are assistant 3. Summarize the results.",
             user=f"Results from the other assistants: {combined}",
         ),
+        tools=[],
         label="a3",
     )
 
@@ -78,13 +79,11 @@ class MultiAgentDisplay:
         label = msg.label or "unknown"
         color = self.COLORS.get(label, "white")
 
-        # Append streaming deltas
         if msg.text_delta:
             self.streams[label].append(msg.text_delta, style=color)
         if msg.reasoning_delta:
             self.streams[label].append(msg.reasoning_delta, style="dim")
 
-        # Handle tool events
         for delta in msg.tool_deltas:
             self.streams[label].append(f"{delta.args_delta}", style="yellow")
 
@@ -125,7 +124,7 @@ async def main():
     display = MultiAgentDisplay()
 
     with Live(display.render(), refresh_per_second=15) as live:
-        async for msg in ai.execute(multiagent, llm, "Process the number 5"):
+        async for msg in ai.run(multiagent, llm, "Process the number 5"):
             display.update(msg)
             live.update(display.render())
 

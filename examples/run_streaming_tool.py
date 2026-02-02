@@ -35,14 +35,13 @@ async def talk_to_mothership(question: str, runtime: ai.Runtime) -> str:
             is_done=False,
             label="tool_progress",
         )
-        await runtime.put(progress_msg)
-        await asyncio.sleep(0.5)  # Simulate interstellar latency
+        await runtime.put_message(progress_msg)
+        await asyncio.sleep(0.5)
 
-    # Return accumulated transcript to the agent
     return "\n".join(accumulated)
 
 
-async def agent(llm: ai.LanguageModel, user_query: str) -> list[ai.Message]:
+async def agent(llm: ai.LanguageModel, user_query: str):
     return await ai.stream_loop(
         llm,
         messages=ai.make_messages(
@@ -60,7 +59,7 @@ async def main():
         api_key=os.environ.get("AI_GATEWAY_API_KEY"),
     )
 
-    async for msg in ai.execute(agent, llm, "When will the robots take over?"):
+    async for msg in ai.run(agent, llm, "When will the robots take over?"):
         # Show streaming text from LLM
         if msg.text_delta:
             print(f"[blue]{msg.text_delta}[/blue]", end="", flush=True)
@@ -71,10 +70,10 @@ async def main():
 
         # Show tool results
         if msg.is_done:
-            print("\n")
+            print()
             for part in msg.parts:
                 if isinstance(part, ai.ToolPart) and part.status == "result":
-                    print(f"\n[green]Accumulated result:[/green]\n{part.result}\n")
+                    print(f"\n[green]Tool result:[/green]\n{part.result}\n")
 
 
 if __name__ == "__main__":
