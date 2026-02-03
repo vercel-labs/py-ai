@@ -7,6 +7,14 @@ from typing import Any, Callable, get_args, get_origin, get_type_hints, overload
 
 import pydantic
 
+# Module-level tool registry - populated at decoration time
+_tool_registry: dict[str, "Tool"] = {}
+
+
+def get_tool(name: str) -> "Tool | None":
+    """Look up a tool by name from the global registry."""
+    return _tool_registry.get(name)
+
 
 def _is_runtime_type(hint: Any) -> bool:
     """Check if a type hint is the Runtime class."""
@@ -75,12 +83,15 @@ def tool(
         if required:
             parameters["required"] = required
 
-        return Tool(
+        t = Tool(
             name=f.__name__,
             description=inspect.getdoc(f) or "",
             schema=parameters,
             fn=f,
         )
+        # Register in global registry
+        _tool_registry[t.name] = t
+        return t
 
     if fn is not None:
         return make_tool(fn)

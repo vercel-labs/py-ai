@@ -11,27 +11,24 @@ from . import messages as messages_
 
 @dataclasses.dataclass
 class StreamResult:
-    messages: list[messages_.Message] = dataclasses.field(
-        default_factory=list
-    )  # TODO is there ever more than one?
-    # tool_calls: list[ToolCall] = field(default_factory=list)
+    messages: list[messages_.Message] = dataclasses.field(default_factory=list)
 
     @property
-    def tool_calls(self) -> None:
-        # extract tool parts, maybe resolve into tools
-        # for better ergonomics, i.e. for tool_call in stream_result.tool_calls: tool_call.execute()
-        # TODO would that work with durable @step?
-        pass
+    def last_message(self) -> messages_.Message | None:
+        return self.messages[-1] if self.messages else None
 
-    # @property
-    # def last_message(self) -> messages_.Message | None:
-    #     return self.messages[-1] if self.messages else None
+    @property
+    def tool_calls(self) -> list[messages_.ToolPart]:
+        """Get tool calls from the last message."""
+        if self.last_message:
+            return self.last_message.tool_calls
+        return []
 
-    # @property
-    # def text(self) -> str:
-    #     if self.last_message:
-    #         return self.last_message.text
-    #     return ""
+    @property
+    def text(self) -> str:
+        if self.last_message:
+            return self.last_message.text
+        return ""
 
 
 Stream = Callable[[], AsyncGenerator[messages_.Message, None]]

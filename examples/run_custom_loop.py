@@ -56,17 +56,12 @@ async def agent(llm: ai.LanguageModel, user_query: str):
     while True:
         result = await custom_stream_step(llm, messages, tools, label="agent")
 
-        last_message = result.messages[-1]
-        tool_calls = last_message.tool_calls
-
-        if not tool_calls:
+        if not result.tool_calls:
             return result
 
-        messages.append(last_message)
+        messages.append(result.last_message)
 
-        await asyncio.gather(
-            *(ai.execute_tool(tc, tools, last_message) for tc in tool_calls)
-        )
+        await asyncio.gather(*(tc.execute() for tc in result.tool_calls))
 
 
 async def main():

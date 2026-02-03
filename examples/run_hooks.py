@@ -29,27 +29,24 @@ async def graph(llm: ai.LanguageModel, query: str):
 
     while True:
         result = await ai.stream_step(llm, messages, tools)
-        tool_calls = result.messages[-1].tool_calls
 
-        if not tool_calls:
+        if not result.tool_calls:
             break
 
-        for tc in tool_calls:
+        for tc in result.tool_calls:
             if tc.tool_name == "contact_mothership":
                 # Create hook - this emits a Message with HookPart(status="pending") and blocks
                 approval = await CommunicationApproval.create()
 
                 if approval.granted:
-                    await ai.execute_tool(tc, tools, result.messages[-1])
+                    await tc.execute()
                 else:
-                    if tool_part := result.messages[-1].get_tool_part(tc.tool_call_id):
-                        tool_part.status = "result"
-                        tool_part.result = {"error": f"Rejected: {approval.reason}"}
+                    tc.set_result({"error": f"Rejected: {approval.reason}"})
             else:
                 # non-sensitive tools execute directly
-                await ai.execute_tool(tc, tools, result.messages[-1])
+                await tc.execute()
 
-        messages.append(result.messages[-1])
+        messages.append(result.last_message)
 
     return result
 

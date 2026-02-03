@@ -28,9 +28,7 @@ class SessionState:
     """Persisted between requests. In real app, this would be in a database."""
 
     pending_tools: list[ai.ToolPart] = dataclasses.field(default_factory=list)
-    hook_resolutions: dict[str, dict[str, Any]] = dataclasses.field(
-        default_factory=dict
-    )
+    resolutions: dict[str, dict[str, Any]] = dataclasses.field(default_factory=dict)
 
 
 # Simulated database
@@ -52,24 +50,20 @@ async def graph(
     while True:
         # Handle pending tool calls first (from previous request)
         if state.pending_tools:
-            last_msg = messages[-1]
-
             for tc in state.pending_tools:
                 if tc.tool_name == "contact_mothership":
                     # This raises HookPending if resolution not provided
                     approval = CommunicationApproval.create_or_raise(
-                        f"approval_{tc.tool_call_id}"
+                        f"approval_{tc.tool_call_id}",
+                        resolutions=state.resolutions,
                     )
 
                     if approval.granted:
-                        await ai.execute_tool(tc, tools, last_msg)
+                        await tc.execute()
                     else:
-                        part = last_msg.get_tool_part(tc.tool_call_id)
-                        if part:
-                            part.status = "result"
-                            part.result = {"error": f"Rejected: {approval.reason}"}
+                        tc.set_result({"error": f"Rejected: {approval.reason}"})
                 else:
-                    await ai.execute_tool(tc, tools, last_msg)
+                    await tc.execute()
 
             state.pending_tools = []
 
@@ -78,14 +72,12 @@ async def graph(
         if not result.messages:
             return None
 
-        last_msg = result.messages[-1]
-        messages.append(last_msg)
+        messages.append(result.last_message)
 
-        tool_calls = last_msg.tool_calls
-        if tool_calls:
-            state.pending_tools = list(tool_calls)
+        if result.tool_calls:
+            state.pending_tools = list(result.tool_calls)
         else:
-            return last_msg.text
+            return result.text
 
 
 async def pretend_endpoint(
@@ -106,7 +98,7 @@ async def pretend_endpoint(
 
     # Apply hook resolution if provided
     if hook_resolution:
-        state.hook_resolutions[hook_resolution["hook_id"]] = hook_resolution["data"]
+        state.resolutions[hook_resolution["hook_id"]] = hook_resolution["data"]
 
     llm = ai.openai.OpenAIModel(
         model="anthropic/claude-sonnet-4-20250514",
@@ -116,9 +108,7 @@ async def pretend_endpoint(
     tools = [contact_mothership]
 
     try:
-        async for msg in ai.run(
-            graph, llm, messages, tools, state, hook_resolutions=state.hook_resolutions
-        ):
+        async for msg in ai.run(graph, llm, messages, tools, state):
             if msg.text_delta:
                 rich.print(msg.text_delta, end="", flush=True)
         rich.print()

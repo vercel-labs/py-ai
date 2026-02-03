@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import uuid
 from typing import Any, ClassVar, Generic, Literal, TypeVar
 
@@ -10,11 +9,6 @@ import pydantic
 from . import messages as messages_
 
 T = TypeVar("T", bound=pydantic.BaseModel)
-
-# Context var for pre-loaded hook resolutions (used in serverless patterns)
-_resolutions: contextvars.ContextVar[dict[str, dict[str, Any]]] = (
-    contextvars.ContextVar("hook_resolutions", default={})
-)
 
 
 # TODO this should be properly typed
@@ -114,18 +108,26 @@ class Hook(Generic[T]):
         return result
 
     @classmethod
-    def create_or_raise(cls, hook_id: str, metadata: dict[str, Any] | None = None) -> T:
+    def create_or_raise(
+        cls,
+        hook_id: str,
+        resolutions: dict[str, dict[str, Any]] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> T:
         """
         Get a resolved hook value or raise HookPending.
+
+        For serverless applications where the resolution is provided in a
+        different process. Instead of blocking, raises HookPending to exit
+        the function. On subsequent invocation, pass the resolutions dict
+        to resolve the hook synchronously.
+
+        Args:
+            hook_id: Unique identifier for this hook instance
+            resolutions: Dict mapping hook_id to resolution data
+            metadata: Optional metadata to include in HookPending
         """
-
-        # this is for serverless applications where the resolution
-        # is being provided in a different process, so instead of blocking
-        # it needs to raise to exit the function
-
-        resolutions = _resolutions.get()
-
-        if hook_id in resolutions:
+        if resolutions and hook_id in resolutions:
             return cls._schema(**resolutions[hook_id])  # type: ignore[return-value]
 
         raise HookPending(

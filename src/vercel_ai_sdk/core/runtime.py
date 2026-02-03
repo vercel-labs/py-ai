@@ -125,17 +125,12 @@ async def stream_loop(
     while True:
         result = await stream_step(llm, local_messages, tools, label=label)
 
-        last_message = result.messages[-1]
-        tool_calls = last_message.tool_calls
-
-        if not tool_calls:
+        if not result.tool_calls:
             return result
 
-        local_messages.append(last_message)
+        local_messages.append(result.last_message)
 
-        await asyncio.gather(
-            *(execute_tool(tc, tools, last_message) for tc in tool_calls)
-        )
+        await asyncio.gather(*(tc.execute() for tc in result.tool_calls))
 
 
 async def execute_tool(
@@ -183,7 +178,6 @@ async def _stop_when_done(runtime: Runtime, task: Awaitable[None]) -> None:
 async def run(
     root: Callable[..., Coroutine[Any, Any, Any]],
     *args: Any,
-    hook_resolutions: dict[str, dict[str, Any]] | None = None,
 ) -> AsyncGenerator[messages_.Message, None]:
     """
     Main entry point.
@@ -200,11 +194,6 @@ async def run(
 
     mcp_pool: dict[str, mcp.client._Connection] = {}
     mcp_token = mcp.client._pool.set(mcp_pool)
-
-    # # Set hook resolutions in context
-    resolutions_token = None
-    if hook_resolutions is not None:
-        resolutions_token = hooks_._resolutions.set(hook_resolutions)
 
     kwargs: dict[str, Any] = {}
     if runtime_param := _find_runtime_param(root):
@@ -271,8 +260,5 @@ async def run(
         if mcp_token is not None:
             await mcp.client.close_connections()
             mcp.client._pool.reset(mcp_token)
-
-        if resolutions_token is not None:
-            hooks_._resolutions.reset(resolutions_token)
 
         _runtime.reset(token_runtime)
