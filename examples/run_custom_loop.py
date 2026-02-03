@@ -36,8 +36,7 @@ async def custom_stream_step(
 ) -> AsyncGenerator[ai.Message, None]:
     marker = ai.Message(
         role="assistant",
-        parts=[ai.TextPart(text="start of a custom step")],
-        is_done=True,
+        parts=[ai.TextPart(text="start of a custom step", state="done")],
         label="custom_loop_marker",
     )
     yield marker
@@ -62,12 +61,7 @@ async def agent(llm: ai.LanguageModel, user_query: str):
 
         messages.append(result.last_message)
 
-        await asyncio.gather(
-            *(
-                ai.execute_tool(tc, tools, result.last_message)
-                for tc in result.tool_calls
-            )
-        )
+        await asyncio.gather(*(tc.execute() for tc in result.tool_calls))
 
 
 async def main():
@@ -77,28 +71,35 @@ async def main():
         api_key=os.environ.get("AI_GATEWAY_API_KEY"),
     )
 
+    # Track tool calls we've already printed to avoid duplicates
+    printed_tool_calls: set[str] = set()
+
     async for msg in ai.run(
         agent, llm, "What's the weather and population of New York and Los Angeles?"
     ):
         if msg.label == "custom_loop_marker":
             rich.print(f"\n[red]{msg.text}[/red]")
+            printed_tool_calls.clear()  # Reset for new step
             continue
 
         # Show streaming text
         if msg.text_delta:
             rich.print(f"[blue]{msg.text_delta}[/blue]", end="", flush=True)
 
-        # Show tool status
-        if msg.is_done:
-            for part in msg.parts:
-                if isinstance(part, ai.ToolPart):
-                    if part.status == "pending":
+        # Show tool status (only print each tool call once)
+        for part in msg.parts:
+            if isinstance(part, ai.ToolPart):
+                tool_id = part.tool_call_id
+                if part.status == "pending" and part.state == "done":
+                    if tool_id not in printed_tool_calls:
+                        printed_tool_calls.add(tool_id)
                         rich.print(
                             f"\n[yellow]→ Calling {part.tool_name}({part.tool_args})[/yellow]"
                         )
-                    elif part.status == "result":
-                        # actually the execute_tool helper should yield a message to the stream
-                        # or a bunch of messages
+                elif part.status == "result":
+                    result_key = f"{tool_id}:result"
+                    if result_key not in printed_tool_calls:
+                        printed_tool_calls.add(result_key)
                         rich.print(f"[green]✓ {part.tool_name} = {part.result}[/green]")
 
 

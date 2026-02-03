@@ -39,14 +39,12 @@ async def graph(llm: ai.LanguageModel, query: str):
                 approval = await CommunicationApproval.create()
 
                 if approval.granted:
-                    await ai.execute_tool(tc, tools, result.last_message)
+                    await tc.execute()
                 else:
-                    if tool_part := result.last_message.get_tool_part(tc.tool_call_id):
-                        tool_part.status = "result"
-                        tool_part.result = {"error": f"Rejected: {approval.reason}"}
+                    tc.set_result({"error": f"Rejected: {approval.reason}"})
             else:
                 # non-sensitive tools execute directly
-                await ai.execute_tool(tc, tools, result.last_message)
+                await tc.execute()
 
         messages.append(result.last_message)
 

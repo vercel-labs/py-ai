@@ -4,15 +4,12 @@ import asyncio
 import os
 from collections import defaultdict
 
-import dotenv
 from rich.console import Group
 from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
 import vercel_ai_sdk as ai
-
-dotenv.load_dotenv()
 
 
 @ai.tool
@@ -49,7 +46,7 @@ async def multiagent(llm: ai.LanguageModel, user_query: str):
         ),
     )
 
-    combined = f"{result1.text}\n{result2.text}"
+    combined = f"{result1.messages[-1].text}\n{result2.messages[-1].text}"
 
     return await ai.stream_loop(
         llm,
