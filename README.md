@@ -40,20 +40,13 @@ async for msg in ai.run(agent, llm, "When will the robots take over?"):
 
 ### Core Primitives
 
-#### `ai.run(root, *args, hook_resolutions=None)`
+#### `ai.run(root, *args)`
 
 Entry point. Executes an async function, yields all `Message` objects from nested streams.
 
 ```python
 async for msg in ai.run(my_agent, llm, "hello"):
     print(msg.text_delta, end="")
-```
-
-For serverless suspend/resume, pass pre-resolved hook values:
-
-```python
-async for msg in ai.run(my_agent, hook_resolutions={"hook_123": {"granted": True}}):
-    ...
 ```
 
 #### `@ai.tool`
@@ -87,7 +80,7 @@ async def my_custom_step(llm, messages):
     async for msg in llm.stream(messages):
         yield msg
 
-result = await my_custom_step(llm, messages)  # returns StepResult
+result = await my_custom_step(llm, messages)  # returns StreamResult
 ```
 
 #### `@ai.hook`
@@ -109,17 +102,17 @@ if approval.granted:
 Approval.resolve(hook_id, {"granted": True, "reason": "User approved"})
 ```
 
-For serverless (raises `HookPending` if not in `hook_resolutions`):
+For serverless (raises `HookPending` if resolution not provided):
 
 ```python
-approval = Approval.create_or_raise(f"approval_{tool_call_id}")
+approval = Approval.create_or_raise(f"approval_{tool_call_id}", resolutions=saved_resolutions)
 ```
 
 ### Convenience Functions
 
 #### `ai.stream_step(llm, messages, tools=None, label=None)`
 
-Single LLM call. Built on `@ai.stream`. Returns `StepResult`.
+Single LLM call. Built on `@ai.stream`. Returns `StreamResult`.
 
 ```python
 result = await ai.stream_step(llm, messages, tools=[search])
@@ -128,18 +121,18 @@ result = await ai.stream_step(llm, messages, tools=[search])
 
 #### `ai.stream_loop(llm, messages, tools, label=None)`
 
-Full agent loop: calls LLM, executes tools, repeats until no more tool calls. Returns final `StepResult`.
+Full agent loop: calls LLM, executes tools, repeats until no more tool calls. Returns final `StreamResult`.
 
 ```python
 result = await ai.stream_loop(llm, messages, tools=[search, get_weather])
 ```
 
-#### `ai.execute_tool(tool_call, tools, message=None)`
+#### `ToolPart.execute()`
 
-Execute a single `ToolCall`. If `message` is provided, updates the corresponding `ToolPart` with the result.
+Execute a tool call. Tools are looked up from the global registry (populated by `@ai.tool`).
 
 ```python
-await asyncio.gather(*(ai.execute_tool(tc, tools, msg) for tc in result.tool_calls))
+await asyncio.gather(*(tc.execute() for tc in result.tool_calls))
 ```
 
 #### `ai.make_messages(*, system=None, user)`
@@ -212,14 +205,14 @@ return StreamingResponse(stream_response(), headers=UI_MESSAGE_STREAM_HEADERS)
 | Type | Description |
 |------|-------------|
 | `Message` | Universal message with `role`, `parts`, `label`. Properties: `text`, `text_delta`, `reasoning_delta`, `tool_deltas`, `is_done` |
-| `TextPart` | Text content |
-| `ToolPart` | Tool call with `tool_call_id`, `tool_name`, `tool_args`, `status` ("pending"/"result"), `result` |
+| `TextPart` | Text content with streaming `state` and `delta` |
+| `ToolPart` | Tool call with `tool_call_id`, `tool_name`, `tool_args`, `status`, `result`. Has `.execute()` method |
 | `ReasoningPart` | Model reasoning/thinking with optional `signature` (Anthropic) |
 | `HookPart` | Hook suspension with `hook_id`, `hook_type`, `status`, `metadata`, `resolution` |
-| `StepResult` | Result of a step: `messages`, `tool_calls`, `text`, `last_message` |
-| `ToolCall` | Extracted tool call: `tool_call_id`, `tool_name`, `tool_args` |
-| `Tool` | Tool definition: `name`, `description`, `parameters`, `fn` |
-| `Runtime` | Step queue with `put_message()`, `get_pending_hooks()`, `resolve_hook()` |
+| `PartState` | Literal type: `"streaming"` or `"done"` |
+| `StreamResult` | Result of a stream: `messages`, `tool_calls`, `text`, `last_message` |
+| `Tool` | Tool definition: `name`, `description`, `schema`, `fn` |
+| `Runtime` | Step queue with `put_message()`, `get_all_hooks()` |
 | `LanguageModel` | Abstract base class for LLM providers |
 | `HookPending` | Exception raised by `Hook.create_or_raise()` when resolution needed |
 
