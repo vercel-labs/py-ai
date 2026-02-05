@@ -2,8 +2,12 @@
 Based on: .reference/ai/packages/ai/src/ui/process-ui-message-stream.test.ts
 """
 
+import asyncio
+from collections.abc import AsyncGenerator
+
 import pytest
 
+import vercel_ai_sdk as ai
 from vercel_ai_sdk.ai_sdk_ui.adapter import to_ui_message_stream
 from vercel_ai_sdk.core.messages import Message, TextPart, ToolPart
 
@@ -209,3 +213,164 @@ async def test_text_then_tool_then_text():
         "finish-step",
         "finish",
     ]
+
+
+# -----------------------------------------------------------------------------
+# Integration tests - runtime-based execution
+# -----------------------------------------------------------------------------
+
+
+class MockLLM(ai.LanguageModel):
+    """A mock LLM that yields pre-defined message sequences."""
+
+    def __init__(self, responses: list[list[Message]]) -> None:
+        """
+        Args:
+            responses: List of response sequences. Each call to stream() consumes
+                       one sequence and yields its messages.
+        """
+        self._responses = list(responses)
+        self._call_index = 0
+
+    async def stream(
+        self,
+        messages: list[Message],
+        tools: list[ai.Tool] | None = None,
+    ) -> AsyncGenerator[Message, None]:
+        if self._call_index >= len(self._responses):
+            raise RuntimeError("MockLLM: no more responses configured")
+
+        response_sequence = self._responses[self._call_index]
+        self._call_index += 1
+
+        for msg in response_sequence:
+            yield msg
+
+
+@ai.tool
+async def get_weather(city: str) -> str:
+    """Get weather for a city."""
+    return f"Sunny in {city}"
+
+
+@ai.stream
+async def mock_agent_step(
+    llm: ai.LanguageModel,
+    messages: list[Message],
+    tools: list[ai.Tool],
+) -> AsyncGenerator[Message, None]:
+    """Single LLM step wrapped with @ai.stream."""
+    async for msg in llm.stream(messages=messages, tools=tools):
+        yield msg
+
+
+async def mock_agent_loop(
+    llm: ai.LanguageModel,
+    user_query: str,
+) -> None:
+    """
+    Minimal agent loop: LLM -> tool execution -> LLM.
+    Mirrors the pattern in examples/run_custom_loop.py.
+    """
+    tools = [get_weather]
+    messages = ai.make_messages(system="You are helpful.", user=user_query)
+
+    while True:
+        result = await mock_agent_step(llm, messages, tools)
+
+        if not result.tool_calls:
+            return
+
+        messages.append(result.last_message)
+        await asyncio.gather(*(tc.execute() for tc in result.tool_calls))
+
+
+@pytest.mark.asyncio
+async def test_runtime_tool_roundtrip():
+    """
+    Integration test: run a mock agent loop through ai.run() and verify
+    that tool-input-available and tool-output-available events are emitted.
+
+    This test demonstrates the bug: the runtime yields the message with
+    the tool call, but by the time it's yielded the tool has already been
+    executed and the ToolPart has been mutated to status="result". The UI
+    adapter never sees the intermediate status="pending" state.
+
+    Root cause: stream_loop appends the message, then executes tools which
+    mutate the message in-place. The message was already yielded with
+    status="pending", but pydantic models are mutable so when we collect
+    them at the end, we see the mutated state.
+    """
+    # First LLM call: returns a tool call
+    tool_call_response = [
+        Message(
+            id="msg-1",
+            role="assistant",
+            parts=[
+                ToolPart(
+                    tool_call_id="tc-1",
+                    tool_name="get_weather",
+                    tool_args='{"city": "London"}',
+                    status="pending",
+                    state="done",
+                ),
+            ],
+        ),
+    ]
+
+    # Second LLM call: returns final text
+    final_text_response = [
+        Message(
+            id="msg-2",
+            role="assistant",
+            parts=[TextPart(text="The weather is sunny.", state="done")],
+        ),
+    ]
+
+    mock_llm = MockLLM([tool_call_response, final_text_response])
+
+    # Collect all messages from the runtime
+    runtime_messages: list[Message] = []
+    async for msg in ai.run(mock_agent_loop, mock_llm, "What's the weather in London?"):
+        runtime_messages.append(msg)
+
+    # Stream through UI adapter
+    event_types = [
+        p.type async for p in to_ui_message_stream(_async_iter(runtime_messages))
+    ]
+
+    # This is what SHOULD happen:
+    # 1. First step yields tool call with status="pending" -> tool-input-start, tool-input-available
+    # 2. After tool execution, we should yield the updated message with status="result" -> tool-output-available
+    # 3. Second step yields final text -> text-start, text-end
+    expected = [
+        "start",
+        "start-step",
+        "tool-input-start",
+        "tool-input-available",
+        "finish-step",
+        # After tool execution, we should see tool-output-available
+        "start-step",
+        "tool-output-available",
+        "finish-step",
+        # Then the final text response
+        "start-step",
+        "text-start",
+        "text-end",
+        "finish-step",
+        "finish",
+    ]
+
+    # Current actual output (bug): the tool-input events are missing because
+    # by the time we iterate over runtime_messages, the ToolPart has been
+    # mutated to status="result" (the message object is mutable and shared).
+    # Actual: ['start', 'start-step', 'tool-output-available', 'finish-step',
+    #          'start-step', 'text-start', 'text-end', 'finish-step', 'finish']
+
+    assert event_types == expected
+
+
+async def _async_iter(items: list[Message]) -> AsyncGenerator[Message, None]:
+    """Helper to convert a list to an async generator."""
+    for item in items:
+        yield item
