@@ -121,6 +121,7 @@ async def stream_loop(
 ) -> streams_.StreamResult:
     """Agent loop: stream LLM, execute tools, repeat until done."""
     local_messages = list(messages)
+    runtime = _runtime.get(None)
 
     while True:
         result = await stream_step(llm, local_messages, tools, label=label)
@@ -131,6 +132,12 @@ async def stream_loop(
         local_messages.append(result.last_message)
 
         await asyncio.gather(*(tc.execute() for tc in result.tool_calls))
+
+        # Emit a copy of the message with tool results so the UI sees the transition
+        # from status="pending" to status="result". We copy to avoid mutation issues
+        # since the original message object was already yielded.
+        if runtime and result.last_message:
+            await runtime.put_message(result.last_message.model_copy(deep=True))
 
 
 async def execute_tool(
@@ -226,10 +233,18 @@ async def run(
 
                 step_fn, future = step_item
 
+                # Drain any messages that arrived before this step
+                # (e.g., tool result messages from the previous step)
+                for tool_msg in runtime.get_all_messages():
+                    yield tool_msg
+
                 result_messages: list[messages_.Message] = []
 
                 async for msg in step_fn():
-                    yield msg
+                    # Yield a copy to protect consumers from mutations
+                    # (e.g., tool execution mutates ToolPart.status in place)
+                    msg_copy = msg.model_copy(deep=True)
+                    yield msg_copy
                     result_messages.append(msg)
 
                     # Also drain any messages during step
@@ -239,6 +254,12 @@ async def run(
                 step_result = streams_.StreamResult(messages=result_messages)
 
                 future.set_result(step_result)
+
+                # Yield to allow the agent task to run (e.g., tool execution)
+                # then drain any messages it produced
+                await asyncio.sleep(0)
+                for tool_msg in runtime.get_all_messages():
+                    yield tool_msg
 
     except ExceptionGroup as eg:
         # Extract HookPending from ExceptionGroup and re-raise it directly

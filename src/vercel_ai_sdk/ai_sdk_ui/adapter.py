@@ -373,12 +373,17 @@ async def to_ui_message_stream(
     current_text_id: str | None = None
     current_reasoning_id: str | None = None
     current_label: str | None = None
+    current_message_id: str | None = None
     emitted_start: bool = False
     in_step: bool = False
     started_tool_calls: set[str] = set()  # track which tool calls we've started
     emitted_tool_results: set[str] = set()  # track which tool results we've emitted
+    pending_tool_calls: set[str] = set()  # track tool calls waiting for results
 
     async for msg in messages:
+        # Determine if we need to start a new step (new message ID means new step)
+        is_new_message = current_message_id is not None and msg.id != current_message_id
+
         # Emit start part on first message or label change (new agent)
         if not emitted_start or (msg.label and msg.label != current_label):
             # Close any open blocks before switching
@@ -399,8 +404,24 @@ async def to_ui_message_stream(
             emitted_start = True
             in_step = True
             current_label = msg.label
+            current_message_id = msg.id
             started_tool_calls = set()
             emitted_tool_results = set()
+            pending_tool_calls = set()
+        elif is_new_message:
+            # New message ID within the same stream = new step
+            # Close any open blocks
+            if current_reasoning_id:
+                yield ReasoningEndPart(id=current_reasoning_id)
+                current_reasoning_id = None
+            if current_text_id:
+                yield TextEndPart(id=current_text_id)
+                current_text_id = None
+            if in_step:
+                yield FinishStepPart()
+            yield StartStepPart()
+            in_step = True
+            current_message_id = msg.id
 
         # Handle reasoning streaming (deltas) - reasoning comes before text
         if msg.reasoning_delta:
@@ -438,6 +459,9 @@ async def to_ui_message_stream(
 
         # Handle completed messages
         if msg.is_done:
+            # Track if we had an active text block before closing
+            had_active_text = current_text_id is not None
+
             # Close any open reasoning block
             if current_reasoning_id:
                 yield ReasoningEndPart(id=current_reasoning_id)
@@ -448,38 +472,74 @@ async def to_ui_message_stream(
                 yield TextEndPart(id=current_text_id)
                 current_text_id = None
 
-            # Emit tool-related parts (unified model: ToolPart contains both call and result)
-            has_pending_tool_calls = False
+            # Collect tool parts for processing
+            has_new_pending_tools = False
+            has_new_tool_results = False
+
             for part in msg.parts:
                 if isinstance(part, core.messages.ToolPart):
+                    if (
+                        part.status == "pending"
+                        and part.tool_call_id not in pending_tool_calls
+                    ):
+                        has_new_pending_tools = True
+                    elif (
+                        part.status == "result"
+                        and part.tool_call_id not in emitted_tool_results
+                    ):
+                        has_new_tool_results = True
+
+            # Process parts in two passes:
+            # 1. First handle text and pending tools
+            # 2. Then handle tool results (which may need their own step)
+
+            # Pass 1: Text and pending tool inputs
+            for part in msg.parts:
+                if isinstance(part, core.messages.TextPart):
+                    # For text parts that weren't streamed (no active text block),
+                    # AND this message doesn't have new pending tool calls or results,
+                    # emit text-start and text-end
+                    if (
+                        part.text
+                        and not had_active_text
+                        and not has_new_pending_tools
+                        and not has_new_tool_results
+                    ):
+                        text_id = _generate_id("text")
+                        yield TextStartPart(id=text_id)
+                        yield TextEndPart(id=text_id)
+                elif isinstance(part, core.messages.ToolPart):
                     if part.status == "pending":
-                        has_pending_tool_calls = True
                         # Emit start if we haven't seen this tool call streaming
                         if part.tool_call_id not in started_tool_calls:
+                            started_tool_calls.add(part.tool_call_id)
                             yield ToolInputStartPart(
                                 tool_call_id=part.tool_call_id,
                                 tool_name=part.tool_name,
                             )
-                        yield ToolInputAvailablePart(
-                            tool_call_id=part.tool_call_id,
-                            tool_name=part.tool_name,
-                            input=part.tool_args,
-                        )
-                    elif part.status == "result":
-                        # Tool result - emit output if we haven't already
+                        if part.tool_call_id not in pending_tool_calls:
+                            pending_tool_calls.add(part.tool_call_id)
+                            yield ToolInputAvailablePart(
+                                tool_call_id=part.tool_call_id,
+                                tool_name=part.tool_name,
+                                input=part.tool_args,
+                            )
+
+            # Pass 2: Tool results (same step as tool input per AI SDK protocol)
+            # Tool input and output are part of the same "step" (one LLM turn)
+            if has_new_tool_results:
+                for part in msg.parts:
+                    if (
+                        isinstance(part, core.messages.ToolPart)
+                        and part.status == "result"
+                    ):
                         if part.tool_call_id not in emitted_tool_results:
                             emitted_tool_results.add(part.tool_call_id)
+                            pending_tool_calls.discard(part.tool_call_id)
                             yield ToolOutputAvailablePart(
                                 tool_call_id=part.tool_call_id,
                                 output=part.result,
                             )
-
-            # Finish step if we had pending tool calls (will continue with tool execution)
-            if has_pending_tool_calls:
-                yield FinishStepPart()
-                yield FinishPart(finish_reason="tool-calls")
-                in_step = False
-                emitted_start = False
 
     # Final cleanup
     if current_reasoning_id:

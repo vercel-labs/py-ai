@@ -194,6 +194,9 @@ async def test_text_then_tool_then_text():
         ),
     ]
 
+    # Per AI SDK protocol, tool-input-available and tool-output-available
+    # are in the SAME step (one LLM turn). Reference:
+    # process-ui-message-stream.test.ts "server-side tool roundtrip with multiple assistant texts"
     assert await get_event_types(messages) == [
         "start",
         "start-step",
@@ -202,10 +205,9 @@ async def test_text_then_tool_then_text():
         "text-end",
         "tool-input-start",
         "tool-input-available",
+        "tool-output-available",  # Same step as tool-input (AI SDK protocol)
         "finish-step",
-        "start-step",
-        "tool-output-available",
-        "finish-step",
+        # New step for second LLM call (new message ID)
         "start-step",
         "text-start",
         "text-delta",
@@ -253,36 +255,16 @@ async def get_weather(city: str) -> str:
     return f"Sunny in {city}"
 
 
-@ai.stream
-async def mock_agent_step(
-    llm: ai.LanguageModel,
-    messages: list[Message],
-    tools: list[ai.Tool],
-) -> AsyncGenerator[Message, None]:
-    """Single LLM step wrapped with @ai.stream."""
-    async for msg in llm.stream(messages=messages, tools=tools):
-        yield msg
-
-
-async def mock_agent_loop(
+async def mock_agent(
     llm: ai.LanguageModel,
     user_query: str,
-) -> None:
-    """
-    Minimal agent loop: LLM -> tool execution -> LLM.
-    Mirrors the pattern in examples/run_custom_loop.py.
-    """
-    tools = [get_weather]
-    messages = ai.make_messages(system="You are helpful.", user=user_query)
-
-    while True:
-        result = await mock_agent_step(llm, messages, tools)
-
-        if not result.tool_calls:
-            return
-
-        messages.append(result.last_message)
-        await asyncio.gather(*(tc.execute() for tc in result.tool_calls))
+) -> ai.StreamResult:
+    """Agent using stream_loop directly."""
+    return await ai.stream_loop(
+        llm,
+        messages=ai.make_messages(system="You are helpful.", user=user_query),
+        tools=[get_weather],
+    )
 
 
 @pytest.mark.asyncio
@@ -331,7 +313,7 @@ async def test_runtime_tool_roundtrip():
 
     # Collect all messages from the runtime
     runtime_messages: list[Message] = []
-    async for msg in ai.run(mock_agent_loop, mock_llm, "What's the weather in London?"):
+    async for msg in ai.run(mock_agent, mock_llm, "What's the weather in London?"):
         runtime_messages.append(msg)
 
     # Stream through UI adapter
@@ -341,31 +323,23 @@ async def test_runtime_tool_roundtrip():
 
     # This is what SHOULD happen:
     # 1. First step yields tool call with status="pending" -> tool-input-start, tool-input-available
-    # 2. After tool execution, we should yield the updated message with status="result" -> tool-output-available
-    # 3. Second step yields final text -> text-start, text-end
+    # 2. After tool execution, we yield the same message with status="result" -> tool-output-available
+    #    (same step because same message ID)
+    # 3. Second LLM step yields final text -> text-start, text-end
     expected = [
         "start",
         "start-step",
         "tool-input-start",
         "tool-input-available",
+        "tool-output-available",  # Same step as input (same message ID)
         "finish-step",
-        # After tool execution, we should see tool-output-available
-        "start-step",
-        "tool-output-available",
-        "finish-step",
-        # Then the final text response
+        # Second LLM call (new message ID = new step)
         "start-step",
         "text-start",
         "text-end",
         "finish-step",
         "finish",
     ]
-
-    # Current actual output (bug): the tool-input events are missing because
-    # by the time we iterate over runtime_messages, the ToolPart has been
-    # mutated to status="result" (the message object is mutable and shared).
-    # Actual: ['start', 'start-step', 'tool-output-available', 'finish-step',
-    #          'start-step', 'text-start', 'text-end', 'finish-step', 'finish']
 
     assert event_types == expected
 
