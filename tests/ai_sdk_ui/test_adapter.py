@@ -8,7 +8,14 @@ from collections.abc import AsyncGenerator
 import pytest
 
 import vercel_ai_sdk as ai
-from vercel_ai_sdk.ai_sdk_ui.adapter import to_ui_message_stream
+from vercel_ai_sdk.ai_sdk_ui.adapter import (
+    to_ui_message_stream,
+    to_messages,
+    UIMessage,
+    UITextPart,
+    UIStepStartPart,
+    UIToolPart,
+)
 from vercel_ai_sdk.core.messages import Message, TextPart, ToolPart
 
 
@@ -348,3 +355,158 @@ async def _async_iter(items: list[Message]) -> AsyncGenerator[Message, None]:
     """Helper to convert a list to an async generator."""
     for item in items:
         yield item
+
+
+# -----------------------------------------------------------------------------
+# UI → Internal conversion tests
+# -----------------------------------------------------------------------------
+
+
+def test_ui_to_internal_two_turn_with_tool():
+    """Test converting a realistic two-turn conversation with tool call.
+
+    This test uses the exact payload structure from a real AI SDK frontend
+    that was causing 422 validation errors due to:
+    1. step-start parts (boundary markers)
+    2. tool-{toolName} dynamic type pattern (e.g., "tool-talk_to_mothership")
+    """
+    # Exact structure from a failing request
+    raw_messages = [
+        {
+            "id": "lmaOqWZJdKOVUbYT",
+            "role": "user",
+            "parts": [{"type": "text", "text": "when will the robots take over?"}],
+        },
+        {
+            "id": "d04b88d9a82e",
+            "role": "assistant",
+            "parts": [
+                {"type": "step-start"},
+                {
+                    "type": "text",
+                    "text": "I'll check with the mothership about this important question.",
+                    "state": "done",
+                },
+                {
+                    "type": "tool-talk_to_mothership",
+                    "toolCallId": "toolu_01FiXNXhq1kHx4TegRjSaJyv",
+                    "state": "output-available",
+                    "input": '{"question": "when will the robots take over?"}',
+                    "output": "Soon.",
+                },
+                {"type": "text", "text": "", "state": "done"},  # Empty text part
+                {"type": "step-start"},
+                {
+                    "type": "text",
+                    "text": "The mothership has spoken: Soon.",
+                    "state": "done",
+                },
+                {"type": "text", "text": "", "state": "done"},  # Empty text part
+            ],
+        },
+        {
+            "id": "ZLi3qVpgZLBjwMxZ",
+            "role": "user",
+            "parts": [
+                {
+                    "type": "text",
+                    "text": "this is a test run. can you remember the first turn?",
+                }
+            ],
+        },
+    ]
+
+    # Parse UI messages - this should NOT raise validation errors
+    ui_messages = [UIMessage.model_validate(m) for m in raw_messages]
+
+    # Verify parsing worked
+    assert len(ui_messages) == 3
+    assert ui_messages[0].role == "user"
+    assert ui_messages[1].role == "assistant"
+    assert ui_messages[2].role == "user"
+
+    # Check that step-start and tool parts were parsed correctly
+    assistant_parts = ui_messages[1].parts
+    assert isinstance(assistant_parts[0], UIStepStartPart)
+    assert isinstance(assistant_parts[1], UITextPart)
+    assert isinstance(assistant_parts[2], UIToolPart)
+    assert assistant_parts[2].tool_name == "talk_to_mothership"
+    assert assistant_parts[2].state == "output-available"
+
+    # Convert to internal format
+    internal = to_messages(ui_messages)
+
+    # Verify conversion
+    assert len(internal) == 3
+    assert internal[0].role == "user"
+    assert internal[0].text == "when will the robots take over?"
+
+    assert internal[1].role == "assistant"
+    # Should have text parts (non-empty) and tool part
+    # step-start and empty text parts should be skipped
+    text_parts = [p for p in internal[1].parts if isinstance(p, TextPart)]
+    tool_parts = internal[1].tool_calls
+
+    assert len(text_parts) == 2  # Two non-empty text parts
+    assert (
+        text_parts[0].text
+        == "I'll check with the mothership about this important question."
+    )
+    assert text_parts[1].text == "The mothership has spoken: Soon."
+
+    assert len(tool_parts) == 1
+    assert tool_parts[0].tool_name == "talk_to_mothership"
+    assert tool_parts[0].tool_call_id == "toolu_01FiXNXhq1kHx4TegRjSaJyv"
+    assert tool_parts[0].status == "result"  # output-available maps to result
+    # Non-dict results are wrapped in {"value": ...} for internal ToolPart compatibility
+    assert tool_parts[0].result == {"value": "Soon."}
+
+    assert internal[2].role == "user"
+    assert internal[2].text == "this is a test run. can you remember the first turn?"
+
+
+def test_ui_tool_part_with_dict_input():
+    """Test that tool parts with dict input (not JSON string) are handled."""
+    raw_message = {
+        "id": "msg-1",
+        "role": "assistant",
+        "parts": [
+            {
+                "type": "tool-get_weather",
+                "toolCallId": "tc-1",
+                "state": "input-available",
+                "input": {"city": "London"},  # Dict, not JSON string
+            }
+        ],
+    }
+
+    ui_msg = UIMessage.model_validate(raw_message)
+    internal = to_messages([ui_msg])
+
+    assert len(internal) == 1
+    tool_part = internal[0].tool_calls[0]
+    assert tool_part.tool_name == "get_weather"
+    assert tool_part.tool_args == '{"city": "London"}'
+    assert tool_part.status == "pending"  # input-available maps to pending
+
+
+def test_ui_skips_unsupported_parts():
+    """Test that unsupported part types are skipped gracefully."""
+    raw_message = {
+        "id": "msg-1",
+        "role": "assistant",
+        "parts": [
+            {"type": "text", "text": "Hello"},
+            {"type": "data-custom", "data": {"foo": "bar"}},  # Unsupported
+            {"type": "unknown-type", "content": "xyz"},  # Unsupported
+            {"type": "text", "text": "World"},
+        ],
+    }
+
+    ui_msg = UIMessage.model_validate(raw_message)
+    # Only text parts should be parsed (data-* and unknown skipped)
+    assert len(ui_msg.parts) == 2
+    assert all(isinstance(p, UITextPart) for p in ui_msg.parts)
+
+    internal = to_messages([ui_msg])
+    assert len(internal[0].parts) == 2

@@ -9,6 +9,12 @@ from .adapter import (
     UITextPart,
     UIReasoningPart,
     UIToolInvocationPart,
+    UIStepStartPart,
+    UIToolPart,
+    UIFilePart,
+    UISourceUrlPart,
+    UISourceDocumentPart,
+    UIToolInvocationState,
     # Headers for streaming responses
     UI_MESSAGE_STREAM_HEADERS,
 )
@@ -22,5 +28,11 @@ __all__ = [
     "UITextPart",
     "UIReasoningPart",
     "UIToolInvocationPart",
+    "UIStepStartPart",
+    "UIToolPart",
+    "UIFilePart",
+    "UISourceUrlPart",
+    "UISourceDocumentPart",
+    "UIToolInvocationState",
     "UI_MESSAGE_STREAM_HEADERS",
 ]
