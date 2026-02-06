@@ -2,31 +2,23 @@
 Based on: .reference/ai/packages/ai/src/ui/process-ui-message-stream.test.ts
 """
 
-import asyncio
 from collections.abc import AsyncGenerator
 
 import pytest
 
 import vercel_ai_sdk as ai
-from vercel_ai_sdk.ai_sdk_ui.adapter import (
-    to_ui_message_stream,
-    to_messages,
-    UIMessage,
-    UITextPart,
-    UIStepStartPart,
-    UIToolPart,
-)
-from vercel_ai_sdk.core.messages import Message, TextPart, ToolPart
+from vercel_ai_sdk.ai_sdk_ui import adapter, ui_message
+from vercel_ai_sdk.core import messages
 
 
-async def get_event_types(messages: list[Message]) -> list[str]:
+async def get_event_types(msgs: list[messages.Message]) -> list[str]:
     """Stream messages through adapter and return event type sequence."""
 
     async def stream():
-        for m in messages:
+        for m in msgs:
             yield m
 
-    return [p.type async for p in to_ui_message_stream(stream())]
+    return [p.type async for p in adapter.to_ui_message_stream(stream())]
 
 
 # -----------------------------------------------------------------------------
@@ -37,25 +29,29 @@ async def get_event_types(messages: list[Message]) -> list[str]:
 @pytest.mark.asyncio
 async def test_text_streaming():
     """Text: start -> start-step -> text-start/delta/end -> finish-step -> finish"""
-    messages = [
-        Message(
+    msgs = [
+        messages.Message(
             id="msg-1",
             role="assistant",
-            parts=[TextPart(text="Hello", delta="Hello", state="streaming")],
+            parts=[messages.TextPart(text="Hello", delta="Hello", state="streaming")],
         ),
-        Message(
+        messages.Message(
             id="msg-1",
             role="assistant",
-            parts=[TextPart(text="Hello, world!", delta=", world!", state="streaming")],
+            parts=[
+                messages.TextPart(
+                    text="Hello, world!", delta=", world!", state="streaming"
+                )
+            ],
         ),
-        Message(
+        messages.Message(
             id="msg-1",
             role="assistant",
-            parts=[TextPart(text="Hello, world!", state="done")],
+            parts=[messages.TextPart(text="Hello, world!", state="done")],
         ),
     ]
 
-    assert await get_event_types(messages) == [
+    assert await get_event_types(msgs) == [
         "start",
         "start-step",
         "text-start",
@@ -73,13 +69,13 @@ async def test_tool_roundtrip():
 
     Reference: process-ui-message-stream.test.ts "server-side tool roundtrip"
     """
-    messages = [
+    msgs = [
         # Tool pending
-        Message(
+        messages.Message(
             id="msg-1",
             role="assistant",
             parts=[
-                ToolPart(
+                messages.ToolPart(
                     tool_call_id="tc-1",
                     tool_name="get_weather",
                     tool_args='{"city": "London"}',
@@ -89,11 +85,11 @@ async def test_tool_roundtrip():
             ],
         ),
         # Tool result
-        Message(
+        messages.Message(
             id="msg-1",
             role="assistant",
             parts=[
-                ToolPart(
+                messages.ToolPart(
                     tool_call_id="tc-1",
                     tool_name="get_weather",
                     tool_args='{"city": "London"}',
@@ -104,16 +100,16 @@ async def test_tool_roundtrip():
             ],
         ),
         # Final text
-        Message(
+        messages.Message(
             id="msg-2",
             role="assistant",
             parts=[
-                TextPart(text="The weather is sunny.", state="done"),
+                messages.TextPart(text="The weather is sunny.", state="done"),
             ],
         ),
     ]
 
-    assert await get_event_types(messages) == [
+    assert await get_event_types(msgs) == [
         "start",
         "start-step",
         "tool-input-start",
@@ -138,13 +134,13 @@ async def test_text_then_tool_then_text():
     3. Result: "Soon."
     4. Text: "According to the mothership: Soon."
     """
-    messages = [
+    msgs = [
         # Streaming initial text
-        Message(
+        messages.Message(
             id="msg-1",
             role="assistant",
             parts=[
-                TextPart(
+                messages.TextPart(
                     text="I'll check with the mothership.",
                     delta="I'll check with the mothership.",
                     state="streaming",
@@ -152,12 +148,12 @@ async def test_text_then_tool_then_text():
             ],
         ),
         # Text done + tool pending
-        Message(
+        messages.Message(
             id="msg-1",
             role="assistant",
             parts=[
-                TextPart(text="I'll check with the mothership.", state="done"),
-                ToolPart(
+                messages.TextPart(text="I'll check with the mothership.", state="done"),
+                messages.ToolPart(
                     tool_call_id="tc-1",
                     tool_name="talk_to_mothership",
                     tool_args='{"question": "when?"}',
@@ -167,12 +163,12 @@ async def test_text_then_tool_then_text():
             ],
         ),
         # Tool result
-        Message(
+        messages.Message(
             id="msg-1",
             role="assistant",
             parts=[
-                TextPart(text="I'll check with the mothership.", state="done"),
-                ToolPart(
+                messages.TextPart(text="I'll check with the mothership.", state="done"),
+                messages.ToolPart(
                     tool_call_id="tc-1",
                     tool_name="talk_to_mothership",
                     tool_args='{"question": "when?"}',
@@ -183,28 +179,32 @@ async def test_text_then_tool_then_text():
             ],
         ),
         # Final text (new message)
-        Message(
+        messages.Message(
             id="msg-2",
             role="assistant",
             parts=[
-                TextPart(
+                messages.TextPart(
                     text="According to the mothership: Soon.",
                     delta="According to the mothership: Soon.",
                     state="streaming",
                 )
             ],
         ),
-        Message(
+        messages.Message(
             id="msg-2",
             role="assistant",
-            parts=[TextPart(text="According to the mothership: Soon.", state="done")],
+            parts=[
+                messages.TextPart(
+                    text="According to the mothership: Soon.", state="done"
+                )
+            ],
         ),
     ]
 
     # Per AI SDK protocol, tool-input-available and tool-output-available
     # are in the SAME step (one LLM turn). Reference:
     # process-ui-message-stream.test.ts "server-side tool roundtrip with multiple assistant texts"
-    assert await get_event_types(messages) == [
+    assert await get_event_types(msgs) == [
         "start",
         "start-step",
         "text-start",
@@ -232,7 +232,7 @@ async def test_text_then_tool_then_text():
 class MockLLM(ai.LanguageModel):
     """A mock LLM that yields pre-defined message sequences."""
 
-    def __init__(self, responses: list[list[Message]]) -> None:
+    def __init__(self, responses: list[list[messages.Message]]) -> None:
         """
         Args:
             responses: List of response sequences. Each call to stream() consumes
@@ -243,9 +243,9 @@ class MockLLM(ai.LanguageModel):
 
     async def stream(
         self,
-        messages: list[Message],
+        messages: list[messages.Message],  # noqa: F811
         tools: list[ai.Tool] | None = None,
-    ) -> AsyncGenerator[Message, None]:
+    ) -> AsyncGenerator[messages.Message, None]:
         if self._call_index >= len(self._responses):
             raise RuntimeError("MockLLM: no more responses configured")
 
@@ -292,11 +292,11 @@ async def test_runtime_tool_roundtrip():
     """
     # First LLM call: returns a tool call
     tool_call_response = [
-        Message(
+        messages.Message(
             id="msg-1",
             role="assistant",
             parts=[
-                ToolPart(
+                messages.ToolPart(
                     tool_call_id="tc-1",
                     tool_name="get_weather",
                     tool_args='{"city": "London"}',
@@ -309,23 +309,24 @@ async def test_runtime_tool_roundtrip():
 
     # Second LLM call: returns final text
     final_text_response = [
-        Message(
+        messages.Message(
             id="msg-2",
             role="assistant",
-            parts=[TextPart(text="The weather is sunny.", state="done")],
+            parts=[messages.TextPart(text="The weather is sunny.", state="done")],
         ),
     ]
 
     mock_llm = MockLLM([tool_call_response, final_text_response])
 
     # Collect all messages from the runtime
-    runtime_messages: list[Message] = []
+    runtime_messages: list[messages.Message] = []
     async for msg in ai.run(mock_agent, mock_llm, "What's the weather in London?"):
         runtime_messages.append(msg)
 
     # Stream through UI adapter
     event_types = [
-        p.type async for p in to_ui_message_stream(_async_iter(runtime_messages))
+        p.type
+        async for p in adapter.to_ui_message_stream(_async_iter(runtime_messages))
     ]
 
     # This is what SHOULD happen:
@@ -351,7 +352,9 @@ async def test_runtime_tool_roundtrip():
     assert event_types == expected
 
 
-async def _async_iter(items: list[Message]) -> AsyncGenerator[Message, None]:
+async def _async_iter(
+    items: list[messages.Message],
+) -> AsyncGenerator[messages.Message, None]:
     """Helper to convert a list to an async generator."""
     for item in items:
         yield item
@@ -417,7 +420,7 @@ def test_ui_to_internal_two_turn_with_tool():
     ]
 
     # Parse UI messages - this should NOT raise validation errors
-    ui_messages = [UIMessage.model_validate(m) for m in raw_messages]
+    ui_messages = [ui_message.UIMessage.model_validate(m) for m in raw_messages]
 
     # Verify parsing worked
     assert len(ui_messages) == 3
@@ -427,14 +430,14 @@ def test_ui_to_internal_two_turn_with_tool():
 
     # Check that step-start and tool parts were parsed correctly
     assistant_parts = ui_messages[1].parts
-    assert isinstance(assistant_parts[0], UIStepStartPart)
-    assert isinstance(assistant_parts[1], UITextPart)
-    assert isinstance(assistant_parts[2], UIToolPart)
+    assert isinstance(assistant_parts[0], ui_message.UIStepStartPart)
+    assert isinstance(assistant_parts[1], ui_message.UITextPart)
+    assert isinstance(assistant_parts[2], ui_message.UIToolPart)
     assert assistant_parts[2].tool_name == "talk_to_mothership"
     assert assistant_parts[2].state == "output-available"
 
     # Convert to internal format
-    internal = to_messages(ui_messages)
+    internal = adapter.to_messages(ui_messages)
 
     # Verify conversion
     assert len(internal) == 3
@@ -444,7 +447,7 @@ def test_ui_to_internal_two_turn_with_tool():
     assert internal[1].role == "assistant"
     # Should have text parts (non-empty) and tool part
     # step-start and empty text parts should be skipped
-    text_parts = [p for p in internal[1].parts if isinstance(p, TextPart)]
+    text_parts = [p for p in internal[1].parts if isinstance(p, messages.TextPart)]
     tool_parts = internal[1].tool_calls
 
     assert len(text_parts) == 2  # Two non-empty text parts
@@ -480,8 +483,8 @@ def test_ui_tool_part_with_dict_input():
         ],
     }
 
-    ui_msg = UIMessage.model_validate(raw_message)
-    internal = to_messages([ui_msg])
+    ui_msg = ui_message.UIMessage.model_validate(raw_message)
+    internal = adapter.to_messages([ui_msg])
 
     assert len(internal) == 1
     tool_part = internal[0].tool_calls[0]
@@ -503,10 +506,10 @@ def test_ui_skips_unsupported_parts():
         ],
     }
 
-    ui_msg = UIMessage.model_validate(raw_message)
+    ui_msg = ui_message.UIMessage.model_validate(raw_message)
     # Only text parts should be parsed (data-* and unknown skipped)
     assert len(ui_msg.parts) == 2
-    assert all(isinstance(p, UITextPart) for p in ui_msg.parts)
+    assert all(isinstance(p, ui_message.UITextPart) for p in ui_msg.parts)
 
-    internal = to_messages([ui_msg])
+    internal = adapter.to_messages([ui_msg])
     assert len(internal[0].parts) == 2

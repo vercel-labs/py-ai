@@ -10,13 +10,13 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any, Literal
 
-import pydantic
-
 from .. import core
-from . import protocol
+from . import protocol, ui_message
 
 
-# utils for serialization
+# ============================================================================
+# Serialization utilities
+# ============================================================================
 
 
 def _to_camel_case(snake_str: str) -> str:
@@ -42,6 +42,90 @@ def format_sse(part: protocol.UIMessageStreamPart) -> str:
     return f"data: {serialize_part(part)}\n\n"
 
 
+# ============================================================================
+# Internal Message → UI Message Stream Conversion
+# ============================================================================
+
+
+class _StreamState:
+    """Tracks state for UI message stream event sequencing.
+
+    Encapsulates the mutable state needed to properly sequence events
+    (reasoning blocks, text blocks, steps, tool calls) when converting
+    an internal message stream to the AI SDK UI protocol.
+    """
+
+    def __init__(self) -> None:
+        self.text_id: str | None = None
+        self.reasoning_id: str | None = None
+        self.label: str | None = None
+        self.message_id: str | None = None
+        self.emitted_start: bool = False
+        self.in_step: bool = False
+        self.started_tool_calls: set[str] = set()
+        self.emitted_tool_results: set[str] = set()
+        self.pending_tool_calls: set[str] = set()
+
+    def close_open_blocks(self) -> list[protocol.UIMessageStreamPart]:
+        """Close any open reasoning/text blocks, returning parts to emit."""
+        parts: list[protocol.UIMessageStreamPart] = []
+        if self.reasoning_id:
+            parts.append(protocol.ReasoningEndPart(id=self.reasoning_id))
+            self.reasoning_id = None
+        if self.text_id:
+            parts.append(protocol.TextEndPart(id=self.text_id))
+            self.text_id = None
+        return parts
+
+    def finish_step(self) -> list[protocol.UIMessageStreamPart]:
+        """Close open blocks and finish the current step if active."""
+        parts = self.close_open_blocks()
+        if self.in_step:
+            parts.append(protocol.FinishStepPart())
+            self.in_step = False
+        return parts
+
+    def reset_tool_tracking(self) -> None:
+        """Reset tool tracking sets (for new message/agent boundaries)."""
+        self.started_tool_calls = set()
+        self.emitted_tool_results = set()
+        self.pending_tool_calls = set()
+
+    def begin_message(
+        self, msg: core.messages.Message
+    ) -> list[protocol.UIMessageStreamPart]:
+        """Handle message/step boundaries, returning parts to emit.
+
+        Decides whether to start a new message (first message or agent switch)
+        or a new step (same stream, different message ID), closing any open
+        blocks and steps as needed.
+        """
+        parts: list[protocol.UIMessageStreamPart] = []
+        is_new_message = self.message_id is not None and msg.id != self.message_id
+
+        if not self.emitted_start or (msg.label and msg.label != self.label):
+            # First message or label change (new agent)
+            parts.extend(self.finish_step())
+            if self.emitted_start:
+                parts.append(protocol.FinishPart(finish_reason="stop"))
+
+            parts.append(protocol.StartPart(message_id=msg.id))
+            parts.append(protocol.StartStepPart())
+            self.emitted_start = True
+            self.in_step = True
+            self.label = msg.label
+            self.message_id = msg.id
+            self.reset_tool_tracking()
+        elif is_new_message:
+            # New message ID within the same stream = new step
+            parts.extend(self.finish_step())
+            parts.append(protocol.StartStepPart())
+            self.in_step = True
+            self.message_id = msg.id
+
+        return parts
+
+
 async def to_ui_message_stream(
     messages: AsyncGenerator[core.messages.Message, None],
 ) -> AsyncGenerator[protocol.UIMessageStreamPart, None]:
@@ -51,112 +135,51 @@ async def to_ui_message_stream(
     This adapter transforms the internal message format into the AI SDK
     protocol that can be consumed by useChat and other AI SDK UI hooks.
     """
-    # Track state for proper event sequencing
-    current_text_id: str | None = None
-    current_reasoning_id: str | None = None
-    current_label: str | None = None
-    current_message_id: str | None = None
-    emitted_start: bool = False
-    in_step: bool = False
-    started_tool_calls: set[str] = set()  # track which tool calls we've started
-    emitted_tool_results: set[str] = set()  # track which tool results we've emitted
-    pending_tool_calls: set[str] = set()  # track tool calls waiting for results
+    state = _StreamState()
 
     async for msg in messages:
-        # Determine if we need to start a new step (new message ID means new step)
-        is_new_message = current_message_id is not None and msg.id != current_message_id
-
-        # Emit start part on first message or label change (new agent)
-        if not emitted_start or (msg.label and msg.label != current_label):
-            # Close any open blocks before switching
-            if current_reasoning_id:
-                yield protocol.ReasoningEndPart(id=current_reasoning_id)
-                current_reasoning_id = None
-            if current_text_id:
-                yield protocol.TextEndPart(id=current_text_id)
-                current_text_id = None
-            if in_step:
-                yield protocol.FinishStepPart()
-                in_step = False
-            if emitted_start:
-                yield protocol.FinishPart(finish_reason="stop")
-
-            yield protocol.StartPart(message_id=msg.id)
-            yield protocol.StartStepPart()
-            emitted_start = True
-            in_step = True
-            current_label = msg.label
-            current_message_id = msg.id
-            started_tool_calls = set()
-            emitted_tool_results = set()
-            pending_tool_calls = set()
-        elif is_new_message:
-            # New message ID within the same stream = new step
-            # Close any open blocks
-            if current_reasoning_id:
-                yield protocol.ReasoningEndPart(id=current_reasoning_id)
-                current_reasoning_id = None
-            if current_text_id:
-                yield protocol.TextEndPart(id=current_text_id)
-                current_text_id = None
-            if in_step:
-                yield protocol.FinishStepPart()
-            yield protocol.StartStepPart()
-            in_step = True
-            current_message_id = msg.id
+        for part in state.begin_message(msg):
+            yield part
 
         # Handle reasoning streaming (deltas) - reasoning comes before text
-        if msg.reasoning_delta:
-            if not current_reasoning_id:
-                current_reasoning_id = _generate_id("reasoning")
-                yield protocol.ReasoningStartPart(id=current_reasoning_id)
-
-            yield protocol.ReasoningDeltaPart(
-                id=current_reasoning_id, delta=msg.reasoning_delta
-            )
+        if delta := msg.reasoning_delta:
+            if not state.reasoning_id:
+                state.reasoning_id = _generate_id("reasoning")
+                yield protocol.ReasoningStartPart(id=state.reasoning_id)
+            yield protocol.ReasoningDeltaPart(id=state.reasoning_id, delta=delta)
 
         # Handle text streaming (deltas)
-        if msg.text_delta:
+        if delta := msg.text_delta:
             # Close reasoning block when text starts (reasoning precedes text)
-            if current_reasoning_id:
-                yield protocol.ReasoningEndPart(id=current_reasoning_id)
-                current_reasoning_id = None
+            if state.reasoning_id:
+                yield protocol.ReasoningEndPart(id=state.reasoning_id)
+                state.reasoning_id = None
 
-            if not current_text_id:
-                current_text_id = _generate_id("text")
-                yield protocol.TextStartPart(id=current_text_id)
-
-            yield protocol.TextDeltaPart(id=current_text_id, delta=msg.text_delta)
+            if not state.text_id:
+                state.text_id = _generate_id("text")
+                yield protocol.TextStartPart(id=state.text_id)
+            yield protocol.TextDeltaPart(id=state.text_id, delta=delta)
 
         # Handle streaming tool call arguments
-        for delta in msg.tool_deltas:
-            if delta.tool_call_id not in started_tool_calls:
-                started_tool_calls.add(delta.tool_call_id)
+        for tool_delta in msg.tool_deltas:
+            if tool_delta.tool_call_id not in state.started_tool_calls:
+                state.started_tool_calls.add(tool_delta.tool_call_id)
                 yield protocol.ToolInputStartPart(
-                    tool_call_id=delta.tool_call_id,
-                    tool_name=delta.tool_name,
+                    tool_call_id=tool_delta.tool_call_id,
+                    tool_name=tool_delta.tool_name,
                 )
             yield protocol.ToolInputDeltaPart(
-                tool_call_id=delta.tool_call_id,
-                input_text_delta=delta.args_delta,
+                tool_call_id=tool_delta.tool_call_id,
+                input_text_delta=tool_delta.args_delta,
             )
 
         # Handle completed messages
         if msg.is_done:
-            # Track if we had an active text block before closing
-            had_active_text = current_text_id is not None
+            had_active_text = state.text_id is not None
+            for part in state.close_open_blocks():
+                yield part
 
-            # Close any open reasoning block
-            if current_reasoning_id:
-                yield protocol.ReasoningEndPart(id=current_reasoning_id)
-                current_reasoning_id = None
-
-            # Close any open text block
-            if current_text_id:
-                yield protocol.TextEndPart(id=current_text_id)
-                current_text_id = None
-
-            # Collect tool parts for processing
+            # Scan tool parts for new pending/result states
             has_new_pending_tools = False
             has_new_tool_results = False
 
@@ -164,12 +187,12 @@ async def to_ui_message_stream(
                 if isinstance(part, core.messages.ToolPart):
                     if (
                         part.status == "pending"
-                        and part.tool_call_id not in pending_tool_calls
+                        and part.tool_call_id not in state.pending_tool_calls
                     ):
                         has_new_pending_tools = True
                     elif (
                         part.status == "result"
-                        and part.tool_call_id not in emitted_tool_results
+                        and part.tool_call_id not in state.emitted_tool_results
                     ):
                         has_new_tool_results = True
 
@@ -179,12 +202,9 @@ async def to_ui_message_stream(
 
             # Pass 1: Text and pending tool inputs
             for part in msg.parts:
-                if isinstance(part, core.messages.TextPart):
-                    # For text parts that weren't streamed (no active text block),
-                    # AND this message doesn't have new pending tool calls or results,
-                    # emit text-start and text-end
-                    if (
-                        part.text
+                match part:
+                    case core.messages.TextPart(text=text) if (
+                        text
                         and not had_active_text
                         and not has_new_pending_tools
                         and not has_new_tool_results
@@ -192,48 +212,64 @@ async def to_ui_message_stream(
                         text_id = _generate_id("text")
                         yield protocol.TextStartPart(id=text_id)
                         yield protocol.TextEndPart(id=text_id)
-                elif isinstance(part, core.messages.ToolPart):
-                    if part.status == "pending":
-                        # Emit start if we haven't seen this tool call streaming
-                        if part.tool_call_id not in started_tool_calls:
-                            started_tool_calls.add(part.tool_call_id)
+                    case core.messages.ToolPart(
+                        status="pending",
+                        tool_call_id=tc_id,
+                        tool_name=name,
+                        tool_args=args,
+                    ):
+                        if tc_id not in state.started_tool_calls:
+                            state.started_tool_calls.add(tc_id)
                             yield protocol.ToolInputStartPart(
-                                tool_call_id=part.tool_call_id,
-                                tool_name=part.tool_name,
+                                tool_call_id=tc_id,
+                                tool_name=name,
                             )
-                        if part.tool_call_id not in pending_tool_calls:
-                            pending_tool_calls.add(part.tool_call_id)
+                        if tc_id not in state.pending_tool_calls:
+                            state.pending_tool_calls.add(tc_id)
                             yield protocol.ToolInputAvailablePart(
-                                tool_call_id=part.tool_call_id,
-                                tool_name=part.tool_name,
-                                input=part.tool_args,
+                                tool_call_id=tc_id,
+                                tool_name=name,
+                                input=args,
                             )
 
             # Pass 2: Tool results (same step as tool input per AI SDK protocol)
             # Tool input and output are part of the same "step" (one LLM turn)
             if has_new_tool_results:
                 for part in msg.parts:
-                    if (
-                        isinstance(part, core.messages.ToolPart)
-                        and part.status == "result"
-                    ):
-                        if part.tool_call_id not in emitted_tool_results:
-                            emitted_tool_results.add(part.tool_call_id)
-                            pending_tool_calls.discard(part.tool_call_id)
+                    match part:
+                        case core.messages.ToolPart(
+                            status="result",
+                            tool_call_id=tc_id,
+                            result=result,
+                        ) if tc_id not in state.emitted_tool_results:
+                            state.emitted_tool_results.add(tc_id)
+                            state.pending_tool_calls.discard(tc_id)
                             yield protocol.ToolOutputAvailablePart(
-                                tool_call_id=part.tool_call_id,
-                                output=part.result,
+                                tool_call_id=tc_id,
+                                output=result,
                             )
 
     # Final cleanup
-    if current_reasoning_id:
-        yield protocol.ReasoningEndPart(id=current_reasoning_id)
-    if current_text_id:
-        yield protocol.TextEndPart(id=current_text_id)
-    if in_step:
-        yield protocol.FinishStepPart()
-    if emitted_start:
+    for part in state.finish_step():
+        yield part
+    if state.emitted_start:
         yield protocol.FinishPart(finish_reason="stop")
+
+
+async def filter_by_label(
+    messages: AsyncGenerator[core.messages.Message, None],
+    label: str | None = None,
+) -> AsyncGenerator[core.messages.Message, None]:
+    """Filter a message stream to a single agent label.
+
+    If label is provided, only messages with that label pass through.
+    If label is None, auto-locks to whichever label arrives first.
+    """
+    async for msg in messages:
+        if label is None:
+            label = msg.label
+        if msg.label == label:
+            yield msg
 
 
 async def to_sse_stream(
@@ -245,216 +281,46 @@ async def to_sse_stream(
 
 
 # ============================================================================
-# UI Message → Internal Message Conversion
+# Tool conversion helpers
 # ============================================================================
-#
-# Reference: https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message
-#
-# Pydantic models for parsing AI SDK v6 UI messages. These can be used directly
-# with FastAPI for automatic request body parsing.
-#
-# AI SDK v6 uses a `parts` array instead of legacy `content` string.
 
-
-class UITextPart(pydantic.BaseModel):
-    """Text content part in AI SDK v6 format."""
-
-    type: Literal["text"]
-    text: str
-
-
-class UIReasoningPart(pydantic.BaseModel):
-    """Reasoning/thinking content part in AI SDK v6 format."""
-
-    type: Literal["reasoning"]
-    reasoning: str
-
-
-# Tool invocation states in AI SDK v6:
-# - "input-streaming": Tool arguments are being streamed
-# - "input-available": Tool arguments are complete, ready for execution
-# - "approval-requested": Tool requires user approval (TODO: approval workflow)
-# - "approval-responded": User has responded to approval (TODO: approval workflow)
-# - "output-available": Tool has been executed, result is available
-# - "output-error": Tool execution failed
-# - "output-denied": Tool execution was denied by user (TODO: approval workflow)
-UIToolInvocationState = Literal[
-    "input-streaming",
-    "input-available",
-    "approval-requested",
-    "approval-responded",
-    "output-available",
-    "output-error",
-    "output-denied",
-]
-
-
-class UIToolInvocationPart(pydantic.BaseModel):
-    """Tool invocation part in AI SDK v6 format (legacy type: "tool-invocation").
-
-    Note: The AI SDK frontend typically sends tool-{toolName} format instead.
-    This model is kept for backwards compatibility.
-
-    Reference: https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message
-    """
-
-    model_config = pydantic.ConfigDict(populate_by_name=True)
-
-    type: Literal["tool-invocation"]
-    tool_invocation_id: str = pydantic.Field(alias="toolInvocationId")
-    tool_name: str = pydantic.Field(alias="toolName")
-    args: dict[str, Any] = pydantic.Field(default_factory=dict)
-    state: UIToolInvocationState = "input-available"
-    result: Any | None = None
-
-
-class UIStepStartPart(pydantic.BaseModel):
-    """Step boundary marker. Skipped during conversion to internal format."""
-
-    type: Literal["step-start"]
-
-
-class UIToolPart(pydantic.BaseModel):
-    """Tool part with dynamic type pattern: tool-{toolName}.
-
-    The AI SDK frontend sends tool parts with type like "tool-get_weather"
-    where the tool name is embedded in the type string.
-    """
-
-    model_config = pydantic.ConfigDict(populate_by_name=True)
-
-    # The actual type string (e.g., "tool-talk_to_mothership")
-    # We store this to extract the tool name
-    type: str
-    tool_call_id: str = pydantic.Field(alias="toolCallId")
-    state: UIToolInvocationState
-    input: str | dict[str, Any] | None = None  # JSON string or parsed dict
-    output: Any | None = None
-    error_text: str | None = pydantic.Field(default=None, alias="errorText")
-    # TODO: title, providerExecuted, preliminary fields
-    # TODO: approval workflow (approval object)
-
-    @property
-    def tool_name(self) -> str:
-        """Extract tool name from the type string (e.g., 'tool-get_weather' -> 'get_weather')."""
-        if self.type.startswith("tool-"):
-            return self.type[5:]
-        return self.type
-
-
-class UIFilePart(pydantic.BaseModel):
-    """File part. TODO: FilePart not yet supported in core messages."""
-
-    model_config = pydantic.ConfigDict(populate_by_name=True)
-
-    type: Literal["file"]
-    media_type: str = pydantic.Field(alias="mediaType")
-    url: str
-    filename: str | None = None
-
-
-class UISourceUrlPart(pydantic.BaseModel):
-    """Source URL part. TODO: SourceUrlPart not yet supported."""
-
-    model_config = pydantic.ConfigDict(populate_by_name=True)
-
-    type: Literal["source-url"]
-    source_id: str = pydantic.Field(alias="sourceId")
-    url: str
-    title: str | None = None
-
-
-class UISourceDocumentPart(pydantic.BaseModel):
-    """Source document part. TODO: SourceDocumentPart not yet supported."""
-
-    model_config = pydantic.ConfigDict(populate_by_name=True)
-
-    type: Literal["source-document"]
-    source_id: str = pydantic.Field(alias="sourceId")
-    media_type: str = pydantic.Field(alias="mediaType")
-    title: str
-    filename: str | None = None
-
-
-# Union of all supported part types (used for type hints)
-UIMessagePart = (
-    UITextPart
-    | UIReasoningPart
-    | UIToolInvocationPart
-    | UIStepStartPart
-    | UIToolPart
-    | UIFilePart
-    | UISourceUrlPart
-    | UISourceDocumentPart
+_TOOL_RESULT_STATES: frozenset[str] = frozenset(
+    {"output-available", "output-error", "output-denied"}
 )
 
 
-def _parse_ui_part(part_data: dict[str, Any]) -> UIMessagePart | None:
-    """Parse a UI part dict, handling dynamic type patterns.
+def _map_tool_status(
+    state: ui_message.UIToolInvocationState,
+) -> Literal["pending", "result"]:
+    """Map AI SDK v6 tool invocation state to internal status."""
+    return "result" if state in _TOOL_RESULT_STATES else "pending"
 
-    Returns None for unsupported part types (they will be skipped).
+
+def _normalize_tool_args(tool_input: str | dict[str, Any] | None) -> str:
+    """Normalize tool input (JSON string, dict, or None) to a JSON string."""
+    match tool_input:
+        case str():
+            return tool_input
+        case dict():
+            return json.dumps(tool_input)
+        case _:
+            return "{}"
+
+
+def _normalize_tool_result(output: Any) -> dict[str, Any] | None:
+    """Normalize tool output to dict format for internal ToolPart.
+
+    The internal ToolPart.result expects dict | None, but AI SDK
+    output can be any type. Wrap non-dict results for compatibility.
     """
-    part_type = part_data.get("type", "")
-
-    if part_type == "text":
-        return UITextPart.model_validate(part_data)
-    elif part_type == "reasoning":
-        return UIReasoningPart.model_validate(part_data)
-    elif part_type == "tool-invocation":
-        return UIToolInvocationPart.model_validate(part_data)
-    elif part_type == "step-start":
-        return UIStepStartPart.model_validate(part_data)
-    elif part_type == "file":
-        return UIFilePart.model_validate(part_data)
-    elif part_type == "source-url":
-        return UISourceUrlPart.model_validate(part_data)
-    elif part_type == "source-document":
-        return UISourceDocumentPart.model_validate(part_data)
-    elif part_type.startswith("tool-"):
-        # Dynamic tool type: tool-{toolName} (e.g., "tool-get_weather")
-        return UIToolPart.model_validate(part_data)
-    elif part_type.startswith("data-"):
-        # TODO: data-{name} parts not yet supported
+    if output is None:
         return None
-    elif part_type == "dynamic-tool":
-        # TODO: dynamic-tool type not yet supported
-        return None
-    else:
-        # Unknown part type - skip gracefully
-        return None
+    return output if isinstance(output, dict) else {"value": output}
 
 
-class UIMessage(pydantic.BaseModel):
-    """Message in AI SDK v6 format.
-
-    Reference: https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message
-    """
-
-    model_config = pydantic.ConfigDict(populate_by_name=True)
-
-    id: str = pydantic.Field(default_factory=lambda: _generate_id("msg"))
-    role: Literal["user", "assistant", "system"]
-    parts: list[UIMessagePart] = pydantic.Field(default_factory=list)
-
-    @pydantic.field_validator("parts", mode="before")
-    @classmethod
-    def parse_parts(cls, v: list[dict[str, Any]]) -> list[UIMessagePart]:
-        """Parse parts using custom logic to handle dynamic type patterns."""
-        if not isinstance(v, list):
-            return v
-        result: list[UIMessagePart] = []
-        for part_data in v:
-            if isinstance(part_data, dict):
-                parsed = _parse_ui_part(part_data)
-                if parsed is not None:
-                    result.append(parsed)
-            else:
-                # Already parsed (e.g., in tests)
-                result.append(part_data)
-        return result
-
-
-def to_messages(ui_messages: list[UIMessage]) -> list[core.messages.Message]:
+def to_messages(
+    ui_messages: list[ui_message.UIMessage],
+) -> list[core.messages.Message]:
     """Convert AI SDK v6 UI messages to internal Message format.
 
     Args:
@@ -469,75 +335,44 @@ def to_messages(ui_messages: list[UIMessage]) -> list[core.messages.Message]:
         internal_parts: list[core.messages.Part] = []
 
         for part in ui_msg.parts:
-            if isinstance(part, UITextPart):
-                # Skip empty text parts (AI SDK sometimes sends empty text)
-                if part.text:
-                    internal_parts.append(core.messages.TextPart(text=part.text))
+            match part:
+                case ui_message.UITextPart(text=text) if text:
+                    internal_parts.append(core.messages.TextPart(text=text))
 
-            elif isinstance(part, UIReasoningPart):
-                internal_parts.append(core.messages.ReasoningPart(text=part.reasoning))
+                case ui_message.UIReasoningPart(reasoning=reasoning):
+                    internal_parts.append(core.messages.ReasoningPart(text=reasoning))
 
-            elif isinstance(part, UIToolInvocationPart):
-                # Legacy tool-invocation type
-                # Convert args dict to JSON string (internal format)
-                tool_args = json.dumps(part.args) if part.args else "{}"
-
-                # Map AI SDK v6 states to internal status
-                status: Literal["pending", "result"] = "pending"
-                if part.state in ("output-available", "output-error", "output-denied"):
-                    status = "result"
-
-                internal_parts.append(
-                    core.messages.ToolPart(
-                        tool_call_id=part.tool_invocation_id,
-                        tool_name=part.tool_name,
-                        tool_args=tool_args,
-                        status=status,
-                        result=part.result,
+                case ui_message.UIToolInvocationPart() as inv:
+                    # Legacy tool-invocation type
+                    internal_parts.append(
+                        core.messages.ToolPart(
+                            tool_call_id=inv.tool_invocation_id,
+                            tool_name=inv.tool_name,
+                            tool_args=json.dumps(inv.args) if inv.args else "{}",
+                            status=_map_tool_status(inv.state),
+                            result=inv.result,
+                        )
                     )
-                )
 
-            elif isinstance(part, UIToolPart):
-                # Dynamic tool-{toolName} type (e.g., "tool-get_weather")
-                # Input can be a JSON string or already parsed dict
-                if isinstance(part.input, str):
-                    tool_args = part.input
-                elif part.input is not None:
-                    tool_args = json.dumps(part.input)
-                else:
-                    tool_args = "{}"
-
-                # Map AI SDK v6 states to internal status
-                status: Literal["pending", "result"] = "pending"
-                if part.state in ("output-available", "output-error", "output-denied"):
-                    status = "result"
-
-                # The internal ToolPart.result expects dict | None, but AI SDK
-                # output can be any type. Wrap non-dict results for compatibility.
-                tool_result: dict[str, Any] | None = None
-                if part.output is not None:
-                    if isinstance(part.output, dict):
-                        tool_result = part.output
-                    else:
-                        tool_result = {"value": part.output}
-
-                internal_parts.append(
-                    core.messages.ToolPart(
-                        tool_call_id=part.tool_call_id,
-                        tool_name=part.tool_name,
-                        tool_args=tool_args,
-                        status=status,
-                        result=tool_result,
+                case ui_message.UIToolPart() as tp:
+                    # Dynamic tool-{toolName} type (e.g., "tool-get_weather")
+                    internal_parts.append(
+                        core.messages.ToolPart(
+                            tool_call_id=tp.tool_call_id,
+                            tool_name=tp.tool_name,
+                            tool_args=_normalize_tool_args(tp.input),
+                            status=_map_tool_status(tp.state),
+                            result=_normalize_tool_result(tp.output),
+                        )
                     )
-                )
 
-            elif isinstance(part, UIStepStartPart):
-                # Skip step-start boundary markers
-                pass
-
-            elif isinstance(part, (UIFilePart, UISourceUrlPart, UISourceDocumentPart)):
-                # TODO: these part types not yet supported in core messages
-                pass
+                case (
+                    ui_message.UIStepStartPart()
+                    | ui_message.UIFilePart()
+                    | ui_message.UISourceUrlPart()
+                    | ui_message.UISourceDocumentPart()
+                ):
+                    pass  # Skip unsupported/boundary parts
 
         # Validate user/system messages have content - OpenAI requires it for these roles.
         # Assistant messages can have empty content if they have tool calls.
