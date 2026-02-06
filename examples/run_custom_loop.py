@@ -45,7 +45,15 @@ async def custom_stream_step(
         yield msg
 
 
-async def agent(llm: ai.LanguageModel, user_query: str):
+async def agent(llm: ai.LanguageModel, user_query: str, runtime: ai.Runtime):
+    """
+    Custom agent loop with manual tool execution.
+
+    Note: When implementing a custom loop (instead of using ai.stream_loop),
+    you need to emit tool result messages manually using runtime.put_message()
+    after tool execution. This ensures the UI adapter sees both the pending
+    and result states of tool calls.
+    """
     tools = [get_weather, get_population]
 
     messages = ai.make_messages(
@@ -62,6 +70,11 @@ async def agent(llm: ai.LanguageModel, user_query: str):
         messages.append(result.last_message)
 
         await asyncio.gather(*(tc.execute() for tc in result.tool_calls))
+
+        # Emit the message with tool results so the UI sees status="result"
+        # (the stream_step already yielded the message with status="pending")
+        if result.last_message:
+            await runtime.put_message(result.last_message.model_copy(deep=True))
 
 
 async def main():

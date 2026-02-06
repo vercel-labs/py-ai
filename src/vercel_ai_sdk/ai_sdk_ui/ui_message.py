@@ -1,0 +1,216 @@
+"""
+Pydantic models for parsing AI SDK v6 UI messages.
+
+Reference: https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message
+
+These can be used directly with FastAPI for automatic request body parsing.
+AI SDK v6 uses a `parts` array instead of legacy `content` string.
+"""
+
+from __future__ import annotations
+
+import uuid
+from typing import Any, Literal
+
+import pydantic
+
+
+def _generate_id(prefix: str = "id") -> str:
+    """Generate a unique ID with prefix."""
+    return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+class UITextPart(pydantic.BaseModel):
+    """Text content part in AI SDK v6 format."""
+
+    type: Literal["text"]
+    text: str
+
+
+class UIReasoningPart(pydantic.BaseModel):
+    """Reasoning/thinking content part in AI SDK v6 format."""
+
+    type: Literal["reasoning"]
+    reasoning: str
+
+
+# Tool invocation states in AI SDK v6:
+# - "input-streaming": Tool arguments are being streamed
+# - "input-available": Tool arguments are complete, ready for execution
+# - "approval-requested": Tool requires user approval (TODO: approval workflow)
+# - "approval-responded": User has responded to approval (TODO: approval workflow)
+# - "output-available": Tool has been executed, result is available
+# - "output-error": Tool execution failed
+# - "output-denied": Tool execution was denied by user (TODO: approval workflow)
+UIToolInvocationState = Literal[
+    "input-streaming",
+    "input-available",
+    "approval-requested",
+    "approval-responded",
+    "output-available",
+    "output-error",
+    "output-denied",
+]
+
+
+class UIToolInvocationPart(pydantic.BaseModel):
+    """Tool invocation part in AI SDK v6 format (legacy type: "tool-invocation").
+
+    Note: The AI SDK frontend typically sends tool-{toolName} format instead.
+    This model is kept for backwards compatibility.
+
+    Reference: https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message
+    """
+
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
+    type: Literal["tool-invocation"]
+    tool_invocation_id: str = pydantic.Field(alias="toolInvocationId")
+    tool_name: str = pydantic.Field(alias="toolName")
+    args: dict[str, Any] = pydantic.Field(default_factory=dict)
+    state: UIToolInvocationState = "input-available"
+    result: Any | None = None
+
+
+class UIStepStartPart(pydantic.BaseModel):
+    """Step boundary marker. Skipped during conversion to internal format."""
+
+    type: Literal["step-start"]
+
+
+class UIToolPart(pydantic.BaseModel):
+    """Tool part with dynamic type pattern: tool-{toolName}.
+
+    The AI SDK frontend sends tool parts with type like "tool-get_weather"
+    where the tool name is embedded in the type string.
+    """
+
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
+    # The actual type string (e.g., "tool-talk_to_mothership")
+    # We store this to extract the tool name
+    type: str
+    tool_call_id: str = pydantic.Field(alias="toolCallId")
+    state: UIToolInvocationState
+    input: str | dict[str, Any] | None = None  # JSON string or parsed dict
+    output: Any | None = None
+    error_text: str | None = pydantic.Field(default=None, alias="errorText")
+    # TODO: title, providerExecuted, preliminary fields
+    # TODO: approval workflow (approval object)
+
+    @property
+    def tool_name(self) -> str:
+        """Extract tool name from the type string (e.g., 'tool-get_weather' -> 'get_weather')."""
+        if self.type.startswith("tool-"):
+            return self.type[5:]
+        return self.type
+
+
+class UIFilePart(pydantic.BaseModel):
+    """File part. TODO: FilePart not yet supported in core messages."""
+
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
+    type: Literal["file"]
+    media_type: str = pydantic.Field(alias="mediaType")
+    url: str
+    filename: str | None = None
+
+
+class UISourceUrlPart(pydantic.BaseModel):
+    """Source URL part. TODO: SourceUrlPart not yet supported."""
+
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
+    type: Literal["source-url"]
+    source_id: str = pydantic.Field(alias="sourceId")
+    url: str
+    title: str | None = None
+
+
+class UISourceDocumentPart(pydantic.BaseModel):
+    """Source document part. TODO: SourceDocumentPart not yet supported."""
+
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
+    type: Literal["source-document"]
+    source_id: str = pydantic.Field(alias="sourceId")
+    media_type: str = pydantic.Field(alias="mediaType")
+    title: str
+    filename: str | None = None
+
+
+# Union of all supported part types (used for type hints)
+UIMessagePart = (
+    UITextPart
+    | UIReasoningPart
+    | UIToolInvocationPart
+    | UIStepStartPart
+    | UIToolPart
+    | UIFilePart
+    | UISourceUrlPart
+    | UISourceDocumentPart
+)
+
+
+_STATIC_UI_PART_TYPES: dict[str, type[pydantic.BaseModel]] = {
+    "text": UITextPart,
+    "reasoning": UIReasoningPart,
+    "tool-invocation": UIToolInvocationPart,
+    "step-start": UIStepStartPart,
+    "file": UIFilePart,
+    "source-url": UISourceUrlPart,
+    "source-document": UISourceDocumentPart,
+}
+
+
+def _parse_ui_part(part_data: dict[str, Any]) -> UIMessagePart | None:
+    """Parse a UI part dict, handling dynamic type patterns.
+
+    Returns None for unsupported part types (they will be skipped).
+    """
+    part_type = part_data.get("type", "")
+
+    if model_cls := _STATIC_UI_PART_TYPES.get(part_type):
+        return model_cls.model_validate(part_data)
+
+    match part_type:
+        case str() as t if t.startswith("tool-"):
+            # Dynamic tool type: tool-{toolName} (e.g., "tool-get_weather")
+            return UIToolPart.model_validate(part_data)
+        case str() as t if t.startswith("data-") or t == "dynamic-tool":
+            # TODO: data-{name} and dynamic-tool not yet supported
+            return None
+        case _:
+            # Unknown part type - skip gracefully
+            return None
+
+
+class UIMessage(pydantic.BaseModel):
+    """Message in AI SDK v6 format.
+
+    Reference: https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message
+    """
+
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
+    id: str = pydantic.Field(default_factory=lambda: _generate_id("msg"))
+    role: Literal["user", "assistant", "system"]
+    parts: list[UIMessagePart] = pydantic.Field(default_factory=list)
+
+    @pydantic.field_validator("parts", mode="before")
+    @classmethod
+    def parse_parts(cls, v: list[dict[str, Any]]) -> list[UIMessagePart]:
+        """Parse parts using custom logic to handle dynamic type patterns."""
+        if not isinstance(v, list):
+            return v
+        result: list[UIMessagePart] = []
+        for part_data in v:
+            if isinstance(part_data, dict):
+                parsed = _parse_ui_part(part_data)
+                if parsed is not None:
+                    result.append(parsed)
+            else:
+                # Already parsed (e.g., in tests)
+                result.append(part_data)
+        return result

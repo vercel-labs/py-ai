@@ -1,6 +1,6 @@
 [project]
 name = "vercel-ai-sdk"
-version = "0.0.1.dev1"
+version = "0.0.1.dev3"
 description = "The AI Toolkit for Python"
 readme = "README.md"
 authors = [
@@ -22,5 +22,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "python-dotenv>=1.2.1",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
     "rich>=14.2.0",
 ]
