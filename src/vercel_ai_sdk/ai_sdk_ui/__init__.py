@@ -15,9 +15,9 @@ from .adapter import (
     UISourceUrlPart,
     UISourceDocumentPart,
     UIToolInvocationState,
-    # Headers for streaming responses
-    UI_MESSAGE_STREAM_HEADERS,
 )
+
+from .protocol import UI_MESSAGE_STREAM_HEADERS
 
 __all__ = [
     "to_ui_message_stream",

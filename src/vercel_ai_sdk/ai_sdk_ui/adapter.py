@@ -13,325 +13,7 @@ from typing import Any, Literal
 import pydantic
 
 from .. import core
-
-# necessary headers for the streaming integration to work
-
-UI_MESSAGE_STREAM_HEADERS = {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    "Connection": "keep-alive",
-    "x-vercel-ai-ui-message-stream": "v1",
-    "x-accel-buffering": "no",
-}
-
-
-# different kinds of messages expected by the frontend
-
-FinishReason = Literal[
-    "stop", "length", "content-filter", "tool-calls", "error", "other"
-]
-
-
-@dataclasses.dataclass
-class StartPart:
-    """Indicates the beginning of a new message with metadata."""
-
-    type: Literal["start"] = dataclasses.field(default="start", init=False)
-    message_id: str | None = None
-    message_metadata: Any | None = None
-
-
-@dataclasses.dataclass
-class TextStartPart:
-    """Indicates the beginning of a text block."""
-
-    id: str
-    type: Literal["text-start"] = dataclasses.field(default="text-start", init=False)
-    provider_metadata: dict[str, Any] | None = None
-
-
-@dataclasses.dataclass
-class TextDeltaPart:
-    """Contains incremental text content for the text block."""
-
-    id: str
-    delta: str
-    type: Literal["text-delta"] = dataclasses.field(default="text-delta", init=False)
-    provider_metadata: dict[str, Any] | None = None
-
-
-@dataclasses.dataclass
-class TextEndPart:
-    """Indicates the completion of a text block."""
-
-    id: str
-    type: Literal["text-end"] = dataclasses.field(default="text-end", init=False)
-    provider_metadata: dict[str, Any] | None = None
-
-
-@dataclasses.dataclass
-class ReasoningStartPart:
-    """Indicates the beginning of a reasoning block."""
-
-    id: str
-    type: Literal["reasoning-start"] = dataclasses.field(
-        default="reasoning-start", init=False
-    )
-    provider_metadata: dict[str, Any] | None = None
-
-
-@dataclasses.dataclass
-class ReasoningDeltaPart:
-    """Contains incremental reasoning content for the reasoning block."""
-
-    id: str
-    delta: str
-    type: Literal["reasoning-delta"] = dataclasses.field(
-        default="reasoning-delta", init=False
-    )
-    provider_metadata: dict[str, Any] | None = None
-
-
-@dataclasses.dataclass
-class ReasoningEndPart:
-    """Indicates the completion of a reasoning block."""
-
-    id: str
-    type: Literal["reasoning-end"] = dataclasses.field(
-        default="reasoning-end", init=False
-    )
-    provider_metadata: dict[str, Any] | None = None
-
-
-@dataclasses.dataclass
-class SourceUrlPart:
-    """References to external URLs."""
-
-    source_id: str
-    url: str
-    type: Literal["source-url"] = dataclasses.field(default="source-url", init=False)
-    title: str | None = None
-    provider_metadata: dict[str, Any] | None = None
-
-
-@dataclasses.dataclass
-class SourceDocumentPart:
-    """References to documents or files."""
-
-    source_id: str
-    media_type: str
-    title: str
-    type: Literal["source-document"] = dataclasses.field(
-        default="source-document", init=False
-    )
-    filename: str | None = None
-    provider_metadata: dict[str, Any] | None = None
-
-
-@dataclasses.dataclass
-class FilePart:
-    """The file parts contain references to files with their media type."""
-
-    url: str
-    media_type: str
-    type: Literal["file"] = dataclasses.field(default="file", init=False)
-    provider_metadata: dict[str, Any] | None = None
-
-
-@dataclasses.dataclass
-class DataPart:
-    """Custom data parts allow streaming of arbitrary structured data with type-specific handling.
-
-    The type will be formatted as 'data-{data_type}' in the output.
-    """
-
-    data_type: str
-    data: Any
-    id: str | None = None
-    transient: bool | None = None
-
-
-@dataclasses.dataclass
-class ToolInputStartPart:
-    """Indicates the beginning of tool input streaming."""
-
-    tool_call_id: str
-    tool_name: str
-    type: Literal["tool-input-start"] = dataclasses.field(
-        default="tool-input-start", init=False
-    )
-    provider_executed: bool | None = None
-    dynamic: bool | None = None
-    title: str | None = None
-
-
-@dataclasses.dataclass
-class ToolInputDeltaPart:
-    """Incremental chunks of tool input as it's being generated."""
-
-    tool_call_id: str
-    input_text_delta: str
-    type: Literal["tool-input-delta"] = dataclasses.field(
-        default="tool-input-delta", init=False
-    )
-
-
-@dataclasses.dataclass
-class ToolInputAvailablePart:
-    """Indicates that tool input is complete and ready for execution."""
-
-    tool_call_id: str
-    tool_name: str
-    input: Any
-    type: Literal["tool-input-available"] = dataclasses.field(
-        default="tool-input-available", init=False
-    )
-    provider_executed: bool | None = None
-    provider_metadata: dict[str, Any] | None = None
-    dynamic: bool | None = None
-    title: str | None = None
-
-
-@dataclasses.dataclass
-class ToolInputErrorPart:
-    """Indicates an error occurred during tool input processing."""
-
-    tool_call_id: str
-    tool_name: str
-    input: Any
-    error_text: str
-    type: Literal["tool-input-error"] = dataclasses.field(
-        default="tool-input-error", init=False
-    )
-    provider_executed: bool | None = None
-    provider_metadata: dict[str, Any] | None = None
-    dynamic: bool | None = None
-    title: str | None = None
-
-
-@dataclasses.dataclass
-class ToolOutputAvailablePart:
-    """Contains the result of tool execution."""
-
-    tool_call_id: str
-    output: Any
-    type: Literal["tool-output-available"] = dataclasses.field(
-        default="tool-output-available", init=False
-    )
-    provider_executed: bool | None = None
-    dynamic: bool | None = None
-    preliminary: bool | None = None
-
-
-@dataclasses.dataclass
-class ToolOutputErrorPart:
-    """Indicates an error occurred during tool execution."""
-
-    tool_call_id: str
-    error_text: str
-    type: Literal["tool-output-error"] = dataclasses.field(
-        default="tool-output-error", init=False
-    )
-    provider_executed: bool | None = None
-    dynamic: bool | None = None
-
-
-@dataclasses.dataclass
-class ToolOutputDeniedPart:
-    """Indicates tool execution was denied."""
-
-    tool_call_id: str
-    type: Literal["tool-output-denied"] = dataclasses.field(
-        default="tool-output-denied", init=False
-    )
-
-
-@dataclasses.dataclass
-class ToolApprovalRequestPart:
-    """Requests approval for tool execution."""
-
-    approval_id: str
-    tool_call_id: str
-    type: Literal["tool-approval-request"] = dataclasses.field(
-        default="tool-approval-request", init=False
-    )
-
-
-@dataclasses.dataclass
-class StartStepPart:
-    """A part indicating the start of a step."""
-
-    type: Literal["start-step"] = dataclasses.field(default="start-step", init=False)
-
-
-@dataclasses.dataclass
-class FinishStepPart:
-    """A part indicating that a step has been completed."""
-
-    type: Literal["finish-step"] = dataclasses.field(default="finish-step", init=False)
-
-
-@dataclasses.dataclass
-class FinishPart:
-    """A part indicating the completion of a message."""
-
-    type: Literal["finish"] = dataclasses.field(default="finish", init=False)
-    finish_reason: FinishReason | None = None
-    message_metadata: Any | None = None
-
-
-@dataclasses.dataclass
-class AbortPart:
-    """Indicates the message was aborted."""
-
-    type: Literal["abort"] = dataclasses.field(default="abort", init=False)
-
-
-@dataclasses.dataclass
-class MessageMetadataPart:
-    """Contains message metadata."""
-
-    message_metadata: Any
-    type: Literal["message-metadata"] = dataclasses.field(
-        default="message-metadata", init=False
-    )
-
-
-@dataclasses.dataclass
-class ErrorPart:
-    """The error parts are appended to the message as they are received."""
-
-    error_text: str
-    type: Literal["error"] = dataclasses.field(default="error", init=False)
-
-
-UIMessageStreamPart = (
-    StartPart
-    | TextStartPart
-    | TextDeltaPart
-    | TextEndPart
-    | ReasoningStartPart
-    | ReasoningDeltaPart
-    | ReasoningEndPart
-    | SourceUrlPart
-    | SourceDocumentPart
-    | FilePart
-    | DataPart
-    | ToolInputStartPart
-    | ToolInputDeltaPart
-    | ToolInputAvailablePart
-    | ToolInputErrorPart
-    | ToolOutputAvailablePart
-    | ToolOutputErrorPart
-    | ToolOutputDeniedPart
-    | ToolApprovalRequestPart
-    | StartStepPart
-    | FinishStepPart
-    | FinishPart
-    | AbortPart
-    | MessageMetadataPart
-    | ErrorPart
-)
+from . import protocol
 
 
 # utils for serialization
@@ -348,21 +30,21 @@ def _generate_id(prefix: str = "id") -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
-def serialize_part(part: UIMessageStreamPart) -> str:
+def serialize_part(part: protocol.UIMessageStreamPart) -> str:
     """Serialize a stream part to JSON with camelCase keys."""
     d = dataclasses.asdict(part)
     camel_dict = {_to_camel_case(k): v for k, v in d.items() if v is not None}
     return json.dumps(camel_dict)
 
 
-def format_sse(part: UIMessageStreamPart) -> str:
+def format_sse(part: protocol.UIMessageStreamPart) -> str:
     """Format a stream part as an SSE data line."""
     return f"data: {serialize_part(part)}\n\n"
 
 
 async def to_ui_message_stream(
     messages: AsyncGenerator[core.messages.Message, None],
-) -> AsyncGenerator[UIMessageStreamPart, None]:
+) -> AsyncGenerator[protocol.UIMessageStreamPart, None]:
     """
     Convert a proto_sdk message stream into AI SDK UI message stream parts.
 
@@ -388,19 +70,19 @@ async def to_ui_message_stream(
         if not emitted_start or (msg.label and msg.label != current_label):
             # Close any open blocks before switching
             if current_reasoning_id:
-                yield ReasoningEndPart(id=current_reasoning_id)
+                yield protocol.ReasoningEndPart(id=current_reasoning_id)
                 current_reasoning_id = None
             if current_text_id:
-                yield TextEndPart(id=current_text_id)
+                yield protocol.TextEndPart(id=current_text_id)
                 current_text_id = None
             if in_step:
-                yield FinishStepPart()
+                yield protocol.FinishStepPart()
                 in_step = False
             if emitted_start:
-                yield FinishPart(finish_reason="stop")
+                yield protocol.FinishPart(finish_reason="stop")
 
-            yield StartPart(message_id=msg.id)
-            yield StartStepPart()
+            yield protocol.StartPart(message_id=msg.id)
+            yield protocol.StartStepPart()
             emitted_start = True
             in_step = True
             current_label = msg.label
@@ -412,14 +94,14 @@ async def to_ui_message_stream(
             # New message ID within the same stream = new step
             # Close any open blocks
             if current_reasoning_id:
-                yield ReasoningEndPart(id=current_reasoning_id)
+                yield protocol.ReasoningEndPart(id=current_reasoning_id)
                 current_reasoning_id = None
             if current_text_id:
-                yield TextEndPart(id=current_text_id)
+                yield protocol.TextEndPart(id=current_text_id)
                 current_text_id = None
             if in_step:
-                yield FinishStepPart()
-            yield StartStepPart()
+                yield protocol.FinishStepPart()
+            yield protocol.StartStepPart()
             in_step = True
             current_message_id = msg.id
 
@@ -427,32 +109,34 @@ async def to_ui_message_stream(
         if msg.reasoning_delta:
             if not current_reasoning_id:
                 current_reasoning_id = _generate_id("reasoning")
-                yield ReasoningStartPart(id=current_reasoning_id)
+                yield protocol.ReasoningStartPart(id=current_reasoning_id)
 
-            yield ReasoningDeltaPart(id=current_reasoning_id, delta=msg.reasoning_delta)
+            yield protocol.ReasoningDeltaPart(
+                id=current_reasoning_id, delta=msg.reasoning_delta
+            )
 
         # Handle text streaming (deltas)
         if msg.text_delta:
             # Close reasoning block when text starts (reasoning precedes text)
             if current_reasoning_id:
-                yield ReasoningEndPart(id=current_reasoning_id)
+                yield protocol.ReasoningEndPart(id=current_reasoning_id)
                 current_reasoning_id = None
 
             if not current_text_id:
                 current_text_id = _generate_id("text")
-                yield TextStartPart(id=current_text_id)
+                yield protocol.TextStartPart(id=current_text_id)
 
-            yield TextDeltaPart(id=current_text_id, delta=msg.text_delta)
+            yield protocol.TextDeltaPart(id=current_text_id, delta=msg.text_delta)
 
         # Handle streaming tool call arguments
         for delta in msg.tool_deltas:
             if delta.tool_call_id not in started_tool_calls:
                 started_tool_calls.add(delta.tool_call_id)
-                yield ToolInputStartPart(
+                yield protocol.ToolInputStartPart(
                     tool_call_id=delta.tool_call_id,
                     tool_name=delta.tool_name,
                 )
-            yield ToolInputDeltaPart(
+            yield protocol.ToolInputDeltaPart(
                 tool_call_id=delta.tool_call_id,
                 input_text_delta=delta.args_delta,
             )
@@ -464,12 +148,12 @@ async def to_ui_message_stream(
 
             # Close any open reasoning block
             if current_reasoning_id:
-                yield ReasoningEndPart(id=current_reasoning_id)
+                yield protocol.ReasoningEndPart(id=current_reasoning_id)
                 current_reasoning_id = None
 
             # Close any open text block
             if current_text_id:
-                yield TextEndPart(id=current_text_id)
+                yield protocol.TextEndPart(id=current_text_id)
                 current_text_id = None
 
             # Collect tool parts for processing
@@ -506,20 +190,20 @@ async def to_ui_message_stream(
                         and not has_new_tool_results
                     ):
                         text_id = _generate_id("text")
-                        yield TextStartPart(id=text_id)
-                        yield TextEndPart(id=text_id)
+                        yield protocol.TextStartPart(id=text_id)
+                        yield protocol.TextEndPart(id=text_id)
                 elif isinstance(part, core.messages.ToolPart):
                     if part.status == "pending":
                         # Emit start if we haven't seen this tool call streaming
                         if part.tool_call_id not in started_tool_calls:
                             started_tool_calls.add(part.tool_call_id)
-                            yield ToolInputStartPart(
+                            yield protocol.ToolInputStartPart(
                                 tool_call_id=part.tool_call_id,
                                 tool_name=part.tool_name,
                             )
                         if part.tool_call_id not in pending_tool_calls:
                             pending_tool_calls.add(part.tool_call_id)
-                            yield ToolInputAvailablePart(
+                            yield protocol.ToolInputAvailablePart(
                                 tool_call_id=part.tool_call_id,
                                 tool_name=part.tool_name,
                                 input=part.tool_args,
@@ -536,20 +220,20 @@ async def to_ui_message_stream(
                         if part.tool_call_id not in emitted_tool_results:
                             emitted_tool_results.add(part.tool_call_id)
                             pending_tool_calls.discard(part.tool_call_id)
-                            yield ToolOutputAvailablePart(
+                            yield protocol.ToolOutputAvailablePart(
                                 tool_call_id=part.tool_call_id,
                                 output=part.result,
                             )
 
     # Final cleanup
     if current_reasoning_id:
-        yield ReasoningEndPart(id=current_reasoning_id)
+        yield protocol.ReasoningEndPart(id=current_reasoning_id)
     if current_text_id:
-        yield TextEndPart(id=current_text_id)
+        yield protocol.TextEndPart(id=current_text_id)
     if in_step:
-        yield FinishStepPart()
+        yield protocol.FinishStepPart()
     if emitted_start:
-        yield FinishPart(finish_reason="stop")
+        yield protocol.FinishPart(finish_reason="stop")
 
 
 async def to_sse_stream(
