@@ -208,3 +208,5 @@ __marimo__/
 
 # project-specific
 .reference
+.vercel
+.env*.local
