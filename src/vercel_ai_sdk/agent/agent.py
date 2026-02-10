@@ -9,7 +9,7 @@ from collections.abc import AsyncGenerator
 import pydantic
 
 import vercel_ai_sdk as ai
-from . import tools as tools_
+from .tools import _filesystem, BUILTIN_TOOLS
 from . import proto
 
 
@@ -45,7 +45,7 @@ class Agent:
         try:
             # TODO this should be tucked away into the framework
             # and done using Pydantic
-            approval: ToolApproval = ToolApproval.create(
+            approval: ToolApproval = await ToolApproval.create(
                 metadata={"tool_name": tc.tool_name, "tool_args": tc.tool_args}
             )
 
@@ -67,13 +67,14 @@ class Agent:
         self,
         runtime: ai.Runtime,
         messages: list[ai.Message],
+        tools: list[ai.Tool],
         label: str | None = None,
     ) -> ai.StreamResult:
         local_messages = list(messages)
 
         while True:
             result = await ai.stream_step(
-                self.model, local_messages, self.tools, label=label
+                self.model, local_messages, tools, label=label
             )
 
             if not result.tool_calls:
@@ -98,18 +99,25 @@ class Agent:
         Returns an async generator of streaming Message objects (same shape as ai.run).
         Caller iterates with `async for msg in agent.run(messages): ...`
         """
-        fs_token = tools_._filesystem.set(self.filesystem)
 
-        async def _root() -> None:
+        async def _root(runtime: ai.Runtime) -> None:
+            fs_token = _filesystem.set(self.filesystem)
             try:
+                all_tools = BUILTIN_TOOLS + self.tools
+
                 system_messages: list[ai.Message] = []
                 if self.system:
                     system_messages = ai.make_messages(system=self.system, user="")
                     # make_messages always adds a user msg — we only want system
                     system_messages = [m for m in system_messages if m.role == "system"]
 
-                await self._loop(messages=system_messages + messages, label=label)
+                await self._loop(
+                    runtime,
+                    messages=system_messages + messages,
+                    tools=all_tools,
+                    label=label,
+                )
             finally:
-                tools_._filesystem.reset(fs_token)
+                _filesystem.reset(fs_token)
 
         return ai.run(_root)
