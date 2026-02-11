@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import contextvars
+import dataclasses
 from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
 from typing import TYPE_CHECKING, Any, get_type_hints
 
@@ -12,15 +13,35 @@ from . import tools as tools_
 from . import llm as llm_
 from . import streams as streams_
 from . import hooks as hooks_
+from . import checkpoint as checkpoint_
 
 if TYPE_CHECKING:
     from .hooks import Hook
 
 
+# ── Queue item types ──────────────────────────────────────────────
+
+
+@dataclasses.dataclass
+class HookSuspension:
+    """Submitted to the step queue when a hook needs resolution."""
+
+    label: str
+    hook_type: str
+    metadata: dict[str, Any]
+    future: asyncio.Future[Any]
+
+
+# ── Runtime ───────────────────────────────────────────────────────
+
+
 class Runtime:
     """
+    Central coordinator for the agent loop.
+
     Functions decorated with @stream submit step functions to the queue.
-    run() pulls steps, runs them, yields messages, and resolves futures.
+    Hooks submit HookSuspension items to the same queue.
+    run() pulls items, processes them, yields messages, and resolves futures.
     """
 
     class _Sentinel:
@@ -28,35 +49,65 @@ class Runtime:
 
     _SENTINEL = _Sentinel()
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        checkpoint: checkpoint_.Checkpoint | None = None,
+        resolutions: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
         self._step_queue: asyncio.Queue[
             tuple[streams_.Stream, asyncio.Future[streams_.StreamResult]]
+            | HookSuspension
             | Runtime._Sentinel
         ] = asyncio.Queue()
 
-        # Message queue for streaming tools and hooks (runtime.put_message)
+        # Message queue for streaming tool results and hook messages
         self._message_queue: asyncio.Queue[messages_.Message] = asyncio.Queue()
 
-        # Hook support: pending hooks registry
-        self._pending_hooks: dict[str, tuple[asyncio.Future[Any], Hook[Any]]] = {}
+        # Checkpoint: replay state from previous run
+        self._checkpoint = checkpoint or checkpoint_.Checkpoint()
+        self._resolutions = resolutions or {}
+
+        # Replay cursors
+        self._step_index: int = 0
+        self._tool_replay: dict[str, Any] = {
+            t.tool_call_id: t.result for t in self._checkpoint.tools
+        }
+        self._hook_replay: dict[str, dict[str, Any]] = {
+            h.label: h.resolution for h in self._checkpoint.hooks
+        }
+        # Merge explicit resolutions (override checkpoint)
+        self._hook_replay.update(self._resolutions)
+
+        # Recording: new events from this run
+        self._step_log: list[checkpoint_.StepEvent] = []
+        self._tool_log: list[checkpoint_.ToolEvent] = []
+        self._hook_log: list[checkpoint_.HookEvent] = []
+
+        # Pending hooks (unresolved during this run)
+        self._pending_hooks: dict[str, HookSuspension] = {}
+
+        # Hook support for long-running mode: external resolution
+        self._hook_futures: dict[str, tuple[asyncio.Future[Any], Hook[Any]]] = {}
+
+    # ── Step queue ────────────────────────────────────────────────
 
     async def put_step(
         self, step_fn: streams_.Stream, future: asyncio.Future[streams_.StreamResult]
     ) -> None:
-        """Submit a step function to be executed by run()."""
         await self._step_queue.put((step_fn, future))
 
-    async def get_step(
-        self,
-    ) -> tuple[streams_.Stream, asyncio.Future[streams_.StreamResult]] | _Sentinel:
-        """Get next step from queue (called by run())."""
-        return await self._step_queue.get()
+    async def put_hook_suspension(self, suspension: HookSuspension) -> None:
+        await self._step_queue.put(suspension)
+
+    async def signal_done(self) -> None:
+        await self._step_queue.put(self._SENTINEL)
+
+    # ── Message queue ─────────────────────────────────────────────
 
     async def put_message(self, message: messages_.Message) -> None:
         await self._message_queue.put(message)
 
     def get_all_messages(self) -> list[messages_.Message]:
-        """Drain all pending messages from the message queue."""
         msgs = []
         while not self._message_queue.empty():
             try:
@@ -65,22 +116,70 @@ class Runtime:
                 break
         return msgs
 
+    # ── Replay / record: steps ────────────────────────────────────
+
+    def try_replay_step(self) -> streams_.StreamResult | None:
+        if self._step_index < len(self._checkpoint.steps):
+            event = self._checkpoint.steps[self._step_index]
+            self._step_index += 1
+            return event.to_stream_result()
+        return None
+
+    def record_step(self, result: streams_.StreamResult) -> None:
+        event = checkpoint_.StepEvent(
+            index=self._step_index,
+            messages=[m.model_dump() for m in result.messages],
+        )
+        self._step_log.append(event)
+        self._step_index += 1
+
+    # ── Replay / record: tools ────────────────────────────────────
+
+    def try_replay_tool(self, tool_call_id: str) -> Any | None:
+        if tool_call_id in self._tool_replay:
+            return self._tool_replay[tool_call_id]
+        return None
+
+    def record_tool(self, tool_call_id: str, result: Any) -> None:
+        self._tool_log.append(
+            checkpoint_.ToolEvent(tool_call_id=tool_call_id, result=result)
+        )
+
+    # ── Replay / record: hooks ────────────────────────────────────
+
+    def get_hook_resolution(self, label: str) -> dict[str, Any] | None:
+        return self._hook_replay.get(label)
+
+    def record_hook(self, label: str, resolution: dict[str, Any]) -> None:
+        self._hook_log.append(checkpoint_.HookEvent(label=label, resolution=resolution))
+
+    # ── Hook support for long-running mode ────────────────────────
+
     async def put_hook(
         self, hook: hooks_.Hook[Any], future: asyncio.Future[Any]
     ) -> None:
-        self._pending_hooks[hook.id] = (future, hook)
-        await self._message_queue.put(hook.to_message(status="pending"))
+        """Register a hook for external resolution (long-running mode)."""
+        self._hook_futures[hook.id] = (future, hook)
 
     def get_all_hooks(self) -> dict[str, Hook[Any]]:
-        """Get all pending hooks (for inspection/UI)."""
-        return {k: v[1] for k, v in self._pending_hooks.items()}
+        return {k: v[1] for k, v in self._hook_futures.items()}
 
-    async def signal_done(self) -> None:
-        """Signal that no more steps will be submitted."""
-        await self._step_queue.put(self._SENTINEL)
+    # ── Checkpoint ────────────────────────────────────────────────
+
+    def get_checkpoint(self) -> checkpoint_.Checkpoint:
+        return checkpoint_.Checkpoint(
+            steps=list(self._checkpoint.steps) + self._step_log,
+            tools=list(self._checkpoint.tools) + self._tool_log,
+            hooks=list(self._checkpoint.hooks) + self._hook_log,
+        )
 
 
 _runtime: contextvars.ContextVar[Runtime] = contextvars.ContextVar("runtime")
+
+
+def get_checkpoint() -> checkpoint_.Checkpoint:
+    """Get the current checkpoint from the active Runtime."""
+    return _runtime.get().get_checkpoint()
 
 
 def _find_runtime_param(fn: Callable[..., Any]) -> str | None:
@@ -95,9 +194,7 @@ def _find_runtime_param(fn: Callable[..., Any]) -> str | None:
     return None
 
 
-# these are convenience functions assembled from
-# the core primitives. users could use this for reference
-# when implementing custom workflows.
+# ── Convenience functions ─────────────────────────────────────────
 
 
 @streams_.stream
@@ -113,6 +210,57 @@ async def stream_step(
         yield msg
 
 
+async def execute_tool(
+    tool_call: messages_.ToolPart,
+    message: messages_.Message | None = None,
+) -> Any:
+    """
+    Execute a single tool call with replay support.
+
+    Looks up the tool by name from the global registry, executes it,
+    and updates the ToolPart (and parent Message) with the result.
+    Emits the updated message to the Runtime queue so the UI sees
+    the transition from status="pending" to status="result".
+
+    If a checkpoint exists with a cached result for this tool_call_id,
+    returns the cached result without re-executing.
+    """
+    rt = _runtime.get(None)
+
+    # Replay: return cached result if available
+    if rt:
+        cached = rt.try_replay_tool(tool_call.tool_call_id)
+        if cached is not None:
+            tool_call.set_result(cached)
+            return cached
+
+    # Fresh execution
+    tool = tools_.get_tool(tool_call.tool_name)
+    if tool is None:
+        raise ValueError(f"Tool not found in registry: {tool_call.tool_name}")
+
+    kwargs: dict[str, Any] = (
+        json.loads(tool_call.tool_args) if tool_call.tool_args else {}
+    )
+
+    # Inject runtime if the tool has a Runtime-typed parameter
+    if rt and (runtime_param := _find_runtime_param(tool.fn)):
+        kwargs[runtime_param] = rt
+
+    result = await tool.fn(**kwargs)
+    tool_call.set_result(result)
+
+    # Record for checkpoint
+    if rt:
+        rt.record_tool(tool_call.tool_call_id, result)
+
+    # Emit updated message so UI sees status="result"
+    if rt and message:
+        await rt.put_message(message.model_copy(deep=True))
+
+    return result
+
+
 async def stream_loop(
     llm: llm_.LanguageModel,
     messages: list[messages_.Message],
@@ -121,7 +269,6 @@ async def stream_loop(
 ) -> streams_.StreamResult:
     """Agent loop: stream LLM, execute tools, repeat until done."""
     local_messages = list(messages)
-    runtime = _runtime.get(None)
 
     while True:
         result = await stream_step(llm, local_messages, tools, label=label)
@@ -129,50 +276,68 @@ async def stream_loop(
         if not result.tool_calls:
             return result
 
-        local_messages.append(result.last_message)
+        last_msg = result.last_message
+        local_messages.append(last_msg)
 
-        await asyncio.gather(*(tc.execute() for tc in result.tool_calls))
-
-        # Emit a copy of the message with tool results so the UI sees the transition
-        # from status="pending" to status="result". We copy to avoid mutation issues
-        # since the original message object was already yielded.
-        if runtime and result.last_message:
-            await runtime.put_message(result.last_message.model_copy(deep=True))
+        await asyncio.gather(
+            *(execute_tool(tc, message=last_msg) for tc in result.tool_calls)
+        )
 
 
-async def execute_tool(
-    tool_call: messages_.ToolPart,
-    tools: list[tools_.Tool],
-    message: messages_.Message | None = None,
-) -> Any:
+# ── RunResult ─────────────────────────────────────────────────────
+
+
+@dataclasses.dataclass
+class HookInfo:
+    """Info about a pending (unresolved) hook, exposed on RunResult."""
+
+    label: str
+    hook_type: str
+    metadata: dict[str, Any]
+
+
+class RunResult:
     """
-    Execute a single tool call and optionally update the message.
+    Returned by run(). Async-iterate for messages, then check state.
 
-    If message is provided, updates the tool part with the result.
-    Can be wrapped with @workflow.step for durability.
-    Use with asyncio.gather() for parallel execution.
+    Usage:
+        result = ai.run(my_graph, llm, query)
+        async for msg in result:
+            ...
+        result.checkpoint    # Checkpoint with all completed work
+        result.pending_hooks # dict of unresolved hooks (empty if graph completed)
     """
-    tool_fn = next((t for t in tools if t.name == tool_call.tool_name), None)
-    if tool_fn is None:
-        raise ValueError(f"Tool not found: {tool_call.tool_name}")
 
-    # Inject runtime if the tool has a Runtime-typed parameter
-    kwargs: dict[str, Any] = (
-        json.loads(tool_call.tool_args) if tool_call.tool_args else {}
-    )
-    rt = _runtime.get(None)
-    if rt and (runtime_param := _find_runtime_param(tool_fn.fn)):
-        kwargs[runtime_param] = rt
+    def __init__(self) -> None:
+        self._messages: AsyncGenerator[messages_.Message, None] | None = None
+        self._runtime: Runtime | None = None
 
-    result = await tool_fn.fn(**kwargs)
+    @property
+    def checkpoint(self) -> checkpoint_.Checkpoint:
+        if self._runtime is None:
+            return checkpoint_.Checkpoint()
+        return self._runtime.get_checkpoint()
 
-    if message is not None:
-        tool_part = message.get_tool_part(tool_call.tool_call_id)
-        if tool_part:
-            tool_part.status = "result"
-            tool_part.result = result
+    @property
+    def pending_hooks(self) -> dict[str, HookInfo]:
+        if self._runtime is None:
+            return {}
+        return {
+            label: HookInfo(
+                label=sus.label,
+                hook_type=sus.hook_type,
+                metadata=sus.metadata,
+            )
+            for label, sus in self._runtime._pending_hooks.items()
+        }
 
-    return result
+    async def __aiter__(self) -> AsyncGenerator[messages_.Message, None]:
+        if self._messages is not None:
+            async for msg in self._messages:
+                yield msg
+
+
+# ── run() ─────────────────────────────────────────────────────────
 
 
 async def _stop_when_done(runtime: Runtime, task: Awaitable[None]) -> None:
@@ -182,104 +347,117 @@ async def _stop_when_done(runtime: Runtime, task: Awaitable[None]) -> None:
         await runtime.signal_done()
 
 
-async def run(
+def run(
     root: Callable[..., Coroutine[Any, Any, Any]],
     *args: Any,
-) -> AsyncGenerator[messages_.Message, None]:
+    checkpoint: checkpoint_.Checkpoint | None = None,
+    resolutions: dict[str, dict[str, Any]] | None = None,
+) -> RunResult:
     """
     Main entry point.
 
     1. Starts the root function as a background task
-    2. Pulls steps from the Runtime queue
+    2. Pulls steps and hook suspensions from the Runtime queue
     3. Executes each step, yielding messages
-    4. Resolves futures to unblock user code
+    4. Resolves or cancels hooks
+    5. Returns RunResult with .checkpoint and .pending_hooks
     """
-    from . import hooks as hooks_
+    result = RunResult()
 
-    runtime = Runtime()
-    token_runtime = _runtime.set(runtime)
+    async def _generate() -> AsyncGenerator[messages_.Message, None]:
+        runtime = Runtime(checkpoint=checkpoint, resolutions=resolutions)
+        result._runtime = runtime
+        token_runtime = _runtime.set(runtime)
 
-    mcp_pool: dict[str, mcp.client._Connection] = {}
-    mcp_token = mcp.client._pool.set(mcp_pool)
+        mcp_pool: dict[str, mcp.client._Connection] = {}
+        mcp_token = mcp.client._pool.set(mcp_pool)
 
-    kwargs: dict[str, Any] = {}
-    if runtime_param := _find_runtime_param(root):
-        kwargs[runtime_param] = runtime
+        kwargs: dict[str, Any] = {}
+        if runtime_param := _find_runtime_param(root):
+            kwargs[runtime_param] = runtime
 
-    try:
-        async with asyncio.TaskGroup() as tg:
-            _task: asyncio.Task[None] = tg.create_task(
-                _stop_when_done(runtime, root(*args, **kwargs))
-            )
+        try:
+            async with asyncio.TaskGroup() as tg:
+                _task: asyncio.Task[None] = tg.create_task(
+                    _stop_when_done(runtime, root(*args, **kwargs))
+                )
 
-            while True:
-                # Drain any pending messages (including hook messages)
-                for msg in runtime.get_all_messages():
-                    yield msg
-
-                # Use wait_for with a short timeout to allow checking queues periodically
-                # This is needed because hook messages can arrive while we're waiting
-                try:
-                    step_item = await asyncio.wait_for(runtime.get_step(), timeout=0.1)
-                except asyncio.TimeoutError:
-                    # No step ready, loop back to drain queues
-                    continue
-
-                if isinstance(step_item, Runtime._Sentinel):
-                    # Drain remaining messages before exiting
+                while True:
+                    # Drain pending messages
                     for msg in runtime.get_all_messages():
                         yield msg
-                    break
 
-                step_fn, future = step_item
+                    # Wait for next queue item
+                    try:
+                        step_item = await asyncio.wait_for(
+                            runtime._step_queue.get(), timeout=0.1
+                        )
+                    except asyncio.TimeoutError:
+                        continue
 
-                # Drain any messages that arrived before this step
-                # (e.g., tool result messages from the previous step)
-                for tool_msg in runtime.get_all_messages():
-                    yield tool_msg
+                    if isinstance(step_item, Runtime._Sentinel):
+                        for msg in runtime.get_all_messages():
+                            yield msg
+                        break
 
-                result_messages: list[messages_.Message] = []
+                    # ── Hook suspension ────────────────────────
+                    if isinstance(step_item, HookSuspension):
+                        resolution = runtime.get_hook_resolution(step_item.label)
+                        if resolution is not None:
+                            # Resolve immediately
+                            step_item.future.set_result(resolution)
+                            runtime.record_hook(step_item.label, resolution)
+                        else:
+                            # No resolution — cancel the future, record as pending
+                            runtime._pending_hooks[step_item.label] = step_item
+                            step_item.future.cancel()
+                            # Yield pending hook message
+                            yield messages_.Message(
+                                role="assistant",
+                                parts=[
+                                    messages_.HookPart(
+                                        hook_id=step_item.label,
+                                        hook_type=step_item.hook_type,
+                                        status="pending",
+                                        metadata=step_item.metadata,
+                                    )
+                                ],
+                            )
 
-                async for msg in step_fn():
-                    # Yield a copy to protect consumers from mutations
-                    # (e.g., tool execution mutates ToolPart.status in place)
-                    msg_copy = msg.model_copy(deep=True)
-                    yield msg_copy
-                    result_messages.append(msg)
+                        # Drain messages after hook processing
+                        for msg in runtime.get_all_messages():
+                            yield msg
+                        continue
 
-                    # Also drain any messages during step
+                    # ── Regular step ───────────────────────────
+                    step_fn, future = step_item
+
                     for tool_msg in runtime.get_all_messages():
                         yield tool_msg
 
-                step_result = streams_.StreamResult(messages=result_messages)
+                    result_messages: list[messages_.Message] = []
 
-                future.set_result(step_result)
+                    async for msg in step_fn():
+                        msg_copy = msg.model_copy(deep=True)
+                        yield msg_copy
+                        result_messages.append(msg)
 
-                # Yield to allow the agent task to run (e.g., tool execution)
-                # then drain any messages it produced
-                await asyncio.sleep(0)
-                for tool_msg in runtime.get_all_messages():
-                    yield tool_msg
+                        for tool_msg in runtime.get_all_messages():
+                            yield tool_msg
 
-    except ExceptionGroup as eg:
-        # Extract HookPending from ExceptionGroup and re-raise it directly
-        # (TaskGroup wraps exceptions from tasks in ExceptionGroup)
-        hook_pending = None
-        other_exceptions = []
-        for exc in eg.exceptions:
-            if isinstance(exc, hooks_.HookPending):
-                hook_pending = exc
-            else:
-                other_exceptions.append(exc)
+                    step_result = streams_.StreamResult(messages=result_messages)
+                    future.set_result(step_result)
 
-        if hook_pending is not None and not other_exceptions:
-            raise hook_pending from None
-        else:
-            raise
+                    await asyncio.sleep(0)
+                    for tool_msg in runtime.get_all_messages():
+                        yield tool_msg
 
-    finally:
-        if mcp_token is not None:
-            await mcp.client.close_connections()
-            mcp.client._pool.reset(mcp_token)
+        finally:
+            if mcp_token is not None:
+                await mcp.client.close_connections()
+                mcp.client._pool.reset(mcp_token)
 
-        _runtime.reset(token_runtime)
+            _runtime.reset(token_runtime)
+
+    result._messages = _generate()
+    return result

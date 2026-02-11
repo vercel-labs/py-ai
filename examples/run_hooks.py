@@ -35,16 +35,19 @@ async def graph(llm: ai.LanguageModel, query: str):
 
         for tc in result.tool_calls:
             if tc.tool_name == "contact_mothership":
-                # Create hook - this emits a Message with HookPart(status="pending") and blocks
-                approval = await CommunicationApproval.create()
+                # Create hook - blocks until resolved (long-running)
+                # or cancelled (serverless)
+                approval = await CommunicationApproval.create(
+                    f"approve_{tc.tool_call_id}",
+                    metadata={"tool": tc.tool_name},
+                )
 
                 if approval.granted:
-                    await tc.execute()
+                    await ai.execute_tool(tc, message=result.last_message)
                 else:
                     tc.set_result({"error": f"Rejected: {approval.reason}"})
             else:
-                # non-sensitive tools execute directly
-                await tc.execute()
+                await ai.execute_tool(tc, message=result.last_message)
 
         messages.append(result.last_message)
 
@@ -66,7 +69,8 @@ async def main():
     )
 
     # Run the graph and handle hook messages
-    async for msg in ai.run(graph, llm, "When will the robots take over?"):
+    result = ai.run(graph, llm, "When will the robots take over?")
+    async for msg in result:
         hook_part = get_hook_part(msg)
 
         if hook_part:
@@ -78,7 +82,6 @@ async def main():
 
             if hook_part.status == "pending":
                 # In a real app, this would come from user input via API/websocket
-                # For demo purposes, we auto-approve after a short delay
                 rich.print("[bold green]Auto-approving in 1 second...[/]")
                 await asyncio.sleep(1)
 
@@ -88,7 +91,6 @@ async def main():
                     {"granted": True, "reason": "Auto-approved for demo"},
                 )
         else:
-            # Regular message
             if msg.text_delta:
                 print(msg.text_delta, end="", flush=True)
 

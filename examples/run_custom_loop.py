@@ -45,14 +45,13 @@ async def custom_stream_step(
         yield msg
 
 
-async def agent(llm: ai.LanguageModel, user_query: str, runtime: ai.Runtime):
+async def agent(llm: ai.LanguageModel, user_query: str):
     """
     Custom agent loop with manual tool execution.
 
-    Note: When implementing a custom loop (instead of using ai.stream_loop),
-    you need to emit tool result messages manually using runtime.put_message()
-    after tool execution. This ensures the UI adapter sees both the pending
-    and result states of tool calls.
+    ai.execute_tool() handles looking up the tool, executing it,
+    updating the ToolPart with the result, and emitting the updated
+    message to the Runtime queue so the UI sees the transition.
     """
     tools = [get_weather, get_population]
 
@@ -67,14 +66,12 @@ async def agent(llm: ai.LanguageModel, user_query: str, runtime: ai.Runtime):
         if not result.tool_calls:
             return result
 
-        messages.append(result.last_message)
+        last_msg = result.last_message
+        messages.append(last_msg)
 
-        await asyncio.gather(*(tc.execute() for tc in result.tool_calls))
-
-        # Emit the message with tool results so the UI sees status="result"
-        # (the stream_step already yielded the message with status="pending")
-        if result.last_message:
-            await runtime.put_message(result.last_message.model_copy(deep=True))
+        await asyncio.gather(
+            *(ai.execute_tool(tc, message=last_msg) for tc in result.tool_calls)
+        )
 
 
 async def main():
@@ -87,9 +84,10 @@ async def main():
     # Track tool calls we've already printed to avoid duplicates
     printed_tool_calls: set[str] = set()
 
-    async for msg in ai.run(
+    result = ai.run(
         agent, llm, "What's the weather and population of New York and Los Angeles?"
-    ):
+    )
+    async for msg in result:
         if msg.label == "custom_loop_marker":
             rich.print(f"\n[red]{msg.text}[/red]")
             printed_tool_calls.clear()  # Reset for new step

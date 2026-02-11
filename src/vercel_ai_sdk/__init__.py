@@ -17,12 +17,16 @@ from .core.llm import LanguageModel
 from .core.streams import StreamResult, stream
 from .core.runtime import (
     Runtime,
+    RunResult,
+    HookInfo,
     stream_step,
     stream_loop,
     execute_tool,
+    get_checkpoint,
     run,
 )
-from .core.hooks import Hook, HookPending, hook
+from .core.hooks import Hook, hook
+from .core.checkpoint import Checkpoint
 
 __all__ = [
     # Types
@@ -36,16 +40,19 @@ __all__ = [
     "Tool",
     "LanguageModel",
     "Runtime",
+    "RunResult",
+    "HookInfo",
     "StreamResult",
     "Hook",
     "HookPart",
-    "HookPending",
+    "Checkpoint",
     # Functions
     "tool",
     "stream",
     "stream_step",
     "stream_loop",
     "execute_tool",
+    "get_checkpoint",
     "run",
     "make_messages",
     "hook",
