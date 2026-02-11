@@ -181,7 +181,7 @@ async def test_hook_cancellation_with_pending_hooks():
         ]
     )
 
-    result = ai.run(graph, llm)
+    result = ai.run(graph, llm, cancel_on_hooks=True)
     msgs = [msg async for msg in result]
 
     # Hook should be pending
@@ -214,8 +214,8 @@ async def test_hook_resolution_on_reentry():
         )
     ]
 
-    # First run: hook is cancelled (no resolution)
-    result1 = ai.run(graph, MockLLM([response]))
+    # First run: hook is cancelled (no resolution, serverless mode)
+    result1 = ai.run(graph, MockLLM([response]), cancel_on_hooks=True)
     [msg async for msg in result1]
     assert "my_approval" in result1.pending_hooks
     cp = result1.checkpoint
@@ -266,7 +266,7 @@ async def test_parallel_hooks_all_collected():
         ]
     )
 
-    result = ai.run(graph, llm)
+    result = ai.run(graph, llm, cancel_on_hooks=True)
     [msg async for msg in result]
 
     # Both hooks should be pending
@@ -303,8 +303,8 @@ async def test_parallel_hooks_resolve_on_reentry():
         )
     ]
 
-    # First run: both hooks cancelled
-    result1 = ai.run(graph, MockLLM([response]))
+    # First run: both hooks cancelled (serverless mode)
+    result1 = ai.run(graph, MockLLM([response]), cancel_on_hooks=True)
     [msg async for msg in result1]
     assert len(result1.pending_hooks) == 2
     cp = result1.checkpoint

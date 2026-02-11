@@ -20,13 +20,16 @@ class Hook(Generic[T]):
         if approval.granted:
             ...
 
-    In long-running mode: the await blocks until Hook.resolve() is called
-    from outside the graph (e.g., websocket handler, API endpoint).
+    Behavior depends on the cancel_on_hooks flag passed to ai.run():
 
-    In serverless mode: if no resolution is available, the hook's future
-    is cancelled by run(). The branch receives CancelledError and dies
-    cleanly. Other parallel branches continue to their furthest point.
-    On re-entry, pass resolutions= to run() to resolve the hooks.
+    cancel_on_hooks=False (default, long-running): the await blocks until
+    Hook.resolve() is called from outside the graph (e.g., websocket
+    handler, API endpoint).
+
+    cancel_on_hooks=True (serverless): if no resolution is available, the
+    hook's future is cancelled by run(). The branch receives CancelledError
+    and dies cleanly. On re-entry, pass checkpoint= and resolutions= to
+    run() to replay completed work and resolve the hooks.
     """
 
     _schema: ClassVar[type[pydantic.BaseModel]]
@@ -61,8 +64,8 @@ class Hook(Generic[T]):
 
         The hook is submitted to the Runtime's step queue. run() will either:
         - Resolve immediately (if a resolution is available from checkpoint/resolutions)
-        - Cancel the future (if no resolution is available, serverless mode)
-        - Hold the future (long-running mode, waiting for external resolve() call)
+        - Cancel the future (cancel_on_hooks=True, serverless mode)
+        - Hold the future (cancel_on_hooks=False, long-running mode)
 
         Args:
             label: Stable identifier for this hook. Used to match resolutions

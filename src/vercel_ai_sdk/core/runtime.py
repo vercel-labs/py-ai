@@ -352,6 +352,7 @@ def run(
     *args: Any,
     checkpoint: checkpoint_.Checkpoint | None = None,
     resolutions: dict[str, dict[str, Any]] | None = None,
+    cancel_on_hooks: bool = False,
 ) -> RunResult:
     """
     Main entry point.
@@ -359,7 +360,11 @@ def run(
     1. Starts the root function as a background task
     2. Pulls steps and hook suspensions from the Runtime queue
     3. Executes each step, yielding messages
-    4. Resolves or cancels hooks
+    4. Resolves or suspends hooks depending on mode:
+       - cancel_on_hooks=True  (serverless): cancel the future, branch dies,
+         caller inspects result.pending_hooks and result.checkpoint to resume
+       - cancel_on_hooks=False (long-running, default): future stays alive,
+         external code calls Hook.resolve() / Hook.cancel() to unblock
     5. Returns RunResult with .checkpoint and .pending_hooks
     """
     result = RunResult()
@@ -408,9 +413,16 @@ def run(
                             step_item.future.set_result(resolution)
                             runtime.record_hook(step_item.label, resolution)
                         else:
-                            # No resolution — cancel the future, record as pending
+                            # No resolution available
                             runtime._pending_hooks[step_item.label] = step_item
-                            step_item.future.cancel()
+                            if cancel_on_hooks:
+                                # Serverless: cancel the future so the branch
+                                # dies with CancelledError. Caller inspects
+                                # result.pending_hooks to resume later.
+                                step_item.future.cancel()
+                            # else: long-running — future stays alive,
+                            # external code calls Hook.resolve() to unblock.
+
                             # Yield pending hook message
                             yield messages_.Message(
                                 role="assistant",

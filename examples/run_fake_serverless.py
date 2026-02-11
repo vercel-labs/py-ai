@@ -108,6 +108,7 @@ async def pretend_endpoint(
         tools,
         checkpoint=checkpoint,
         resolutions=resolutions,
+        cancel_on_hooks=True,
     )
 
     async for msg in result:
