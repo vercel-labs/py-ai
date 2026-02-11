@@ -1,24 +1,30 @@
-"""Multi-agent example with parallel execution, hooks, and live streaming display.
+"""Multi-agent hooks example — server.
 
-Two sub-agents run in parallel — one contacts the mothership, the other contacts
-the data centers. Each branch requires approval via a hook before its tool can
-execute. A third agent summarizes the combined results.
+Runs the multi-agent graph and streams messages to a connected websocket
+client. Hook resolutions arrive back on the same connection.
 
-Run:
-    AI_GATEWAY_API_KEY=... python examples/run_multiagent_hooks.py
+    Terminal 1:  python examples/run_multiagent_hooks/server.py
+    Terminal 2:  python examples/run_multiagent_hooks/client.py
 """
 
 import asyncio
+import contextvars
+import json
 import os
-from collections import defaultdict
+import warnings
 
 import pydantic
-from rich.console import Group
-from rich.live import Live
-from rich.panel import Panel
-from rich.text import Text
+import websockets
 
 import vercel_ai_sdk as ai
+
+# ToolPart.result is typed as dict but tools can return plain strings;
+# model_dump() still works but emits noisy warnings.  We suppress them
+# here and normalize the data before sending over the wire.
+warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
+
+HOST = "localhost"
+PORT = 8765
 
 # ---------------------------------------------------------------------------
 # Tools
@@ -146,69 +152,7 @@ async def multiagent(llm: ai.LanguageModel, query: str):
 
 
 # ---------------------------------------------------------------------------
-# Live display
-# ---------------------------------------------------------------------------
-
-LABELS = ["mothership", "data_centers", "summary"]
-COLORS = {"mothership": "cyan", "data_centers": "magenta", "summary": "green"}
-TITLES = {
-    "mothership": "Agent 1 (mothership)",
-    "data_centers": "Agent 2 (data centers)",
-    "summary": "Agent 3 (summary)",
-}
-
-
-class MultiAgentHookDisplay:
-    """Rich live display for multiple parallel agent streams with hook events."""
-
-    def __init__(self):
-        self.streams: dict[str, Text] = defaultdict(Text)
-
-    def update(self, msg: ai.Message) -> None:
-        label = msg.label or "unknown"
-        color = COLORS.get(label, "white")
-
-        if msg.text_delta:
-            self.streams[label].append(msg.text_delta, style=color)
-        if msg.reasoning_delta:
-            self.streams[label].append(msg.reasoning_delta, style="dim")
-
-        for delta in msg.tool_deltas:
-            self.streams[label].append(f"{delta.args_delta}", style="yellow")
-
-        if msg.is_done:
-            for part in msg.parts:
-                match part:
-                    case ai.ToolPart(status="pending", tool_name=name, tool_args=args):
-                        self.streams[label].append(
-                            f"\n-> {name}({args})", style="yellow"
-                        )
-                    case ai.ToolPart(status="result", tool_name=name, result=result):
-                        self.streams[label].append(
-                            f"\n= {name} = {result}", style="green"
-                        )
-            self.streams[label].append("\n")
-
-    def add_hook_event(self, label: str, status: str, detail: str) -> None:
-        color = "bold yellow" if status == "pending" else "bold green"
-        self.streams[label].append(f"\n[hook {status}] {detail}\n", style=color)
-
-    def render(self) -> Group:
-        panels = []
-        for label in LABELS:
-            if label in self.streams:
-                panels.append(
-                    Panel(
-                        self.streams[label],
-                        title=TITLES.get(label, label),
-                        border_style=COLORS.get(label, "white"),
-                    )
-                )
-        return Group(*panels)
-
-
-# ---------------------------------------------------------------------------
-# Helpers
+# Websocket handler
 # ---------------------------------------------------------------------------
 
 
@@ -219,56 +163,75 @@ def get_hook_part(msg: ai.Message) -> ai.HookPart | None:
     return None
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+async def handle_client(ws: websockets.ServerConnection):
+    print("Client connected")
 
-
-async def main():
     llm = ai.anthropic.AnthropicModel(
         model="anthropic/claude-haiku-4.5",
         base_url="https://ai-gateway.vercel.sh",
         api_key=os.environ.get("AI_GATEWAY_API_KEY"),
     )
 
-    display = MultiAgentHookDisplay()
+    # Background task: read hook resolutions from the client
+    # and resolve the corresponding hooks.
+    #
+    # Approval.resolve() looks up the Runtime via a ContextVar that is
+    # set inside ai.run()'s async generator.  We need this task to share
+    # that context, so we start it lazily on the first message (by which
+    # point the generator has set the var) and copy the current context.
+    async def read_resolutions():
+        async for raw in ws:
+            data = json.loads(raw)
+            print(f"  Resolution received: {data['hook_id']}")
+            Approval.resolve(
+                data["hook_id"],
+                {"granted": data["granted"], "reason": data["reason"]},
+            )
 
-    with Live(display.render(), refresh_per_second=15) as live:
+    reader: asyncio.Task[None] | None = None
+
+    try:
         async for msg in ai.run(multiagent, llm, "When will the robots take over?"):
-            hook_part = get_hook_part(msg)
-
-            if hook_part and hook_part.status == "pending":
-                branch = hook_part.metadata.get("branch", "unknown")
-                display.add_hook_event(branch, "pending", hook_part.hook_id)
-                live.update(display.render())
-
-                # Pause live display to collect user input
-                live.stop()
-                answer = input(
-                    f"\n[{branch}] Approve {hook_part.metadata.get('tool', '?')}? (y/n): "
+            # Start the reader on the first message — the Runtime
+            # ContextVar is now set, so we snapshot it into the task.
+            if reader is None:
+                reader = asyncio.create_task(
+                    read_resolutions(),
+                    context=contextvars.copy_context(),
                 )
-                if answer.strip().lower() == "y":
-                    Approval.resolve(
-                        hook_part.hook_id,
-                        {"granted": True, "reason": "approved by operator"},
-                    )
-                else:
-                    Approval.resolve(
-                        hook_part.hook_id,
-                        {"granted": False, "reason": "denied by operator"},
-                    )
-                live.start()
 
-            elif hook_part and hook_part.status == "resolved":
-                branch = hook_part.metadata.get("branch", "unknown")
-                granted = hook_part.resolution and hook_part.resolution.get("granted")
-                tag = "approved" if granted else "denied"
-                display.add_hook_event(branch, f"resolved ({tag})", hook_part.hook_id)
-                live.update(display.render())
+            # Serialize the message. ToolPart.result is typed as
+            # dict but tools can return plain strings — normalize so
+            # the client can deserialize without errors.
+            data = msg.model_dump()
+            for part in data.get("parts", []):
+                if part.get("type") == "tool" and isinstance(part.get("result"), str):
+                    part["result"] = {"value": part["result"]}
+            await ws.send(json.dumps(data))
 
-            else:
-                display.update(msg)
-                live.update(display.render())
+            hook_part = get_hook_part(msg)
+            if hook_part:
+                print(f"  Hook {hook_part.status}: {hook_part.hook_id}")
+    finally:
+        if reader is not None:
+            reader.cancel()
+            try:
+                await reader
+            except asyncio.CancelledError:
+                pass
+
+    # Signal completion
+    try:
+        await ws.send(json.dumps({"type": "done"}))
+    except websockets.exceptions.ConnectionClosed:
+        pass
+    print("Run complete")
+
+
+async def main():
+    async with websockets.serve(handle_client, HOST, PORT):
+        print(f"Server listening on ws://{HOST}:{PORT}")
+        await asyncio.Future()  # run forever
 
 
 if __name__ == "__main__":
