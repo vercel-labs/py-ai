@@ -114,6 +114,10 @@ async def pretend_endpoint(
     async for msg in result:
         if msg.text_delta:
             rich.print(msg.text_delta, end="", flush=True)
+        if msg.is_done:
+            for part in msg.parts:
+                if isinstance(part, ai.ToolPart):
+                    rich.print(part)
     rich.print()
 
     if result.pending_hooks:

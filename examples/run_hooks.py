@@ -82,14 +82,20 @@ async def main():
 
             if hook_part.status == "pending":
                 # In a real app, this would come from user input via API/websocket
-                rich.print("[bold green]Auto-approving in 1 second...[/]")
-                await asyncio.sleep(1)
 
-                # Resolve the hook
-                CommunicationApproval.resolve(
-                    hook_part.hook_id,
-                    {"granted": True, "reason": "Auto-approved for demo"},
-                )
+                approval = input("approve? y / n")
+
+                if approval.strip() == "y":
+                    # Resolve the hook
+                    CommunicationApproval.resolve(
+                        hook_part.hook_id,
+                        {"granted": True, "reason": "yeah sure"},
+                    )
+                else:
+                    CommunicationApproval.resolve(
+                        hook_part.hook_id,
+                        {"granted": False, "reason": "yeah no"},
+                    )
         else:
             if msg.text_delta:
                 print(msg.text_delta, end="", flush=True)
