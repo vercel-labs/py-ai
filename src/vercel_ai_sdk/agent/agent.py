@@ -4,8 +4,6 @@ import asyncio
 import dataclasses
 import traceback
 
-from collections.abc import AsyncGenerator
-
 import pydantic
 
 import vercel_ai_sdk as ai
@@ -40,17 +38,20 @@ class Agent:
     system: str = ""
     tools: list[ai.Tool] = dataclasses.field(default_factory=list)
 
-    async def _execute_tool(self, tc: ai.ToolPart) -> None:
+    async def _execute_tool(
+        self, tc: ai.ToolPart, message: ai.Message | None = None
+    ) -> None:
         """Execute a single tool call with approval check and error handling."""
         try:
             # TODO this should be tucked away into the framework
             # and done using Pydantic
-            approval: ToolApproval = await ToolApproval.create(
-                metadata={"tool_name": tc.tool_name, "tool_args": tc.tool_args}
+            approval = await ToolApproval.create(
+                f"approve_{tc.tool_call_id}",
+                metadata={"tool_name": tc.tool_name, "tool_args": tc.tool_args},
             )
 
             if approval.granted:
-                await tc.execute()
+                await ai.execute_tool(tc, message=message)
             else:
                 tc.set_result({"error": "Tool call was denied by the user."})
                 return
@@ -65,7 +66,6 @@ class Agent:
 
     async def _loop(
         self,
-        runtime: ai.Runtime,
         messages: list[ai.Message],
         tools: list[ai.Tool],
         label: str | None = None,
@@ -80,27 +80,28 @@ class Agent:
             if not result.tool_calls:
                 return result
 
-            local_messages.append(result.last_message)
+            last_msg = result.last_message
+            local_messages.append(last_msg)
 
-            await asyncio.gather(*(self._execute_tool(tc) for tc in result.tool_calls))
-
-            if runtime and result.last_message:
-                await runtime.put_message(result.last_message.model_copy(deep=True))
+            await asyncio.gather(
+                *(self._execute_tool(tc, message=last_msg) for tc in result.tool_calls)
+            )
 
     def run(
         self,
         messages: list[ai.Message],
         *,
         label: str | None = None,
-    ) -> AsyncGenerator[ai.Message, None]:
+        checkpoint: ai.Checkpoint | None = None,
+    ) -> ai.RunResult:
         """
         Run the agent on the given messages.
 
-        Returns an async generator of streaming Message objects (same shape as ai.run).
-        Caller iterates with `async for msg in agent.run(messages): ...`
+        Returns a RunResult — async-iterate for messages, then check
+        .checkpoint and .pending_hooks.
         """
 
-        async def _root(runtime: ai.Runtime) -> None:
+        async def _root() -> None:
             fs_token = _filesystem.set(self.filesystem)
             try:
                 all_tools = BUILTIN_TOOLS + self.tools
@@ -112,7 +113,6 @@ class Agent:
                     system_messages = [m for m in system_messages if m.role == "system"]
 
                 await self._loop(
-                    runtime,
                     messages=system_messages + messages,
                     tools=all_tools,
                     label=label,
@@ -120,4 +120,4 @@ class Agent:
             finally:
                 _filesystem.reset(fs_token)
 
-        return ai.run(_root)
+        return ai.run(_root, checkpoint=checkpoint)

@@ -43,6 +43,9 @@ def stream(
 
     The decorated function submits its work to the Runtime queue and
     blocks until run() processes it, then returns the StreamResult.
+
+    If a checkpoint exists with a cached result for this step index,
+    returns the cached result without submitting to the queue (replay).
     """
 
     from . import runtime as runtime_
@@ -51,8 +54,14 @@ def stream(
     async def wrapped(*args: Any, **kwargs: Any) -> StreamResult:
         rt: runtime_.Runtime | None = runtime_._runtime.get(None)
         if rt is None:
-            raise ValueError("No Runtime context - must be called within ai.execute()")
+            raise ValueError("No Runtime context - must be called within ai.run()")
 
+        # Replay: return cached result if available
+        cached = rt.try_replay_step()
+        if cached is not None:
+            return cached
+
+        # Fresh execution: submit to queue and wait
         future: asyncio.Future[StreamResult] = asyncio.Future()
 
         async def stream_fn() -> AsyncGenerator[messages_.Message, None]:
@@ -60,6 +69,10 @@ def stream(
                 yield msg
 
         await rt.put_step(stream_fn, future)
-        return await future
+        result = await future
+
+        # Record for checkpoint
+        rt.record_step(result)
+        return result
 
     return wrapped

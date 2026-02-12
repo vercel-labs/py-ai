@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+
+# Node
+node_modules/
+
+# Local data (FileStorage)
+data/
+
+# Environment
+.env
+.env*.local
+
+# Vercel
+.vercel

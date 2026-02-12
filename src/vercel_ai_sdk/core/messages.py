@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import json
 import uuid
-from typing import Annotated, Any, Literal, TYPE_CHECKING
+from typing import Annotated, Any, Literal
 
 import pydantic
-
-if TYPE_CHECKING:
-    from . import tools as tools_
 
 
 # Streaming state for parts
@@ -37,30 +33,6 @@ class ToolPart(pydantic.BaseModel):
         """Set the tool result and mark as completed."""
         self.status = "result"
         self.result = result
-
-    async def execute(self) -> Any:
-        """Execute this tool call using the global tool registry.
-
-        Looks up the tool by name, parses args, injects Runtime if needed,
-        and updates this part with the result.
-        """
-        from . import tools as tools_
-        from . import runtime as runtime_
-
-        tool = tools_.get_tool(self.tool_name)
-        if tool is None:
-            raise ValueError(f"Tool not found in registry: {self.tool_name}")
-
-        kwargs: dict[str, Any] = json.loads(self.tool_args) if self.tool_args else {}
-
-        # Inject runtime if the tool has a Runtime-typed parameter
-        rt = runtime_._runtime.get(None)
-        if rt and (runtime_param := runtime_._find_runtime_param(tool.fn)):
-            kwargs[runtime_param] = rt
-
-        result = await tool.fn(**kwargs)
-        self.set_result(result)
-        return result
 
 
 class ReasoningPart(pydantic.BaseModel):

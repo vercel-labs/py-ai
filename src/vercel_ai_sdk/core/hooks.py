@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
-from typing import Any, ClassVar, Generic, Literal, TypeVar
+from typing import Any, ClassVar, Generic, TypeVar
 
 import pydantic
 
@@ -11,190 +10,229 @@ from . import messages as messages_
 T = TypeVar("T", bound=pydantic.BaseModel)
 
 
-# TODO this should be properly typed
-class HookPending(Exception):
-    """
-    Raised when a hook is places using .create_or_raise() and
-    doesn't have a resolution in the context.
-    """
+# ---------------------------------------------------------------------------
+# Module-level hook registries
+#
+# These allow Hook.resolve() and Hook.cancel() to work from anywhere —
+# no ContextVar lookup, no RunResult handle, no copy_context().
+#
+# _live_hooks:
+#   Populated by Hook.create() when a hook suspends inside a running graph.
+#   Maps hook label -> (future, metadata dict, Runtime).
+#   Consumed by Hook.resolve() / Hook.cancel() to unblock the awaiting
+#   coroutine.  Entries are removed when the hook resolves, cancels, or
+#   the run completes.
+#
+# _pending_resolutions:
+#   Populated by Hook.resolve() when no live hook exists yet (serverless
+#   re-entry: the user calls resolve() *before* ai.run() replays the graph).
+#   Maps hook label -> validated resolution dict.
+#   Consumed by Hook.create() at the start of graph execution — if a
+#   pre-registered resolution exists for the label, the hook returns
+#   immediately without suspending.  Entries are removed on consumption.
+# ---------------------------------------------------------------------------
 
-    def __init__(
-        self,
-        hook_id: str,
-        hook_type: str,
-        metadata: dict[str, Any] | None = None,
-    ):
-        self.hook_id = hook_id
-        self.hook_type = hook_type
-        self.metadata = metadata or {}
-        super().__init__(f"Hook pending: {hook_type}:{hook_id}")
+_live_hooks: dict[str, tuple[asyncio.Future[Any], dict[str, Any], Any]] = {}
+# label -> (future, metadata, Runtime)
+
+_pending_resolutions: dict[str, dict[str, Any]] = {}
+# label -> validated resolution dict
+
+
+def _cleanup_run(labels: set[str]) -> None:
+    """Remove all registry entries associated with a finished run."""
+    for label in labels:
+        _live_hooks.pop(label, None)
+        _pending_resolutions.pop(label, None)
 
 
 class Hook(Generic[T]):
     """
-    Mixin for hooks that adds hook-related classmethods
-    to a Pydantic BaseModel that represents the hook's payload
+    Hook: a suspension point that requires external input to continue.
+
+    Usage in graph code (identical in all modes):
+
+        approval = await ToolApproval.create("approve_delete", metadata={...})
+        if approval.granted:
+            ...
+
+    Resolution from outside the graph (any task, any context):
+
+        ToolApproval.resolve("approve_delete", {"granted": True, ...})
+
+    Behavior depends on the cancel_on_hooks flag passed to ai.run():
+
+    cancel_on_hooks=False (default, long-running): the await blocks until
+    Hook.resolve() is called from outside the graph (e.g., websocket
+    handler, API endpoint).
+
+    cancel_on_hooks=True (serverless): if no resolution is available, the
+    hook's future is cancelled by run(). The branch receives CancelledError
+    and dies cleanly. On re-entry, call Hook.resolve() before ai.run() to
+    pre-register the resolution, then pass checkpoint= to replay.
     """
 
     _schema: ClassVar[type[pydantic.BaseModel]]
     _hook_type: ClassVar[str]
 
-    def __init__(self, id: str, metadata: dict[str, Any] | None = None):
-        self.id = id
-        self.metadata = metadata or {}
-        self._future: asyncio.Future[T] | None = None
-
-    def to_message(
-        self,
-        status: Literal["pending", "resolved", "cancelled"],
-        resolution: dict[str, Any] | None = None,
-    ) -> messages_.Message:
-        return messages_.Message(
-            role="assistant",
-            parts=[
-                messages_.HookPart(
-                    hook_id=self.id,
-                    hook_type=self._hook_type,
-                    status=status,
-                    metadata=self.metadata,
-                    resolution=resolution,
-                )
-            ],
-        )
-
     @classmethod
-    async def create(cls, metadata: dict[str, Any] | None = None) -> T:
+    async def create(cls, label: str, metadata: dict[str, Any] | None = None) -> T:
         """
         Create a hook and await its resolution.
 
-        This emits a Message with HookPart(status="pending") to the stream, then
-        blocks until resolve() is called. Upon resolution, emits another Message
-        with HookPart(status="resolved").
+        The hook is submitted to the Runtime's step queue. run() will either:
+        - Resolve immediately (if a resolution is available from checkpoint
+          or pre-registered via Hook.resolve())
+        - Cancel the future (cancel_on_hooks=True, serverless mode)
+        - Hold the future (cancel_on_hooks=False, long-running mode)
+
+        Args:
+            label: Stable identifier for this hook. Used to match resolutions
+                   across requests in serverless mode. Must be unique within
+                   a single run.
+            metadata: Optional metadata surfaced in the pending HookPart message.
         """
-
-        # this is for a long-running type of application, where the hook
-        # suspends execution until it is resolved from outside of the function
-
         from . import runtime as runtime_
 
         rt = runtime_._runtime.get(None)
         if rt is None:
             raise ValueError("No Runtime context - must be called within ai.run()")
 
-        hook_id = uuid.uuid4().hex[:12]
-        instance = cls(id=hook_id, metadata=metadata)
+        # Check pre-registered resolutions (serverless re-entry path)
+        pre_registered = _pending_resolutions.pop(label, None)
+        if pre_registered is not None:
+            rt.record_hook(label, pre_registered)
+            return cls._schema(**pre_registered)  # type: ignore[return-value]
 
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[T] = loop.create_future()
-        instance._future = future
+        # Check checkpoint for a previously resolved value
+        resolution = rt.get_hook_resolution(label)
+        if resolution is not None:
+            rt.record_hook(label, resolution)
+            return cls._schema(**resolution)  # type: ignore[return-value]
 
-        # Register in runtime's pending hooks and emit pending message
-        await rt.put_hook(instance, future)
+        # Submit to step queue — run() decides what to do
+        future: asyncio.Future[dict[str, Any]] = asyncio.Future()
+        suspension = runtime_.HookSuspension(
+            label=label,
+            hook_type=cls._hook_type,
+            metadata=metadata or {},
+            future=future,
+        )
+        await rt.put_hook_suspension(suspension)
 
-        # Block until resolved
-        result = await future
+        # Register in module-level registry for external resolution
+        hook_metadata = metadata or {}
+        _live_hooks[label] = (future, hook_metadata, rt)
+        rt.track_hook_label(label)
+
+        # Await resolution — may be resolved immediately by run(),
+        # cancelled by run() (serverless), or resolved later by
+        # Hook.resolve() (long-running).
+        resolution = await future
+
+        # Clean up
+        _live_hooks.pop(label, None)
+
+        # Record for checkpoint
+        rt.record_hook(label, resolution)
 
         # Emit resolved message
         await rt.put_message(
-            instance.to_message(
-                status="resolved",
-                resolution=result.model_dump() if hasattr(result, "model_dump") else {},
+            messages_.Message(
+                role="assistant",
+                parts=[
+                    messages_.HookPart(
+                        hook_id=label,
+                        hook_type=cls._hook_type,
+                        status="resolved",
+                        metadata=hook_metadata,
+                        resolution=resolution,
+                    )
+                ],
             )
         )
 
-        # Clean up
-        rt._pending_hooks.pop(hook_id, None)
-
-        return result
+        return cls._schema(**resolution)  # type: ignore[return-value]
 
     @classmethod
-    def create_or_raise(
-        cls,
-        hook_id: str,
-        resolutions: dict[str, dict[str, Any]] | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> T:
+    def resolve(cls, label: str, data: T | dict[str, Any]) -> None:
         """
-        Get a resolved hook value or raise HookPending.
+        Resolve a hook by label.
 
-        For serverless applications where the resolution is provided in a
-        different process. Instead of blocking, raises HookPending to exit
-        the function. On subsequent invocation, pass the resolutions dict
-        to resolve the hook synchronously.
+        Works in two modes:
+
+        1. Live hook exists (long-running): validates data, resolves the
+           future immediately, unblocking the awaiting coroutine.
+
+        2. No live hook yet (serverless re-entry): validates data and
+           stashes it in the pre-registration registry. When ai.run()
+           replays the graph and Hook.create() executes, it finds the
+           pre-registered resolution and returns without suspending.
+
+        Can be called from any task, any context — no ContextVar or
+        RunResult handle needed.
 
         Args:
-            hook_id: Unique identifier for this hook instance
-            resolutions: Dict mapping hook_id to resolution data
-            metadata: Optional metadata to include in HookPending
+            label: The hook label to resolve.
+            data: Resolution payload (dict or pydantic model). Validated
+                  against the hook's schema immediately.
         """
-        if resolutions and hook_id in resolutions:
-            return cls._schema(**resolutions[hook_id])  # type: ignore[return-value]
-
-        raise HookPending(
-            hook_id=hook_id,
-            hook_type=cls._hook_type,
-            metadata=metadata or {},
-        )
-
-    # TODO prohibit dict for a payload
-    @classmethod
-    def resolve(cls, hook_id: str, data: T | dict[str, Any]) -> None:
-        """
-        Resolve a pending hook by ID.
-
-        Can be called from outside the graph (API handler, websocket, etc.)
-        to unblock the awaiting coroutine.
-        """
-        from . import runtime as runtime_
-
-        rt = runtime_._runtime.get(None)
-        if rt is None:
-            raise ValueError("No Runtime context")
-
-        if hook_id not in rt._pending_hooks:
-            raise ValueError(f"No pending hook with id: {hook_id}")
-
-        future, _instance = rt._pending_hooks[hook_id]
-
-        # Convert dict to model if needed
-        resolved: T
+        # Validate and normalize to dict
         if isinstance(data, dict):
-            resolved = cls._schema(**data)  # type: ignore[assignment]
+            # Validate by constructing the schema model
+            validated = cls._schema(**data)
+            resolution = validated.model_dump()
         else:
-            resolved = data
+            # Already a model instance — validate it's the right type
+            if not isinstance(data, cls._schema):
+                raise TypeError(
+                    f"Expected {cls._schema.__name__} or dict, "
+                    f"got {type(data).__name__}"
+                )
+            resolution = data.model_dump()
 
-        future.set_result(resolved)
+        # Path 1: live hook — resolve the future directly
+        if label in _live_hooks:
+            future, _, _rt = _live_hooks[label]
+            future.set_result(resolution)
+            return
+
+        # Path 2: no live hook — pre-register for later consumption
+        _pending_resolutions[label] = resolution
 
     @classmethod
-    def cancel(cls, hook_id: str, reason: str | None = None) -> None:
+    def cancel(cls, label: str, reason: str | None = None) -> None:
+        """Cancel a pending hook.
+
+        Only works for live hooks (long-running mode). Raises if the
+        hook is not currently pending.
         """
-        Cancel a pending hook.
-        """
-        from . import runtime as runtime_
+        if label not in _live_hooks:
+            raise ValueError(f"No pending hook with label: {label}")
 
-        rt = runtime_._runtime.get(None)
-        if rt is None:
-            raise ValueError("No Runtime context")
-
-        if hook_id not in rt._pending_hooks:
-            raise ValueError(f"No pending hook with id: {hook_id}")
-
-        future, instance = rt._pending_hooks[hook_id]
+        future, hook_metadata, rt = _live_hooks.pop(label)
         future.cancel(reason)
 
-        # Emit cancelled message
-        asyncio.create_task(rt.put_message(instance.to_message(status="cancelled")))
-
-        rt._pending_hooks.pop(hook_id, None)
+        msg = messages_.Message(
+            role="assistant",
+            parts=[
+                messages_.HookPart(
+                    hook_id=label,
+                    hook_type=cls._hook_type,
+                    status="cancelled",
+                    metadata=hook_metadata,
+                )
+            ],
+        )
+        asyncio.create_task(rt.put_message(msg))
 
 
 def hook(cls: type[T]) -> type[Hook[T]]:
     """
     Decorator to create a Hook type from a pydantic model.
 
-    The pydantic model defines the schema for the hook's payload
+    The pydantic model defines the schema for the hook's resolution payload.
     """
-    # Create a new class that inherits from Hook
     hook_impl = type(
         cls.__name__,
         (Hook,),
