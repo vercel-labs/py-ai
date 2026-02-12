@@ -86,8 +86,8 @@ class Runtime:
         # Pending hooks (unresolved during this run)
         self._pending_hooks: dict[str, HookSuspension] = {}
 
-        # Hook support for long-running mode: external resolution
-        self._hook_futures: dict[str, tuple[asyncio.Future[Any], Hook[Any]]] = {}
+        # Track hook labels registered in this run for cleanup
+        self._hook_labels: set[str] = set()
 
     # ── Step queue ────────────────────────────────────────────────
 
@@ -153,16 +153,9 @@ class Runtime:
     def record_hook(self, label: str, resolution: dict[str, Any]) -> None:
         self._hook_log.append(checkpoint_.HookEvent(label=label, resolution=resolution))
 
-    # ── Hook support for long-running mode ────────────────────────
-
-    async def put_hook(
-        self, hook: hooks_.Hook[Any], future: asyncio.Future[Any]
-    ) -> None:
-        """Register a hook for external resolution (long-running mode)."""
-        self._hook_futures[hook.id] = (future, hook)
-
-    def get_all_hooks(self) -> dict[str, Hook[Any]]:
-        return {k: v[1] for k, v in self._hook_futures.items()}
+    def track_hook_label(self, label: str) -> None:
+        """Track a hook label for cleanup when the run completes."""
+        self._hook_labels.add(label)
 
     # ── Checkpoint ────────────────────────────────────────────────
 
@@ -436,6 +429,10 @@ def run(
                                 ],
                             )
 
+                        # Let resolved branches resume and submit their
+                        # next steps before we pull from the queue again.
+                        await asyncio.sleep(0)
+
                         # Drain messages after hook processing
                         for msg in runtime.get_all_messages():
                             yield msg
@@ -465,6 +462,9 @@ def run(
                         yield tool_msg
 
         finally:
+            # Clean up module-level hook registries for this run
+            hooks_._cleanup_run(runtime._hook_labels)
+
             if mcp_token is not None:
                 await mcp.client.close_connections()
                 mcp.client._pool.reset(mcp_token)

@@ -8,7 +8,6 @@ client. Hook resolutions arrive back on the same connection.
 """
 
 import asyncio
-import contextvars
 import json
 import os
 import warnings
@@ -172,13 +171,11 @@ async def handle_client(ws: websockets.ServerConnection):
         api_key=os.environ.get("AI_GATEWAY_API_KEY"),
     )
 
-    # Background task: read hook resolutions from the client
-    # and resolve the corresponding hooks.
-    #
-    # Approval.resolve() looks up the Runtime via a ContextVar that is
-    # set inside ai.run()'s async generator.  We need this task to share
-    # that context, so we start it lazily on the first message (by which
-    # point the generator has set the var) and copy the current context.
+    result = ai.run(multiagent, llm, "When will the robots take over?")
+
+    # Background task: read hook resolutions from the client.
+    # Approval.resolve() uses the module-level hook registry — works
+    # from any task without ContextVar tricks or RunResult handles.
     async def read_resolutions():
         async for raw in ws:
             data = json.loads(raw)
@@ -188,18 +185,10 @@ async def handle_client(ws: websockets.ServerConnection):
                 {"granted": data["granted"], "reason": data["reason"]},
             )
 
-    reader: asyncio.Task[None] | None = None
+    reader = asyncio.create_task(read_resolutions())
 
     try:
-        async for msg in ai.run(multiagent, llm, "When will the robots take over?"):
-            # Start the reader on the first message — the Runtime
-            # ContextVar is now set, so we snapshot it into the task.
-            if reader is None:
-                reader = asyncio.create_task(
-                    read_resolutions(),
-                    context=contextvars.copy_context(),
-                )
-
+        async for msg in result:
             # Serialize the message. ToolPart.result is typed as
             # dict but tools can return plain strings — normalize so
             # the client can deserialize without errors.
@@ -213,12 +202,11 @@ async def handle_client(ws: websockets.ServerConnection):
             if hook_part:
                 print(f"  Hook {hook_part.status}: {hook_part.hook_id}")
     finally:
-        if reader is not None:
-            reader.cancel()
-            try:
-                await reader
-            except asyncio.CancelledError:
-                pass
+        reader.cancel()
+        try:
+            await reader
+        except asyncio.CancelledError:
+            pass
 
     # Signal completion
     try:
