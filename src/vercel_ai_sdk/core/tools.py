@@ -35,8 +35,6 @@ def _get_param_schema(param_type: type) -> dict[str, Any]:
 def _is_optional(param_type: type) -> bool:
     """Check if a type is Optional (Union with None)."""
     origin = get_origin(param_type)
-    if origin is type(None):
-        return True
     if origin is not None:
         args = get_args(param_type)
         return type(None) in args

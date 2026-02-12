@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, ClassVar, Generic, Literal, TypeVar
+from typing import Any, ClassVar, Generic, TypeVar
 
 import pydantic
 
@@ -18,7 +18,7 @@ T = TypeVar("T", bound=pydantic.BaseModel)
 #
 # _live_hooks:
 #   Populated by Hook.create() when a hook suspends inside a running graph.
-#   Maps hook label -> (future, Hook instance, Runtime).
+#   Maps hook label -> (future, metadata dict, Runtime).
 #   Consumed by Hook.resolve() / Hook.cancel() to unblock the awaiting
 #   coroutine.  Entries are removed when the hook resolves, cancels, or
 #   the run completes.
@@ -32,8 +32,8 @@ T = TypeVar("T", bound=pydantic.BaseModel)
 #   immediately without suspending.  Entries are removed on consumption.
 # ---------------------------------------------------------------------------
 
-_live_hooks: dict[str, tuple[asyncio.Future[Any], Any, Any]] = {}
-# label -> (future, Hook instance, Runtime)
+_live_hooks: dict[str, tuple[asyncio.Future[Any], dict[str, Any], Any]] = {}
+# label -> (future, metadata, Runtime)
 
 _pending_resolutions: dict[str, dict[str, Any]] = {}
 # label -> validated resolution dict
@@ -74,28 +74,6 @@ class Hook(Generic[T]):
 
     _schema: ClassVar[type[pydantic.BaseModel]]
     _hook_type: ClassVar[str]
-
-    def __init__(self, id: str, metadata: dict[str, Any] | None = None):
-        self.id = id
-        self.metadata = metadata or {}
-
-    def to_message(
-        self,
-        status: Literal["pending", "resolved", "cancelled"],
-        resolution: dict[str, Any] | None = None,
-    ) -> messages_.Message:
-        return messages_.Message(
-            role="assistant",
-            parts=[
-                messages_.HookPart(
-                    hook_id=self.id,
-                    hook_type=self._hook_type,
-                    status=status,
-                    metadata=self.metadata,
-                    resolution=resolution,
-                )
-            ],
-        )
 
     @classmethod
     async def create(cls, label: str, metadata: dict[str, Any] | None = None) -> T:
@@ -143,8 +121,8 @@ class Hook(Generic[T]):
         await rt.put_hook_suspension(suspension)
 
         # Register in module-level registry for external resolution
-        instance = cls(id=label, metadata=metadata)
-        _live_hooks[label] = (future, instance, rt)
+        hook_metadata = metadata or {}
+        _live_hooks[label] = (future, hook_metadata, rt)
         rt.track_hook_label(label)
 
         # Await resolution — may be resolved immediately by run(),
@@ -160,9 +138,17 @@ class Hook(Generic[T]):
 
         # Emit resolved message
         await rt.put_message(
-            instance.to_message(
-                status="resolved",
-                resolution=resolution,
+            messages_.Message(
+                role="assistant",
+                parts=[
+                    messages_.HookPart(
+                        hook_id=label,
+                        hook_type=cls._hook_type,
+                        status="resolved",
+                        metadata=hook_metadata,
+                        resolution=resolution,
+                    )
+                ],
             )
         )
 
@@ -207,7 +193,7 @@ class Hook(Generic[T]):
 
         # Path 1: live hook — resolve the future directly
         if label in _live_hooks:
-            future, _instance, _rt = _live_hooks[label]
+            future, _, _rt = _live_hooks[label]
             future.set_result(resolution)
             return
 
@@ -224,10 +210,21 @@ class Hook(Generic[T]):
         if label not in _live_hooks:
             raise ValueError(f"No pending hook with label: {label}")
 
-        future, instance, rt = _live_hooks.pop(label)
+        future, hook_metadata, rt = _live_hooks.pop(label)
         future.cancel(reason)
 
-        asyncio.create_task(rt.put_message(instance.to_message(status="cancelled")))
+        msg = messages_.Message(
+            role="assistant",
+            parts=[
+                messages_.HookPart(
+                    hook_id=label,
+                    hook_type=cls._hook_type,
+                    status="cancelled",
+                    metadata=hook_metadata,
+                )
+            ],
+        )
+        asyncio.create_task(rt.put_message(msg))
 
 
 def hook(cls: type[T]) -> type[Hook[T]]:

@@ -220,12 +220,12 @@ async def test_hook_resolution_on_reentry():
     assert "my_approval" in result1.pending_hooks
     cp = result1.checkpoint
 
-    # Second run: provide resolution, replay step from checkpoint
+    # Second run: pre-register resolution, replay step from checkpoint
+    Approval.resolve("my_approval", {"granted": True})
     result2 = ai.run(
         graph,
         MockLLM([]),  # no LLM responses needed — step replays from checkpoint
         checkpoint=cp,
-        resolutions={"my_approval": {"granted": True}},
     )
     msgs2 = [msg async for msg in result2]
 
@@ -309,15 +309,13 @@ async def test_parallel_hooks_resolve_on_reentry():
     assert len(result1.pending_hooks) == 2
     cp = result1.checkpoint
 
-    # Second run: resolve both
+    # Second run: pre-register resolutions, then replay
+    Approval.resolve("hook_a", {"granted": True})
+    Approval.resolve("hook_b", {"granted": False})
     result2 = ai.run(
         graph,
         MockLLM([]),
         checkpoint=cp,
-        resolutions={
-            "hook_a": {"granted": True},
-            "hook_b": {"granted": False},
-        },
     )
     [msg async for msg in result2]
     assert len(result2.pending_hooks) == 0

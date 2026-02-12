@@ -5,7 +5,7 @@ import json
 import contextvars
 import dataclasses
 from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
-from typing import TYPE_CHECKING, Any, get_type_hints
+from typing import Any, get_type_hints
 
 from .. import mcp
 from . import messages as messages_
@@ -14,9 +14,6 @@ from . import llm as llm_
 from . import streams as streams_
 from . import hooks as hooks_
 from . import checkpoint as checkpoint_
-
-if TYPE_CHECKING:
-    from .hooks import Hook
 
 
 # ── Queue item types ──────────────────────────────────────────────
@@ -52,7 +49,6 @@ class Runtime:
     def __init__(
         self,
         checkpoint: checkpoint_.Checkpoint | None = None,
-        resolutions: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         self._step_queue: asyncio.Queue[
             tuple[streams_.Stream, asyncio.Future[streams_.StreamResult]]
@@ -65,7 +61,6 @@ class Runtime:
 
         # Checkpoint: replay state from previous run
         self._checkpoint = checkpoint or checkpoint_.Checkpoint()
-        self._resolutions = resolutions or {}
 
         # Replay cursors
         self._step_index: int = 0
@@ -75,8 +70,6 @@ class Runtime:
         self._hook_replay: dict[str, dict[str, Any]] = {
             h.label: h.resolution for h in self._checkpoint.hooks
         }
-        # Merge explicit resolutions (override checkpoint)
-        self._hook_replay.update(self._resolutions)
 
         # Recording: new events from this run
         self._step_log: list[checkpoint_.StepEvent] = []
@@ -344,7 +337,6 @@ def run(
     root: Callable[..., Coroutine[Any, Any, Any]],
     *args: Any,
     checkpoint: checkpoint_.Checkpoint | None = None,
-    resolutions: dict[str, dict[str, Any]] | None = None,
     cancel_on_hooks: bool = False,
 ) -> RunResult:
     """
@@ -363,7 +355,7 @@ def run(
     result = RunResult()
 
     async def _generate() -> AsyncGenerator[messages_.Message, None]:
-        runtime = Runtime(checkpoint=checkpoint, resolutions=resolutions)
+        runtime = Runtime(checkpoint=checkpoint)
         result._runtime = runtime
         token_runtime = _runtime.set(runtime)
 

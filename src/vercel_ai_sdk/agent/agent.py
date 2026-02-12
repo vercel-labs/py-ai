@@ -66,7 +66,6 @@ class Agent:
 
     async def _loop(
         self,
-        runtime: ai.Runtime,
         messages: list[ai.Message],
         tools: list[ai.Tool],
         label: str | None = None,
@@ -94,7 +93,6 @@ class Agent:
         *,
         label: str | None = None,
         checkpoint: ai.Checkpoint | None = None,
-        resolutions: dict[str, dict] | None = None,
     ) -> ai.RunResult:
         """
         Run the agent on the given messages.
@@ -103,7 +101,7 @@ class Agent:
         .checkpoint and .pending_hooks.
         """
 
-        async def _root(runtime: ai.Runtime) -> None:
+        async def _root() -> None:
             fs_token = _filesystem.set(self.filesystem)
             try:
                 all_tools = BUILTIN_TOOLS + self.tools
@@ -115,7 +113,6 @@ class Agent:
                     system_messages = [m for m in system_messages if m.role == "system"]
 
                 await self._loop(
-                    runtime,
                     messages=system_messages + messages,
                     tools=all_tools,
                     label=label,
@@ -123,4 +120,4 @@ class Agent:
             finally:
                 _filesystem.reset(fs_token)
 
-        return ai.run(_root, checkpoint=checkpoint, resolutions=resolutions)
+        return ai.run(_root, checkpoint=checkpoint)

@@ -101,13 +101,19 @@ async def pretend_endpoint(
     )
     tools = [contact_mothership]
 
+    # Pre-register resolutions via the global hook registry.
+    # When the graph replays and Hook.create() runs, it finds these
+    # and returns immediately without suspending.
+    if resolutions:
+        for label, data in resolutions.items():
+            CommunicationApproval.resolve(label, data)
+
     result = ai.run(
         graph,
         llm,
         messages,
         tools,
         checkpoint=checkpoint,
-        resolutions=resolutions,
         cancel_on_hooks=True,
     )
 
