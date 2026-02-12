@@ -10,6 +10,8 @@ import vercel_ai_sdk as ai
 from vercel_ai_sdk.ai_sdk_ui import adapter, ui_message
 from vercel_ai_sdk.core import messages
 
+from ..conftest import MockLLM
+
 
 async def get_event_types(msgs: list[messages.Message]) -> list[str]:
     """Stream messages through adapter and return event type sequence."""
@@ -227,33 +229,6 @@ async def test_text_then_tool_then_text():
 # -----------------------------------------------------------------------------
 # Integration tests - runtime-based execution
 # -----------------------------------------------------------------------------
-
-
-class MockLLM(ai.LanguageModel):
-    """A mock LLM that yields pre-defined message sequences."""
-
-    def __init__(self, responses: list[list[messages.Message]]) -> None:
-        """
-        Args:
-            responses: List of response sequences. Each call to stream() consumes
-                       one sequence and yields its messages.
-        """
-        self._responses = list(responses)
-        self._call_index = 0
-
-    async def stream(
-        self,
-        messages: list[messages.Message],  # noqa: F811
-        tools: list[ai.Tool] | None = None,
-    ) -> AsyncGenerator[messages.Message, None]:
-        if self._call_index >= len(self._responses):
-            raise RuntimeError("MockLLM: no more responses configured")
-
-        response_sequence = self._responses[self._call_index]
-        self._call_index += 1
-
-        for msg in response_sequence:
-            yield msg
 
 
 @ai.tool
