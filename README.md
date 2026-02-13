@@ -9,6 +9,7 @@ uv add vercel-ai-sdk
 ```
 
 ```python
+import os
 import vercel_ai_sdk as ai
 
 @ai.tool
@@ -27,7 +28,7 @@ async def agent(llm, query):
     )
 
 llm = ai.openai.OpenAIModel(
-    model="anthropic/claude-sonnet-4",
+    model="anthropic/claude-opus-4.6",
     base_url="https://ai-gateway.vercel.sh/v1",
     api_key=os.environ["AI_GATEWAY_API_KEY"],
 )
@@ -40,14 +41,20 @@ async for msg in ai.run(agent, llm, "When will the robots take over?"):
 
 ### Core Primitives
 
-#### `ai.run(root, *args)`
+#### `ai.run(root, *args, checkpoint=None, cancel_on_hooks=False)`
 
-Entry point. Executes an async function, yields all `Message` objects from nested streams.
+Entry point. Starts `root` as a background task, processes the step/hook queue, yields `Message` objects. Returns a `RunResult`.
 
 ```python
-async for msg in ai.run(my_agent, llm, "hello"):
+result = ai.run(my_agent, llm, "hello")
+async for msg in result:
     print(msg.text_delta, end="")
+
+result.checkpoint      # Checkpoint with all completed work
+result.pending_hooks   # dict of unresolved hooks (empty if run completed)
 ```
+
+If `root` declares a `runtime: ai.Runtime` parameter, it's auto-injected.
 
 #### `@ai.tool`
 
@@ -60,7 +67,7 @@ async def search(query: str, limit: int = 10) -> list[str]:
     ...
 ```
 
-If a tool declares a `runtime: ai.Runtime` parameter, it's auto-injected:
+If a tool declares a `runtime: ai.Runtime` parameter, it's auto-injected (not passed by the LLM):
 
 ```python
 @ai.tool
@@ -83,6 +90,8 @@ async def my_custom_step(llm, messages):
 result = await my_custom_step(llm, messages)  # returns StreamResult
 ```
 
+Must be called within `ai.run()` (needs a Runtime context).
+
 #### `@ai.hook`
 
 Decorator that creates a suspension point from a pydantic model. The model defines the resolution schema.
@@ -92,20 +101,38 @@ Decorator that creates a suspension point from a pydantic model. The model defin
 class Approval(pydantic.BaseModel):
     granted: bool
     reason: str
-
-# In your agent - blocks until resolved
-approval = await Approval.create(metadata={"tool": "send_email"})
-if approval.granted:
-    ...
-
-# From outside (API handler, websocket, etc.)
-Approval.resolve(hook_id, {"granted": True, "reason": "User approved"})
 ```
 
-For serverless (raises `HookPending` if resolution not provided):
+Inside your agent — blocks until resolved:
 
 ```python
-approval = Approval.create_or_raise(f"approval_{tool_call_id}", resolutions=saved_resolutions)
+approval = await Approval.create("approve_send_email", metadata={"tool": "send_email"})
+if approval.granted:
+    ...
+```
+
+From outside (API handler, websocket, iterator loop, etc.):
+
+```python
+Approval.resolve("approve_send_email", {"granted": True, "reason": "User approved"})
+Approval.cancel("approve_send_email")  # or cancel it
+```
+
+**Long-running mode** (`cancel_on_hooks=False`, the default): the `await` in `create()` blocks until `resolve()` or `cancel()` is called from external code.
+
+**Serverless mode** (`cancel_on_hooks=True`): if no resolution is available, the hook's future is cancelled and the branch dies. Inspect `result.pending_hooks` and `result.checkpoint` to resume later:
+
+```python
+result = ai.run(my_agent, llm, query, cancel_on_hooks=True)
+async for msg in result:
+    ...
+
+if result.pending_hooks:
+    # Save result.checkpoint, collect resolutions, then re-enter:
+    Approval.resolve("approve_send_email", {"granted": True, "reason": "User approved"})
+    result = ai.run(my_agent, llm, query, checkpoint=result.checkpoint)
+    async for msg in result:
+        ...
 ```
 
 ### Convenience Functions
@@ -127,13 +154,15 @@ Full agent loop: calls LLM, executes tools, repeats until no more tool calls. Re
 result = await ai.stream_loop(llm, messages, tools=[search, get_weather])
 ```
 
-#### `ToolPart.execute()`
+#### `ai.execute_tool(tool_call, message=None)`
 
-Execute a tool call. Tools are looked up from the global registry (populated by `@ai.tool`).
+Execute a single tool call. Looks up the tool from the global registry (populated by `@ai.tool`). Updates the `ToolPart` with the result. If `message` is provided, emits it to the Runtime queue so the UI sees the status change.
 
 ```python
-await asyncio.gather(*(tc.execute() for tc in result.tool_calls))
+await asyncio.gather(*(ai.execute_tool(tc, message=last_msg) for tc in result.tool_calls))
 ```
+
+Supports checkpoint replay — returns the cached result without re-executing if one exists.
 
 #### `ai.make_messages(*, system=None, user)`
 
@@ -143,6 +172,33 @@ Build a message list from system + user strings.
 messages = ai.make_messages(system="You are helpful.", user="Hello!")
 ```
 
+#### `ai.get_checkpoint()`
+
+Get the current `Checkpoint` from the active Runtime context. Call this from within `ai.run()`.
+
+```python
+checkpoint = ai.get_checkpoint()
+```
+
+### Checkpoints
+
+`Checkpoint` records completed work (LLM steps, tool executions, hook resolutions) so a run can be replayed without re-executing already-finished operations.
+
+```python
+# After a run completes or suspends
+checkpoint = result.checkpoint
+data = checkpoint.serialize()   # dict, JSON-safe
+
+# Later: restore and resume
+checkpoint = ai.Checkpoint.deserialize(data)
+result = ai.run(my_agent, llm, query, checkpoint=checkpoint)
+```
+
+Three event types are tracked:
+- **Steps** — LLM call results (replayed without calling the model)
+- **Tools** — tool execution results (replayed without re-executing)
+- **Hooks** — hook resolutions (replayed without re-suspending)
+
 ### Adapters
 
 #### LLM Providers
@@ -150,7 +206,7 @@ messages = ai.make_messages(system="You are helpful.", user="Hello!")
 ```python
 # OpenAI-compatible (including Vercel AI Gateway)
 llm = ai.openai.OpenAIModel(
-    model="anthropic/claude-sonnet-4",
+    model="anthropic/claude-opus-4.6",
     base_url="https://ai-gateway.vercel.sh/v1",
     api_key=os.environ["AI_GATEWAY_API_KEY"],
     thinking=True,           # enable reasoning output
@@ -159,7 +215,7 @@ llm = ai.openai.OpenAIModel(
 
 # Anthropic (native client)
 llm = ai.anthropic.AnthropicModel(
-    model="claude-sonnet-4-5-20250929",
+    model="claude-opus-4.6-20250916",
     thinking=True,
     budget_tokens=10000,
 )
@@ -181,6 +237,8 @@ tools = await ai.mcp.get_stdio_tools(
     tool_prefix="fs",
 )
 ```
+
+MCP connections are pooled per `ai.run()` and cleaned up automatically.
 
 #### AI SDK UI
 
@@ -204,26 +262,40 @@ return StreamingResponse(stream_response(), headers=UI_MESSAGE_STREAM_HEADERS)
 
 | Type | Description |
 |------|-------------|
-| `Message` | Universal message with `role`, `parts`, `label`. Properties: `text`, `text_delta`, `reasoning_delta`, `tool_deltas`, `is_done` |
+| `Message` | Universal message with `role`, `parts`, `label`. Properties: `text`, `text_delta`, `reasoning_delta`, `tool_deltas`, `tool_calls`, `is_done` |
 | `TextPart` | Text content with streaming `state` and `delta` |
-| `ToolPart` | Tool call with `tool_call_id`, `tool_name`, `tool_args`, `status`, `result`. Has `.execute()` method |
+| `ToolPart` | Tool call with `tool_call_id`, `tool_name`, `tool_args`, `status`, `result`. Has `.set_result()` |
+| `ToolDelta` | Tool argument streaming delta (`tool_call_id`, `tool_name`, `args_delta`) |
 | `ReasoningPart` | Model reasoning/thinking with optional `signature` (Anthropic) |
-| `HookPart` | Hook suspension with `hook_id`, `hook_type`, `status`, `metadata`, `resolution` |
-| `PartState` | Literal type: `"streaming"` or `"done"` |
-| `StreamResult` | Result of a stream: `messages`, `tool_calls`, `text`, `last_message` |
+| `HookPart` | Hook suspension with `hook_id`, `hook_type`, `status` (`pending`/`resolved`/`cancelled`), `metadata`, `resolution` |
+| `Part` | Union: `TextPart \| ToolPart \| ReasoningPart \| HookPart` |
+| `PartState` | Literal: `"streaming"` \| `"done"` |
+| `StreamResult` | Result of a stream step: `messages`, `tool_calls`, `text`, `last_message` |
 | `Tool` | Tool definition: `name`, `description`, `schema`, `fn` |
-| `Runtime` | Step queue with `put_message()`, `get_all_hooks()` |
+| `ToolSchema` | Serializable tool description: `name`, `description`, `tool_schema` (no `fn`) |
+| `Runtime` | Central coordinator for the agent loop. Step queue, message queue, checkpoint replay/record |
+| `RunResult` | Return type of `run()`. Async-iterable for messages, then `.checkpoint` and `.pending_hooks` |
+| `HookInfo` | Pending hook info: `label`, `hook_type`, `metadata` |
+| `Hook` | Generic hook base with `.create()`, `.resolve()`, `.cancel()` class methods |
+| `Checkpoint` | Serializable snapshot of completed work: `steps[]`, `tools[]`, `hooks[]`. Has `.serialize()` / `.deserialize()` |
 | `LanguageModel` | Abstract base class for LLM providers |
-| `HookPending` | Exception raised by `Hook.create_or_raise()` when resolution needed |
 
 ## Examples
 
 See the `examples/` directory:
 
-- `run_agent.py` - Basic agent with tools
-- `run_multiagent.py` - Parallel agents with live display
-- `run_hooks.py` - Human-in-the-loop approval flow
-- `run_streaming_tool.py` - Tool that streams progress via Runtime
-- `run_custom_loop.py` - Custom step with `@ai.stream`
-- `run_mcp.py` - MCP integration
-- `run_fake_serverless.py` - Suspend/resume with `HookPending`
+**Samples** (`examples/samples/`):
+
+- `simple.py` — Basic agent with tools and `stream_loop`
+- `agent.py` — Coding agent with local filesystem tools
+- `hooks.py` — Human-in-the-loop approval flow
+- `streaming_tool.py` — Tool that streams progress via Runtime
+- `multiagent.py` — Parallel agents with labels, then summarization
+- `custom_loop.py` — Custom step with `@ai.stream`
+- `mcp.py` — MCP integration (Context7)
+
+**Projects**:
+
+- `examples/fastapi-vite/` — Full-stack chat app (FastAPI + Vite + AI SDK UI)
+- `examples/temporal-durable/` — Durable execution with Temporal workflows
+- `examples/multiagent-textual/` — Multi-agent TUI with Textual

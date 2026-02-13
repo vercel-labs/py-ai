@@ -24,9 +24,8 @@ async def main():
 
     async for msg in coding_agent.run(messages):
         # Auto-approve all tool calls
-        for part in msg.parts:
-            if isinstance(part, ai.HookPart) and part.status == "pending":
-                agent.ToolApproval.resolve(part.hook_id, {"granted": True})
+        if (hook := msg.get_hook_part()) and hook.status == "pending":
+            agent.ToolApproval.resolve(hook.hook_id, {"granted": True})
 
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)

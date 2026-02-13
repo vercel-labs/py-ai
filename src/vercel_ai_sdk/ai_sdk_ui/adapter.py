@@ -7,7 +7,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterable
 from typing import Any, Literal
 
 from .. import core
@@ -127,7 +127,7 @@ class _StreamState:
 
 
 async def to_ui_message_stream(
-    messages: AsyncGenerator[core.messages.Message, None],
+    messages: AsyncIterable[core.messages.Message],
 ) -> AsyncGenerator[protocol.UIMessageStreamPart, None]:
     """
     Convert a proto_sdk message stream into AI SDK UI message stream parts.
@@ -257,7 +257,7 @@ async def to_ui_message_stream(
 
 
 async def filter_by_label(
-    messages: AsyncGenerator[core.messages.Message, None],
+    messages: AsyncIterable[core.messages.Message],
     label: str | None = None,
 ) -> AsyncGenerator[core.messages.Message, None]:
     """Filter a message stream to a single agent label.
@@ -273,7 +273,7 @@ async def filter_by_label(
 
 
 async def to_sse_stream(
-    messages: AsyncGenerator[core.messages.Message, None],
+    messages: AsyncIterable[core.messages.Message],
 ) -> AsyncGenerator[str, None]:
     """Convert a proto_sdk message stream directly into SSE-formatted strings."""
     async for part in to_ui_message_stream(messages):

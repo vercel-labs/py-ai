@@ -61,17 +61,16 @@ async def main():
 
     async for msg in ai.run(graph, llm, "When will the robots take over?"):
         # Hook parts arrive as pending, waiting for resolution
-        for part in msg.parts:
-            if isinstance(part, ai.HookPart) and part.status == "pending":
-                answer = input(f"Approve {part.hook_id}? [y/n] ")
-                CommunicationApproval.resolve(
-                    part.hook_id,
-                    {
-                        "granted": answer.strip().lower() in ("y", "yes"),
-                        "reason": "operator decision",
-                    },
-                )
-                continue
+        if (hook := msg.get_hook_part()) and hook.status == "pending":
+            answer = input(f"Approve {hook.hook_id}? [y/n] ")
+            CommunicationApproval.resolve(
+                hook.hook_id,
+                {
+                    "granted": answer.strip().lower() in ("y", "yes"),
+                    "reason": "operator decision",
+                },
+            )
+            continue
 
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)

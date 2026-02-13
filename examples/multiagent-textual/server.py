@@ -154,13 +154,6 @@ async def multiagent(llm: ai.LanguageModel, query: str):
 # ---------------------------------------------------------------------------
 
 
-def _get_hook_part(msg: ai.Message) -> ai.HookPart | None:
-    for part in msg.parts:
-        if isinstance(part, ai.HookPart):
-            return part
-    return None
-
-
 def _normalise_message(data: dict) -> dict:
     """Ensure ToolPart.result is always a dict for safe deserialisation."""
     for part in data.get("parts", []):
@@ -208,8 +201,7 @@ async def ws_endpoint(websocket: WebSocket):
             data = _normalise_message(msg.model_dump())
             await websocket.send_json(data)
 
-            hook_part = _get_hook_part(msg)
-            if hook_part:
+            if hook_part := msg.get_hook_part():
                 print(f"  Hook {hook_part.status}: {hook_part.hook_id}")
     finally:
         reader.cancel()

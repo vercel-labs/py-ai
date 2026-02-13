@@ -146,6 +146,14 @@ class Message(pydantic.BaseModel):
                 return part
         return None
 
+    def get_hook_part(self, hook_id: str | None = None) -> HookPart | None:
+        """Find a HookPart by hook_id, or return the first HookPart if no id given."""
+        for part in self.parts:
+            if isinstance(part, HookPart):
+                if hook_id is None or part.hook_id == hook_id:
+                    return part
+        return None
+
 
 def make_messages(*, system: str | None = None, user: str) -> list[Message]:
     """Convenience builder for common system + user message pattern."""
