@@ -231,12 +231,15 @@ def _mcp_tool_to_native(
     if tool_prefix:
         name = f"{tool_prefix}_{name}"
 
-    return core.tools.Tool(
+    t = core.tools.Tool(
         name=name,
         description=mcp_tool.description or "",
         tool_schema=mcp_tool.inputSchema,
         fn=_make_tool_fn(connection_key, mcp_tool.name, transport_factory),
     )
+    # Register so execute_tool() can find it by name
+    core.tools._tool_registry[name] = t
+    return t
 
 
 async def close_connections() -> None:
