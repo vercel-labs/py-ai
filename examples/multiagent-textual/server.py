@@ -15,15 +15,15 @@ import json
 import os
 import warnings
 
+import fastapi
 import pydantic
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 import vercel_ai_sdk as ai
 
 # ToolPart.result is typed as dict but tools can return plain strings.
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
-app = FastAPI(title="multiagent-textual")
+app = fastapi.FastAPI(title="multiagent-textual")
 
 # ---------------------------------------------------------------------------
 # Tools
@@ -168,7 +168,7 @@ def _normalise_message(data: dict) -> dict:
 
 
 @app.websocket("/ws")
-async def ws_endpoint(websocket: WebSocket):
+async def ws_endpoint(websocket: fastapi.WebSocket):
     await websocket.accept()
     print("Client connected")
 
@@ -191,7 +191,7 @@ async def ws_endpoint(websocket: WebSocket):
                     data["hook_id"],
                     {"granted": data["granted"], "reason": data["reason"]},
                 )
-        except WebSocketDisconnect:
+        except fastapi.WebSocketDisconnect:
             pass
 
     reader = asyncio.create_task(read_resolutions())

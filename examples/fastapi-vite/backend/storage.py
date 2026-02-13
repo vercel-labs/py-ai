@@ -10,7 +10,7 @@ rest of the app.
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import pathlib
 from typing import Any, Protocol, runtime_checkable
 
 
@@ -31,11 +31,11 @@ class FileStorage:
     local development; replace with a real database for production.
     """
 
-    def __init__(self, directory: str | Path = "./data") -> None:
-        self._dir = Path(directory)
+    def __init__(self, directory: str | pathlib.Path = "./data") -> None:
+        self._dir = pathlib.Path(directory)
         self._dir.mkdir(parents=True, exist_ok=True)
 
-    def _path(self, key: str) -> Path:
+    def _path(self, key: str) -> pathlib.Path:
         # Sanitise the key so it's safe as a filename
         safe = key.replace("/", "__").replace(":", "_")
         return self._dir / f"{safe}.json"

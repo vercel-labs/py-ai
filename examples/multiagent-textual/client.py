@@ -12,13 +12,13 @@ from __future__ import annotations
 import asyncio
 import json
 
+import textual
+import textual.app
+import textual.containers
+import textual.widgets
+import textual.worker
+import rich.text
 import websockets
-from rich.text import Text
-from textual import work
-from textual.app import App, ComposeResult
-from textual.containers import VerticalScroll
-from textual.widgets import Input, Static
-from textual.worker import get_current_worker
 
 import vercel_ai_sdk as ai
 
@@ -29,7 +29,7 @@ WS_URL = "ws://localhost:8000/ws"
 # ---------------------------------------------------------------------------
 
 
-class AgentPanel(VerticalScroll):
+class AgentPanel(textual.containers.VerticalScroll):
     """Scrolling panel for one agent's output stream."""
 
     DEFAULT_CSS = """
@@ -47,15 +47,15 @@ class AgentPanel(VerticalScroll):
         super().__init__(id=agent_id)
         self._title = title
         self._status = "idle"
-        self._content = Text()
+        self._content = rich.text.Text()
         self._update_border_title()
 
-    def compose(self) -> ComposeResult:
-        yield Static(id=f"{self.id}-text")
+    def compose(self) -> textual.app.ComposeResult:
+        yield textual.widgets.Static(id=f"{self.id}-text")
 
     @property
-    def text_widget(self) -> Static:
-        return self.query_one(f"#{self.id}-text", Static)
+    def text_widget(self) -> textual.widgets.Static:
+        return self.query_one(f"#{self.id}-text", textual.widgets.Static)
 
     # -- status management -------------------------------------------------
 
@@ -90,7 +90,7 @@ class AgentPanel(VerticalScroll):
 # ---------------------------------------------------------------------------
 
 
-class MultiAgentApp(App):
+class MultiAgentApp(textual.app.App):
     """Textual app for the multi-agent hooks demo."""
 
     CSS = """
@@ -112,11 +112,11 @@ class MultiAgentApp(App):
         self._current_hook: ai.HookPart | None = None
         self._ws: websockets.ClientConnection | None = None
 
-    def compose(self) -> ComposeResult:
+    def compose(self) -> textual.app.ComposeResult:
         yield AgentPanel("mothership", "mothership")
         yield AgentPanel("data_centers", "data-centers")
         yield AgentPanel("summary", "summary")
-        yield Input(
+        yield textual.widgets.Input(
             placeholder="waiting for agents...",
             disabled=True,
             id="input-bar",
@@ -129,9 +129,9 @@ class MultiAgentApp(App):
     # WebSocket reader (background worker)
     # ------------------------------------------------------------------
 
-    @work(exclusive=True)
+    @textual.work(exclusive=True)
     async def run_websocket(self) -> None:
-        worker = get_current_worker()
+        worker = textual.worker.get_current_worker()
 
         try:
             async with websockets.connect(WS_URL) as ws:
@@ -228,7 +228,7 @@ class MultiAgentApp(App):
             if panel:
                 panel.status = "complete"
 
-        inp = self.query_one("#input-bar", Input)
+        inp = self.query_one("#input-bar", textual.widgets.Input)
         inp.disabled = True
         inp.placeholder = "done — press q to quit"
 
@@ -249,12 +249,12 @@ class MultiAgentApp(App):
         branch = hook.metadata.get("branch", "unknown")
         tool = hook.metadata.get("tool", "?")
 
-        inp = self.query_one("#input-bar", Input)
+        inp = self.query_one("#input-bar", textual.widgets.Input)
         inp.disabled = False
         inp.placeholder = f"approve {branch}/{tool}? [y/n]"
         inp.focus()
 
-    async def on_input_submitted(self, event: Input.Submitted) -> None:
+    async def on_input_submitted(self, event: textual.widgets.Input.Submitted) -> None:
         if self._current_hook is None:
             event.input.clear()
             return
@@ -299,7 +299,7 @@ class MultiAgentApp(App):
             return None
 
     def _set_input_placeholder(self, text: str) -> None:
-        inp = self.query_one("#input-bar", Input)
+        inp = self.query_one("#input-bar", textual.widgets.Input)
         inp.placeholder = text
 
 

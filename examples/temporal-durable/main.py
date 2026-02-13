@@ -15,30 +15,34 @@ import asyncio
 import sys
 import uuid
 
-from temporalio.client import Client
-from temporalio.worker import Worker
+import temporalio.client
+import temporalio.worker
 
-from activities import get_weather_activity, get_population_activity, llm_call_activity
-from workflow import AgentWorkflow
+import activities
+import workflow
 
 TASK_QUEUE = "agent-durable"
 
 
 async def main(user_query: str) -> None:
-    client = await Client.connect("localhost:7233")
+    temporal = await temporalio.client.Client.connect("localhost:7233")
 
-    async with Worker(
-        client,
+    async with temporalio.worker.Worker(
+        temporal,
         task_queue=TASK_QUEUE,
-        workflows=[AgentWorkflow],
-        activities=[llm_call_activity, get_weather_activity, get_population_activity],
+        workflows=[workflow.AgentWorkflow],
+        activities=[
+            activities.llm_call_activity,
+            activities.get_weather_activity,
+            activities.get_population_activity,
+        ],
     ):
         workflow_id = f"agent-durable-{uuid.uuid4().hex[:8]}"
         print(f"Workflow {workflow_id}")
         print(f"Query: {user_query}\n")
 
-        result = await client.execute_workflow(
-            AgentWorkflow.run,
+        result = await temporal.execute_workflow(
+            workflow.AgentWorkflow.run,
             user_query,
             id=workflow_id,
             task_queue=TASK_QUEUE,

@@ -7,25 +7,25 @@ The LLM activity uses ToolSchema (no dummy fn) and llm.buffer()
 
 from __future__ import annotations
 
+import dataclasses
 import os
-from dataclasses import dataclass
 from typing import Any
 
-from temporalio import activity
+import temporalio.activity
 
 import vercel_ai_sdk as ai
-from vercel_ai_sdk.anthropic import AnthropicModel
+import vercel_ai_sdk.anthropic
 
 
 # ── Tool activities (one per tool, plain functions) ───────────────
 
 
-@activity.defn(name="get_weather")
+@temporalio.activity.defn(name="get_weather")
 async def get_weather_activity(city: str) -> str:
     return f"Sunny, 72F in {city}"
 
 
-@activity.defn(name="get_population")
+@temporalio.activity.defn(name="get_population")
 async def get_population_activity(city: str) -> int:
     return {"new york": 8_336_817, "los angeles": 3_979_576}.get(
         city.lower(), 1_000_000
@@ -35,21 +35,21 @@ async def get_population_activity(city: str) -> int:
 # ── LLM activity ─────────────────────────────────────────────────
 
 
-@dataclass
+@dataclasses.dataclass
 class LLMCallParams:
     messages: list[dict[str, Any]]
     tool_schemas: list[dict[str, Any]]
 
 
-@dataclass
+@dataclasses.dataclass
 class LLMCallResult:
     message: dict[str, Any]  # serialized ai.Message
 
 
-@activity.defn(name="llm_call")
+@temporalio.activity.defn(name="llm_call")
 async def llm_call_activity(params: LLMCallParams) -> LLMCallResult:
     """Call the LLM, drain the stream, return the final message."""
-    llm = AnthropicModel(
+    llm = ai.anthropic.AnthropicModel(
         model="anthropic/claude-sonnet-4",
         base_url="https://ai-gateway.vercel.sh",
         api_key=os.environ.get("AI_GATEWAY_API_KEY"),
