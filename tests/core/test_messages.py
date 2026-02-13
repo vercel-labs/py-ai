@@ -1,6 +1,7 @@
 """Message model: properties, ToolPart.set_result, make_messages."""
 
 from vercel_ai_sdk.core.messages import (
+    HookPart,
     Message,
     ReasoningPart,
     TextPart,
@@ -149,6 +150,32 @@ def test_get_tool_part_found():
 def test_get_tool_part_missing():
     m = Message(id="m1", role="assistant", parts=[TextPart(text="no tools")])
     assert m.get_tool_part("tc-nope") is None
+
+
+# -- get_hook_part ---------------------------------------------------------
+
+
+def test_get_hook_part_found():
+    """get_hook_part returns the HookPart when present."""
+    hook = HookPart(hook_id="h1", hook_type="Approval", status="pending")
+    m = Message(id="m1", role="assistant", parts=[hook])
+    assert m.get_hook_part() is hook
+    assert m.get_hook_part("h1") is hook
+
+
+def test_get_hook_part_by_id():
+    """get_hook_part with a specific hook_id skips non-matching hooks."""
+    h1 = HookPart(hook_id="h1", hook_type="Approval", status="pending")
+    h2 = HookPart(hook_id="h2", hook_type="Approval", status="resolved")
+    m = Message(id="m1", role="assistant", parts=[h1, h2])
+    assert m.get_hook_part("h2") is h2
+
+
+def test_get_hook_part_missing():
+    """get_hook_part returns None when no HookPart exists."""
+    m = Message(id="m1", role="assistant", parts=[TextPart(text="no hooks")])
+    assert m.get_hook_part() is None
+    assert m.get_hook_part("h-nope") is None
 
 
 # -- ToolPart.set_result ---------------------------------------------------

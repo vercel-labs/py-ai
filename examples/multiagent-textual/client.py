@@ -158,15 +158,15 @@ class MultiAgentApp(App):
     # ------------------------------------------------------------------
 
     def _handle_message(self, msg: ai.Message) -> None:
-        hook_part = _get_hook_part(msg)
         label = msg.label or "unknown"
 
-        if hook_part and hook_part.status == "pending":
-            self._on_hook_pending(hook_part)
-            return
-        if hook_part and hook_part.status == "resolved":
-            self._on_hook_resolved(hook_part)
-            return
+        if (hook_part := msg.get_hook_part()) is not None:
+            if hook_part.status == "pending":
+                self._on_hook_pending(hook_part)
+                return
+            if hook_part.status == "resolved":
+                self._on_hook_resolved(hook_part)
+                return
 
         panel = self._get_panel(label)
         if panel is None:
@@ -301,13 +301,6 @@ class MultiAgentApp(App):
     def _set_input_placeholder(self, text: str) -> None:
         inp = self.query_one("#input-bar", Input)
         inp.placeholder = text
-
-
-def _get_hook_part(msg: ai.Message) -> ai.HookPart | None:
-    for part in msg.parts:
-        if isinstance(part, ai.HookPart):
-            return part
-    return None
 
 
 if __name__ == "__main__":
