@@ -1,10 +1,4 @@
-"""Temporal workflow — the durable agent loop.
-
-Key insight: @ai.tool and ai.stream_loop work unchanged — the tool
-*bodies* call execute_activity, and the LLM is a buffered_model that
-calls an activity.  The framework doesn't know about Temporal; Temporal
-doesn't know about the framework.  They compose via plain async/await.
-"""
+"""Temporal workflow — the durable agent loop."""
 
 from __future__ import annotations
 
@@ -25,14 +19,6 @@ with workflow.unsafe.imports_passed_through():
         get_weather_activity,
         llm_call_activity,
     )
-
-
-# ── buffered_model (candidate for framework extraction) ──────────
-#
-# Wraps an async callable into a LanguageModel.  The callable receives
-# serialized messages + tool schemas and returns a serialized message.
-# This lets you slot in any durable execution backend (Temporal, Inngest,
-# etc.) without subclassing LanguageModel by hand.
 
 
 class DurableModel(ai.LanguageModel):

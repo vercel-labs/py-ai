@@ -5,7 +5,6 @@ description = "Durable agent execution with Temporal"
 requires-python = ">=3.12"
 dependencies = [
     "vercel-ai-sdk",
-    "anthropic>=0.40.0",
     "temporalio>=1.9.0",
 ]
 

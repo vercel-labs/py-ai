@@ -5,8 +5,8 @@ Prerequisites:
     2. AI_GATEWAY_API_KEY environment variable set
 
 Usage:
-    uv run python raw/main.py
-    uv run python raw/main.py "What is the weather in Tokyo?"
+    uv run python main.py
+    uv run python main.py "What is the weather in Tokyo?"
 """
 
 from __future__ import annotations
@@ -18,10 +18,10 @@ import uuid
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from activities import llm_call_activity, tool_call_activity
+from activities import get_weather_activity, get_population_activity, llm_call_activity
 from workflow import AgentWorkflow
 
-TASK_QUEUE = "agent-raw"
+TASK_QUEUE = "agent-durable"
 
 
 async def main(user_query: str) -> None:
@@ -31,9 +31,9 @@ async def main(user_query: str) -> None:
         client,
         task_queue=TASK_QUEUE,
         workflows=[AgentWorkflow],
-        activities=[llm_call_activity, tool_call_activity],
+        activities=[llm_call_activity, get_weather_activity, get_population_activity],
     ):
-        workflow_id = f"agent-raw-{uuid.uuid4().hex[:8]}"
+        workflow_id = f"agent-durable-{uuid.uuid4().hex[:8]}"
         print(f"Workflow {workflow_id}")
         print(f"Query: {user_query}\n")
 

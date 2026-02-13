@@ -1345,7 +1345,6 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
     { name = "rich", specifier = ">=14.2.0" },
-    { name = "textual", specifier = ">=3.2.0" },
 ]
 
 [[package]]

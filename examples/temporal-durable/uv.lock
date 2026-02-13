@@ -723,14 +723,12 @@ name = "temporal-durable"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "anthropic" },
     { name = "temporalio" },
     { name = "vercel-ai-sdk" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", specifier = ">=0.40.0" },
     { name = "temporalio", specifier = ">=1.9.0" },
     { name = "vercel-ai-sdk", editable = "../../" },
 ]
