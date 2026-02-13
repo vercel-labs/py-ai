@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
-
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -30,14 +28,6 @@ class ChatRequest(BaseModel):
     session_id: str | None = None
 
 
-async def _iter_result(
-    result: ai.RunResult,
-) -> AsyncGenerator[ai.Message, None]:
-    """Unwrap RunResult into an AsyncGenerator for to_sse_stream."""
-    async for msg in result:
-        yield msg
-
-
 @router.post("/chat")
 async def chat(request: ChatRequest):
     """Handle chat requests and stream responses."""
@@ -57,7 +47,7 @@ async def chat(request: ChatRequest):
     result = ai.run(graph, llm, messages, TOOLS, checkpoint=checkpoint)
 
     async def stream_response():
-        async for chunk in to_sse_stream(_iter_result(result)):
+        async for chunk in to_sse_stream(result):
             yield chunk
 
         # If the run completed (no pending hooks), clear the checkpoint
