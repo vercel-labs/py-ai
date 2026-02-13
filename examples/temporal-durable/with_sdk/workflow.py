@@ -8,9 +8,9 @@ doesn't know about the framework.  They compose via plain async/await.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from datetime import timedelta
-from typing import Any, override
+from typing import override
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -21,64 +21,54 @@ with workflow.unsafe.imports_passed_through():
     from activities import (
         LLMCallParams,
         LLMCallResult,
-        ToolCallParams,
+        get_population_activity,
+        get_weather_activity,
         llm_call_activity,
-        tool_call_activity,
     )
 
 
 # ── buffered_model (candidate for framework extraction) ──────────
 #
 # Wraps an async callable into a LanguageModel.  The callable receives
-# serialized messages + tool schemas and returns serialized messages.
+# serialized messages + tool schemas and returns a serialized message.
 # This lets you slot in any durable execution backend (Temporal, Inngest,
 # etc.) without subclassing LanguageModel by hand.
-#
-# TODO: move to ai.buffered_model() in the framework.
 
 
-def buffered_model(
-    call_fn: Callable[[LLMCallParams], Awaitable[LLMCallResult]],
-) -> ai.LanguageModel:
-    """Create a LanguageModel that delegates to an async callable."""
+class DurableModel(ai.LanguageModel):
+    def __init__(
+        self, call_fn: Callable[[LLMCallParams], Awaitable[LLMCallResult]]
+    ) -> None:
+        self.call_fn = call_fn
 
-    class _Buffered(ai.LanguageModel):
-        @override
-        async def stream(
-            self,
-            messages: list[ai.Message],
-            tools: list[ai.Tool] | None = None,
-        ) -> AsyncGenerator[ai.Message, None]:
-            tool_schemas = [
-                {"name": t.name, "description": t.description, "schema": t.schema}
-                for t in (tools or [])
-            ]
-            result = await call_fn(
-                LLMCallParams(
-                    messages=[m.model_dump() for m in messages],
-                    tool_schemas=tool_schemas,
-                )
+    @override
+    async def stream(
+        self,
+        messages: list[ai.Message],
+        tools: Sequence[ai.ToolSchema] | None = None,
+    ) -> AsyncGenerator[ai.Message, None]:
+        result = await self.call_fn(
+            LLMCallParams(
+                messages=[m.model_dump() for m in messages],
+                tool_schemas=[t.model_dump() for t in (tools or [])],
             )
-            for msg_dict in result.messages:
-                yield ai.Message.model_validate(msg_dict)
-
-    return _Buffered()
+        )
+        yield ai.Message.model_validate(result.message)
 
 
 # ── Durable tools ────────────────────────────────────────────────
 #
 # Plain @ai.tool — the decorator builds the JSON schema from the
 # signature.  The body calls execute_activity, making each tool
-# invocation a durable Temporal activity.  The framework's
-# execute_tool() calls tool.fn(), which just does the activity call.
+# invocation a durable Temporal activity.
 
 
 @ai.tool
 async def get_weather(city: str) -> str:
     """Get current weather for a city."""
     return await workflow.execute_activity(
-        tool_call_activity,
-        ToolCallParams(tool_name="get_weather", tool_args={"city": city}),
+        get_weather_activity,
+        args=[city],
         start_to_close_timeout=timedelta(minutes=2),
     )
 
@@ -87,8 +77,8 @@ async def get_weather(city: str) -> str:
 async def get_population(city: str) -> int:
     """Get population of a city."""
     return await workflow.execute_activity(
-        tool_call_activity,
-        ToolCallParams(tool_name="get_population", tool_args={"city": city}),
+        get_population_activity,
+        args=[city],
         start_to_close_timeout=timedelta(minutes=2),
     )
 
@@ -112,7 +102,7 @@ async def agent(llm: ai.LanguageModel, user_query: str) -> ai.StreamResult:
 class AgentWorkflow:
     @workflow.run
     async def run(self, user_query: str) -> str:
-        llm = buffered_model(
+        llm = DurableModel(
             lambda params: workflow.execute_activity(
                 llm_call_activity,
                 params,

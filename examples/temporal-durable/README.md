@@ -9,8 +9,9 @@ tool call is a durable activity that Temporal replays from history.
 The framework and Temporal compose via plain async/await:
 
 - **Tools**: `@ai.tool` with `execute_activity()` in the body — each tool
-  invocation is automatically a durable activity
-- **LLM**: `buffered_model()` wraps an activity call into a `LanguageModel`
+  is its own activity with a matching signature, no dispatch table needed
+- **LLM**: `buffered_model()` wraps an activity call into a `LanguageModel`;
+  the activity uses `llm.buffer()` and `ToolSchema` (no dummy `fn`, no drain loop)
 - **Loop**: `ai.stream_loop()` runs the agent loop unchanged
 - **Bus**: `ai.run()` provides the unified message bus for streaming
 
@@ -58,8 +59,8 @@ Workflow (deterministic)              Activities (real I/O)
 │     return text         │          │                      │
 │                         │          │                      │
 │   gather(               │          │                      │
-│     activity(tool1) ────┼─────────>│  tool_call(name,args)│
-│     activity(tool2) ────┼─────────>│  tool_call(name,args)│
+│     activity(tool1) ────┼─────────>│  get_weather(city)   │
+│     activity(tool2) ────┼─────────>│  get_population(city)│
 │   )                     │<─────────┼  → plain functions   │
 └─────────────────────────┘          └──────────────────────┘
 ```
@@ -68,12 +69,13 @@ On crash/restart, Temporal replays activity results from its event history.
 The workflow re-executes deterministically — each `execute_activity()` call
 returns the cached result instead of re-running the I/O.
 
-## Framework helpers used in `with_sdk/`
+## Framework primitives used in `with_sdk/`
 
 | Pattern | What it replaces |
 |---|---|
 | `@ai.tool` with activity body | Manual `TOOL_SCHEMAS` dicts + `TOOL_FNS` dispatch table |
-| `buffered_model(fn)` | Hand-written `LanguageModel` subclass (28 lines → 5) |
+| `ai.ToolSchema` | `Tool(fn=_noop)` hacks for passing schemas across boundaries |
+| `llm.buffer(messages, tools)` | Manual stream drain loop |
 | `ai.stream_loop(llm, msgs, tools)` | Manual while/gather/append loop |
 | `ai.make_messages(system=..., user=...)` | Raw dict construction |
 | `ai.Message` (typed, Pydantic) | `dict[str, Any]` blobs |

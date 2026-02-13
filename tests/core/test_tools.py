@@ -20,10 +20,10 @@ def test_simple_types_produce_correct_schema():
 
     assert greet.name == "greet"
     assert greet.description == "Say hello."
-    props = greet.schema["properties"]
+    props = greet.tool_schema["properties"]
     assert props["name"] == {"type": "string"}
     assert props["count"] == {"type": "integer"}
-    assert set(greet.schema["required"]) == {"name", "count"}
+    assert set(greet.tool_schema["required"]) == {"name", "count"}
 
 
 def test_optional_param_not_required():
@@ -32,10 +32,10 @@ def test_optional_param_not_required():
         """Search."""
         return query
 
-    assert "query" in search.schema.get("required", [])
-    assert "limit" not in search.schema.get("required", [])
+    assert "query" in search.tool_schema.get("required", [])
+    assert "limit" not in search.tool_schema.get("required", [])
     # limit should still appear in properties
-    assert "limit" in search.schema["properties"]
+    assert "limit" in search.tool_schema["properties"]
 
 
 def test_default_value_not_required():
@@ -54,7 +54,7 @@ def test_complex_type_schema():
         """Send message."""
         return "sent"
 
-    props = send.schema["properties"]
+    props = send.tool_schema["properties"]
     assert props["recipients"]["type"] == "array"
     assert props["recipients"]["items"]["type"] == "string"
 
@@ -68,10 +68,10 @@ def test_runtime_param_excluded_from_schema():
         """Tool that needs runtime."""
         return query
 
-    props = needs_runtime.schema["properties"]
+    props = needs_runtime.tool_schema["properties"]
     assert "rt" not in props
     assert "query" in props
-    assert set(needs_runtime.schema.get("required", [])) == {"query"}
+    assert set(needs_runtime.tool_schema.get("required", [])) == {"query"}
 
 
 # -- Registry -------------------------------------------------------------
@@ -108,4 +108,4 @@ async def test_tool_fn_is_callable():
 
 
 def search_required(tool: ai.Tool) -> list[str]:
-    return tool.schema.get("required", [])
+    return tool.tool_schema.get("required", [])

@@ -1,8 +1,8 @@
 """Temporal activities — all real I/O lives here.
 
-Activities run outside the workflow sandbox, so they can do network I/O,
-access environment variables, etc.  No framework imports needed — these
-are plain functions wrapped with @activity.defn.
+Each tool is its own activity with a plain function signature.
+The LLM activity uses ToolSchema (no dummy fn) and llm.buffer()
+(no manual drain loop).
 """
 
 from __future__ import annotations
@@ -13,30 +13,26 @@ from typing import Any
 
 from temporalio import activity
 
-from vercel_ai_sdk.anthropic import AnthropicModel
 import vercel_ai_sdk as ai
+from vercel_ai_sdk.anthropic import AnthropicModel
 
 
-# ── Tool functions (plain Python) ─────────────────────────────────
+# ── Tool activities (one per tool, plain functions) ───────────────
 
 
-def get_weather(city: str) -> str:
+@activity.defn(name="get_weather")
+async def get_weather_activity(city: str) -> str:
     return f"Sunny, 72F in {city}"
 
 
-def get_population(city: str) -> int:
+@activity.defn(name="get_population")
+async def get_population_activity(city: str) -> int:
     return {"new york": 8_336_817, "los angeles": 3_979_576}.get(
         city.lower(), 1_000_000
     )
 
 
-TOOL_FNS: dict[str, Any] = {
-    "get_weather": get_weather,
-    "get_population": get_population,
-}
-
-
-# ── Serializable parameter types ─────────────────────────────────
+# ── LLM activity ─────────────────────────────────────────────────
 
 
 @dataclass
@@ -47,16 +43,7 @@ class LLMCallParams:
 
 @dataclass
 class LLMCallResult:
-    messages: list[dict[str, Any]]  # list of serialized ai.Message
-
-
-@dataclass
-class ToolCallParams:
-    tool_name: str
-    tool_args: dict[str, Any]
-
-
-# ── Activities ───────────────────────────────────────────────────
+    message: dict[str, Any]  # serialized ai.Message
 
 
 @activity.defn(name="llm_call")
@@ -69,29 +56,7 @@ async def llm_call_activity(params: LLMCallParams) -> LLMCallResult:
     )
 
     messages = [ai.Message.model_validate(m) for m in params.messages]
+    tools = [ai.ToolSchema.model_validate(t) for t in params.tool_schemas]
 
-    # Build Tool objects with schema only (fn is not called activity-side).
-    # TODO: framework should expose ToolSchema or let stream() accept dicts.
-    async def _noop() -> None: ...
-
-    tools = [
-        ai.Tool(
-            name=t["name"], description=t["description"], schema=t["schema"], fn=_noop
-        )
-        for t in params.tool_schemas
-    ]
-
-    final = None
-    async for msg in llm.stream(messages=messages, tools=tools or None):
-        final = msg
-
-    if final is None:
-        return LLMCallResult(messages=[])
-    return LLMCallResult(messages=[final.model_dump()])
-
-
-@activity.defn(name="tool_call")
-async def tool_call_activity(params: ToolCallParams) -> Any:
-    """Execute a tool function by name."""
-    fn = TOOL_FNS[params.tool_name]
-    return fn(**params.tool_args)
+    result = await llm.buffer(messages, tools)
+    return LLMCallResult(message=result.model_dump())

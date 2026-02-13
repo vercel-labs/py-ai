@@ -18,7 +18,7 @@ import uuid
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from activities import llm_call_activity, tool_call_activity
+from activities import get_weather_activity, get_population_activity, llm_call_activity
 from workflow import AgentWorkflow
 
 TASK_QUEUE = "agent-sdk"
@@ -31,7 +31,7 @@ async def main(user_query: str) -> None:
         client,
         task_queue=TASK_QUEUE,
         workflows=[AgentWorkflow],
-        activities=[llm_call_activity, tool_call_activity],
+        activities=[llm_call_activity, get_weather_activity, get_population_activity],
     ):
         workflow_id = f"agent-sdk-{uuid.uuid4().hex[:8]}"
         print(f"Workflow {workflow_id}")
