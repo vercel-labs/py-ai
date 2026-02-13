@@ -234,7 +234,7 @@ def _mcp_tool_to_native(
     return core.tools.Tool(
         name=name,
         description=mcp_tool.description or "",
-        schema=mcp_tool.inputSchema,
+        tool_schema=mcp_tool.inputSchema,
         fn=_make_tool_fn(connection_key, mcp_tool.name, transport_factory),
     )
 

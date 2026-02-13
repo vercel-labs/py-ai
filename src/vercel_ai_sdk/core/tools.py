@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import dataclasses
 import inspect
 from collections.abc import Awaitable
 from typing import Any, Callable, get_args, get_origin, get_type_hints, overload
@@ -39,6 +38,27 @@ def _is_optional(param_type: type) -> bool:
         args = get_args(param_type)
         return type(None) in args
     return False
+
+
+class ToolSchema(pydantic.BaseModel):
+    """What the LLM sees: name, description, and JSON Schema for parameters.
+
+    This is the serializable, function-free description of a tool.
+    Use this when you need tool metadata without the callable (e.g. passing
+    tool schemas across a serialization boundary to an LLM activity).
+    """
+
+    name: str
+    description: str
+    tool_schema: dict[str, Any]
+
+
+class Tool(ToolSchema):
+    """A ToolSchema plus the async callable that implements it."""
+
+    fn: Callable[..., Awaitable[Any]] = pydantic.Field(exclude=True)
+
+    model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
 
 
 @overload
@@ -84,7 +104,7 @@ def tool(
         t = Tool(
             name=f.__name__,
             description=inspect.getdoc(f) or "",
-            schema=parameters,
+            tool_schema=parameters,
             fn=f,
         )
         # Register in global registry
@@ -94,11 +114,3 @@ def tool(
     if fn is not None:
         return make_tool(fn)
     return make_tool
-
-
-@dataclasses.dataclass
-class Tool:
-    name: str
-    description: str
-    schema: dict[str, Any]
-    fn: Callable[..., Awaitable[Any]]

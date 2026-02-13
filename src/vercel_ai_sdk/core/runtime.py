@@ -4,7 +4,7 @@ import asyncio
 import json
 import contextvars
 import dataclasses
-from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Sequence
 from typing import Any, get_type_hints
 
 from .. import mcp
@@ -187,7 +187,7 @@ def _find_runtime_param(fn: Callable[..., Any]) -> str | None:
 async def stream_step(
     llm: llm_.LanguageModel,
     messages: list[messages_.Message],
-    tools: list[tools_.Tool] | None = None,
+    tools: Sequence[tools_.ToolSchema] | None = None,
     label: str | None = None,
 ) -> AsyncGenerator[messages_.Message, None]:
     """Single LLM call that streams to Runtime."""
@@ -250,7 +250,7 @@ async def execute_tool(
 async def stream_loop(
     llm: llm_.LanguageModel,
     messages: list[messages_.Message],
-    tools: list[tools_.Tool],
+    tools: Sequence[tools_.ToolSchema],
     label: str | None = None,
 ) -> streams_.StreamResult:
     """Agent loop: stream LLM, execute tools, repeat until done."""
