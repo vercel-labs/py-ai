@@ -1,16 +1,14 @@
 """Temporal workflow — the durable agent loop.
 
-Same logic as examples/samples/custom_loop.py.  The differences:
-  1. LLM calls go through a Temporal activity (TemporalLanguageModel)
-  2. Tool calls go through a Temporal activity (direct execute_activity)
-  3. ai.run() drains fully inside the workflow (no streaming out)
+Key insight: @ai.tool and ai.stream_loop work unchanged — the tool
+*bodies* call execute_activity, and the LLM is a buffered_model that
+calls an activity.  The framework doesn't know about Temporal; Temporal
+doesn't know about the framework.  They compose via plain async/await.
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import timedelta
 from typing import Any, override
 
@@ -21,91 +19,90 @@ with workflow.unsafe.imports_passed_through():
     import vercel_ai_sdk as ai
 
     from activities import (
-        TOOLS,
         LLMCallParams,
         LLMCallResult,
         ToolCallParams,
-        llm_stream_activity,
+        llm_call_activity,
         tool_call_activity,
     )
 
 
-# ── TemporalLanguageModel ────────────────────────────────────────
+# ── buffered_model (candidate for framework extraction) ──────────
+#
+# Wraps an async callable into a LanguageModel.  The callable receives
+# serialized messages + tool schemas and returns serialized messages.
+# This lets you slot in any durable execution backend (Temporal, Inngest,
+# etc.) without subclassing LanguageModel by hand.
+#
+# TODO: move to ai.buffered_model() in the framework.
 
 
-class TemporalLanguageModel(ai.LanguageModel):
-    """LanguageModel that delegates to a Temporal activity.
+def buffered_model(
+    call_fn: Callable[[LLMCallParams], Awaitable[LLMCallResult]],
+) -> ai.LanguageModel:
+    """Create a LanguageModel that delegates to an async callable."""
 
-    The activity drains the full LLM stream and returns the final message.
-    On replay, Temporal returns the cached result without re-executing.
-    """
+    class _Buffered(ai.LanguageModel):
+        @override
+        async def stream(
+            self,
+            messages: list[ai.Message],
+            tools: list[ai.Tool] | None = None,
+        ) -> AsyncGenerator[ai.Message, None]:
+            tool_schemas = [
+                {"name": t.name, "description": t.description, "schema": t.schema}
+                for t in (tools or [])
+            ]
+            result = await call_fn(
+                LLMCallParams(
+                    messages=[m.model_dump() for m in messages],
+                    tool_schemas=tool_schemas,
+                )
+            )
+            for msg_dict in result.messages:
+                yield ai.Message.model_validate(msg_dict)
 
-    @override
-    async def stream(
-        self,
-        messages: list[ai.Message],
-        tools: list[ai.Tool] | None = None,
-    ) -> AsyncGenerator[ai.Message, None]:
-        tool_schemas = [
-            {"name": t.name, "description": t.description, "schema": t.schema}
-            for t in (tools or [])
-        ]
-        result: LLMCallResult = await workflow.execute_activity(
-            llm_stream_activity,
-            LLMCallParams(
-                messages=[m.model_dump() for m in messages],
-                tool_schemas=tool_schemas,
-            ),
-            start_to_close_timeout=timedelta(minutes=5),
-            retry_policy=RetryPolicy(maximum_attempts=3),
-        )
-        for msg_dict in result.messages:
-            yield ai.Message.model_validate(msg_dict)
+    return _Buffered()
 
 
-# ── Tool execution via activity ──────────────────────────────────
+# ── Durable tools ────────────────────────────────────────────────
+#
+# Plain @ai.tool — the decorator builds the JSON schema from the
+# signature.  The body calls execute_activity, making each tool
+# invocation a durable Temporal activity.  The framework's
+# execute_tool() calls tool.fn(), which just does the activity call.
 
 
-async def execute_tool_via_activity(
-    tool_call: ai.ToolPart, message: ai.Message
-) -> None:
-    """Execute a tool call through a Temporal activity, then update the ToolPart in-place."""
-    args = json.loads(tool_call.tool_args)
-    result = await workflow.execute_activity(
+@ai.tool
+async def get_weather(city: str) -> str:
+    """Get current weather for a city."""
+    return await workflow.execute_activity(
         tool_call_activity,
-        ToolCallParams(tool_name=tool_call.tool_name, tool_args=args),
+        ToolCallParams(tool_name="get_weather", tool_args={"city": city}),
         start_to_close_timeout=timedelta(minutes=2),
     )
-    # ToolPart.result is typed as dict[str, Any] — wrap raw values so
-    # the message survives Pydantic serialize/deserialize at the activity boundary.
-    if not isinstance(result, dict):
-        result = {"value": result}
-    tool_call.set_result(result)
 
 
-# ── Agent function ───────────────────────────────────────────────
+@ai.tool
+async def get_population(city: str) -> int:
+    """Get population of a city."""
+    return await workflow.execute_activity(
+        tool_call_activity,
+        ToolCallParams(tool_name="get_population", tool_args={"city": city}),
+        start_to_close_timeout=timedelta(minutes=2),
+    )
+
+
+# ── Agent ────────────────────────────────────────────────────────
 
 
 async def agent(llm: ai.LanguageModel, user_query: str) -> ai.StreamResult:
-    tools = list(TOOLS.values())
+    """Agent loop — identical to the non-Temporal version."""
     messages = ai.make_messages(
         system="Answer questions using the weather and population tools.",
         user=user_query,
     )
-
-    while True:
-        result = await ai.stream_step(llm, messages, tools, label="agent")
-
-        if not result.tool_calls:
-            return result
-
-        messages.append(result.last_message)
-        await asyncio.gather(
-            *(
-                execute_tool_via_activity(tc, result.last_message)
-                for tc in result.tool_calls
-            )
-        )
+    return await ai.stream_loop(llm, messages, [get_weather, get_population])
 
 
 # ── Workflow ─────────────────────────────────────────────────────
@@ -115,7 +112,15 @@ async def agent(llm: ai.LanguageModel, user_query: str) -> ai.StreamResult:
 class AgentWorkflow:
     @workflow.run
     async def run(self, user_query: str) -> str:
-        llm = TemporalLanguageModel()
+        llm = buffered_model(
+            lambda params: workflow.execute_activity(
+                llm_call_activity,
+                params,
+                start_to_close_timeout=timedelta(minutes=5),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
+        )
+
         final_text = ""
         async for msg in ai.run(agent, llm, user_query):
             if msg.text:

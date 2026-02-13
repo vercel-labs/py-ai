@@ -23,7 +23,7 @@ class ToolPart(pydantic.BaseModel):
     tool_name: str
     tool_args: str
     status: Literal["pending", "result"] = "pending"  # Execution status
-    result: dict[str, Any] | None = None
+    result: Any = None
     type: Literal["tool"] = "tool"
     # Streaming state (for args streaming)
     state: PartState | None = None

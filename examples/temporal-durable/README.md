@@ -6,12 +6,19 @@ tool call is a durable activity that Temporal replays from history.
 
 ## `with_sdk/` — Using vercel-ai-sdk
 
-Same agent loop as `examples/samples/custom_loop.py`, but with:
-- `TemporalLanguageModel` — wraps `llm.stream()` in an activity
-- Tool calls routed through activities via `execute_tool_via_activity()`
-- `ai.run()`, `ai.stream_step()`, `ai.make_messages()` all work unchanged
+The framework and Temporal compose via plain async/await:
 
-**3 files:** `activities.py` (tools + I/O), `workflow.py` (loop + wrappers), `main.py`
+- **Tools**: `@ai.tool` with `execute_activity()` in the body — each tool
+  invocation is automatically a durable activity
+- **LLM**: `buffered_model()` wraps an activity call into a `LanguageModel`
+- **Loop**: `ai.stream_loop()` runs the agent loop unchanged
+- **Bus**: `ai.run()` provides the unified message bus for streaming
+
+The agent function is identical to the non-Temporal version.
+Temporal doesn't know about the framework; the framework doesn't know
+about Temporal.
+
+**3 files:** `activities.py` (I/O), `workflow.py` (agent + wrappers), `main.py`
 
 ## `raw/` — No framework
 
@@ -60,3 +67,13 @@ Workflow (deterministic)              Activities (real I/O)
 On crash/restart, Temporal replays activity results from its event history.
 The workflow re-executes deterministically — each `execute_activity()` call
 returns the cached result instead of re-running the I/O.
+
+## Framework helpers used in `with_sdk/`
+
+| Pattern | What it replaces |
+|---|---|
+| `@ai.tool` with activity body | Manual `TOOL_SCHEMAS` dicts + `TOOL_FNS` dispatch table |
+| `buffered_model(fn)` | Hand-written `LanguageModel` subclass (28 lines → 5) |
+| `ai.stream_loop(llm, msgs, tools)` | Manual while/gather/append loop |
+| `ai.make_messages(system=..., user=...)` | Raw dict construction |
+| `ai.Message` (typed, Pydantic) | `dict[str, Any]` blobs |
