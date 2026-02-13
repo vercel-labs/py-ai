@@ -1,17 +1,17 @@
 """FastAPI application entry point."""
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+import fastapi
+import fastapi.middleware.cors
 
 from .routes import chat
 
-app = FastAPI(
+app = fastapi.FastAPI(
     title="py-ai-fastapi-chat",
     description="Chat demo using Python Vercel AI SDK",
 )
 
 app.add_middleware(
-    CORSMiddleware,
+    fastapi.middleware.cors.CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],

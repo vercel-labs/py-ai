@@ -2,28 +2,25 @@
 
 from __future__ import annotations
 
+import datetime
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
-from datetime import timedelta
 from typing import override
 
-from temporalio import workflow
-from temporalio.common import RetryPolicy
+import temporalio.common
+import temporalio.workflow
 
-with workflow.unsafe.imports_passed_through():
+with temporalio.workflow.unsafe.imports_passed_through():
     import vercel_ai_sdk as ai
 
-    from activities import (
-        LLMCallParams,
-        LLMCallResult,
-        get_population_activity,
-        get_weather_activity,
-        llm_call_activity,
-    )
+    import activities
 
 
 class DurableModel(ai.LanguageModel):
     def __init__(
-        self, call_fn: Callable[[LLMCallParams], Awaitable[LLMCallResult]]
+        self,
+        call_fn: Callable[
+            [activities.LLMCallParams], Awaitable[activities.LLMCallResult]
+        ],
     ) -> None:
         self.call_fn = call_fn
 
@@ -34,7 +31,7 @@ class DurableModel(ai.LanguageModel):
         tools: Sequence[ai.ToolSchema] | None = None,
     ) -> AsyncGenerator[ai.Message, None]:
         result = await self.call_fn(
-            LLMCallParams(
+            activities.LLMCallParams(
                 messages=[m.model_dump() for m in messages],
                 tool_schemas=[t.model_dump() for t in (tools or [])],
             )
@@ -52,20 +49,20 @@ class DurableModel(ai.LanguageModel):
 @ai.tool
 async def get_weather(city: str) -> str:
     """Get current weather for a city."""
-    return await workflow.execute_activity(
-        get_weather_activity,
+    return await temporalio.workflow.execute_activity(
+        activities.get_weather_activity,
         args=[city],
-        start_to_close_timeout=timedelta(minutes=2),
+        start_to_close_timeout=datetime.timedelta(minutes=2),
     )
 
 
 @ai.tool
 async def get_population(city: str) -> int:
     """Get population of a city."""
-    return await workflow.execute_activity(
-        get_population_activity,
+    return await temporalio.workflow.execute_activity(
+        activities.get_population_activity,
         args=[city],
-        start_to_close_timeout=timedelta(minutes=2),
+        start_to_close_timeout=datetime.timedelta(minutes=2),
     )
 
 
@@ -84,16 +81,16 @@ async def agent(llm: ai.LanguageModel, user_query: str) -> ai.StreamResult:
 # ── Workflow ─────────────────────────────────────────────────────
 
 
-@workflow.defn
+@temporalio.workflow.defn
 class AgentWorkflow:
-    @workflow.run
+    @temporalio.workflow.run
     async def run(self, user_query: str) -> str:
         llm = DurableModel(
-            lambda params: workflow.execute_activity(
-                llm_call_activity,
+            lambda params: temporalio.workflow.execute_activity(
+                activities.llm_call_activity,
                 params,
-                start_to_close_timeout=timedelta(minutes=5),
-                retry_policy=RetryPolicy(maximum_attempts=3),
+                start_to_close_timeout=datetime.timedelta(minutes=5),
+                retry_policy=temporalio.common.RetryPolicy(maximum_attempts=3),
             )
         )
 
