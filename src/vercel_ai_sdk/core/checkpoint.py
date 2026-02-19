@@ -1,27 +1,24 @@
 from __future__ import annotations
 
-import dataclasses
 from typing import Any
+
+import pydantic
 
 from . import messages as messages_
 from . import streams as streams_
 
 
-@dataclasses.dataclass
-class StepEvent:
+class StepEvent(pydantic.BaseModel):
     """A completed @stream step."""
 
     index: int
-    messages: list[dict[str, Any]]  # Message.model_dump() for each
+    messages: list[messages_.Message]
 
     def to_stream_result(self) -> streams_.StreamResult:
-        return streams_.StreamResult(
-            messages=[messages_.Message.model_validate(m) for m in self.messages]
-        )
+        return streams_.StreamResult(messages=list(self.messages))
 
 
-@dataclasses.dataclass
-class ToolEvent:
+class ToolEvent(pydantic.BaseModel):
     """A completed tool execution."""
 
     tool_call_id: str
@@ -29,40 +26,14 @@ class ToolEvent:
     status: str = "result"  # "result" | "error"
 
 
-@dataclasses.dataclass
-class HookEvent:
+class HookEvent(pydantic.BaseModel):
     """A resolved hook."""
 
     label: str
     resolution: dict[str, Any]
 
 
-@dataclasses.dataclass
-class Checkpoint:
-    steps: list[StepEvent] = dataclasses.field(default_factory=list)
-    tools: list[ToolEvent] = dataclasses.field(default_factory=list)
-    hooks: list[HookEvent] = dataclasses.field(default_factory=list)
-
-    def serialize(self) -> dict[str, Any]:
-        return {
-            "steps": [{"index": s.index, "messages": s.messages} for s in self.steps],
-            "tools": [
-                {
-                    "tool_call_id": t.tool_call_id,
-                    "result": t.result,
-                    **({"status": t.status} if t.status != "result" else {}),
-                }
-                for t in self.tools
-            ],
-            "hooks": [
-                {"label": h.label, "resolution": h.resolution} for h in self.hooks
-            ],
-        }
-
-    @classmethod
-    def deserialize(cls, data: dict[str, Any]) -> Checkpoint:
-        return cls(
-            steps=[StepEvent(**s) for s in data.get("steps", [])],
-            tools=[ToolEvent(**t) for t in data.get("tools", [])],
-            hooks=[HookEvent(**h) for h in data.get("hooks", [])],
-        )
+class Checkpoint(pydantic.BaseModel):
+    steps: list[StepEvent] = []
+    tools: list[ToolEvent] = []
+    hooks: list[HookEvent] = []

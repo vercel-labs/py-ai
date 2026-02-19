@@ -163,18 +163,18 @@ def test_checkpoint_serialization_roundtrip():
             StepEvent(
                 index=0,
                 messages=[
-                    {
-                        "id": "m1",
-                        "role": "assistant",
-                        "parts": [{"type": "text", "text": "hi"}],
-                    }
+                    ai.Message(
+                        id="m1",
+                        role="assistant",
+                        parts=[ai.TextPart(text="hi")],
+                    )
                 ],
             )
         ],
         tools=[ToolEvent(tool_call_id="tc-1", result=42)],
         hooks=[HookEvent(label="h1", resolution={"granted": True})],
     )
-    cp2 = Checkpoint.deserialize(cp.serialize())
+    cp2 = Checkpoint.model_validate(cp.model_dump())
     assert cp2.steps[0].index == 0
     assert cp2.tools[0].result == 42
     assert cp2.hooks[0].label == "h1"

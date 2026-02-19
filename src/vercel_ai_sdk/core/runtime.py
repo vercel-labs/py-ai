@@ -122,7 +122,7 @@ class Runtime:
     def record_step(self, result: streams_.StreamResult) -> None:
         event = checkpoint_.StepEvent(
             index=self._step_index,
-            messages=[m.model_dump() for m in result.messages],
+            messages=list(result.messages),
         )
         self._step_log.append(event)
         self._step_index += 1
