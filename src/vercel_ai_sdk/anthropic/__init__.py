@@ -71,15 +71,16 @@ def _messages_to_anthropic(
                             "input": tool_input,
                         }
                     )
-                    # If tool has a result, collect it for a separate user message
-                    if part.status == "result" and part.result is not None:
-                        tool_results.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": part.tool_call_id,
-                                "content": str(part.result),
-                            }
-                        )
+                    # If tool has completed (success or error), collect for user message
+                    if part.status in ("result", "error") and part.result is not None:
+                        entry: dict[str, Any] = {
+                            "type": "tool_result",
+                            "tool_use_id": part.tool_call_id,
+                            "content": str(part.result),
+                        }
+                        if part.status == "error":
+                            entry["is_error"] = True
+                        tool_results.append(entry)
 
             if content:
                 result.append({"role": "assistant", "content": content})

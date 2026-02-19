@@ -26,6 +26,7 @@ class ToolEvent:
 
     tool_call_id: str
     result: Any
+    status: str = "result"  # "result" | "error"
 
 
 @dataclasses.dataclass
@@ -46,7 +47,12 @@ class Checkpoint:
         return {
             "steps": [{"index": s.index, "messages": s.messages} for s in self.steps],
             "tools": [
-                {"tool_call_id": t.tool_call_id, "result": t.result} for t in self.tools
+                {
+                    "tool_call_id": t.tool_call_id,
+                    "result": t.result,
+                    **({"status": t.status} if t.status != "result" else {}),
+                }
+                for t in self.tools
             ],
             "hooks": [
                 {"label": h.label, "resolution": h.resolution} for h in self.hooks

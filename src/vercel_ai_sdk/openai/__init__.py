@@ -62,8 +62,8 @@ def _messages_to_openai(messages: list[core.messages.Message]) -> list[dict[str,
                             },
                         }
                     )
-                    # If tool has a result, collect it for separate tool messages
-                    if part.status == "result" and part.result is not None:
+                    # If tool has completed (success or error), collect for tool messages
+                    if part.status in ("result", "error") and part.result is not None:
                         tool_results.append(
                             {
                                 "role": "tool",

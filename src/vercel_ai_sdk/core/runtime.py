@@ -1,20 +1,21 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import contextvars
 import dataclasses
+import json
 from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Sequence
 from typing import Any, get_type_hints
 
-from .. import mcp
-from . import messages as messages_
-from . import tools as tools_
-from . import llm as llm_
-from . import streams as streams_
-from . import hooks as hooks_
-from . import checkpoint as checkpoint_
+import pydantic
 
+from .. import mcp
+from . import checkpoint as checkpoint_
+from . import hooks as hooks_
+from . import llm as llm_
+from . import messages as messages_
+from . import streams as streams_
+from . import tools as tools_
 
 # ── Queue item types ──────────────────────────────────────────────
 
@@ -64,8 +65,8 @@ class Runtime:
 
         # Replay cursors
         self._step_index: int = 0
-        self._tool_replay: dict[str, Any] = {
-            t.tool_call_id: t.result for t in self._checkpoint.tools
+        self._tool_replay: dict[str, checkpoint_.ToolEvent] = {
+            t.tool_call_id: t for t in self._checkpoint.tools
         }
         self._hook_replay: dict[str, dict[str, Any]] = {
             h.label: h.resolution for h in self._checkpoint.hooks
@@ -128,14 +129,17 @@ class Runtime:
 
     # ── Replay / record: tools ────────────────────────────────────
 
-    def try_replay_tool(self, tool_call_id: str) -> Any | None:
-        if tool_call_id in self._tool_replay:
-            return self._tool_replay[tool_call_id]
-        return None
+    def try_replay_tool(self, tool_call_id: str) -> checkpoint_.ToolEvent | None:
+        """Return the cached ToolEvent if available, else None."""
+        return self._tool_replay.get(tool_call_id)
 
-    def record_tool(self, tool_call_id: str, result: Any) -> None:
+    def record_tool(
+        self, tool_call_id: str, result: Any, *, status: str = "result"
+    ) -> None:
         self._tool_log.append(
-            checkpoint_.ToolEvent(tool_call_id=tool_call_id, result=result)
+            checkpoint_.ToolEvent(
+                tool_call_id=tool_call_id, result=result, status=status
+            )
         )
 
     # ── Replay / record: hooks ────────────────────────────────────
@@ -189,7 +193,7 @@ async def stream_step(
     messages: list[messages_.Message],
     tools: Sequence[tools_.ToolLike] | None = None,
     label: str | None = None,
-) -> AsyncGenerator[messages_.Message, None]:
+) -> AsyncGenerator[messages_.Message]:
     """Single LLM call that streams to Runtime."""
     async for msg in llm.stream(messages=messages, tools=tools):
         msg.label = label
@@ -206,7 +210,7 @@ async def execute_tool(
     Looks up the tool by name from the global registry, executes it,
     and updates the ToolPart (and parent Message) with the result.
     Emits the updated message to the Runtime queue so the UI sees
-    the transition from status="pending" to status="result".
+    the transition from status="pending" to status="result" (or "error").
 
     If a checkpoint exists with a cached result for this tool_call_id,
     returns the cached result without re-executing.
@@ -217,23 +221,31 @@ async def execute_tool(
     if rt:
         cached = rt.try_replay_tool(tool_call.tool_call_id)
         if cached is not None:
-            tool_call.set_result(cached)
-            return cached
+            if cached.status == "error":
+                tool_call.set_error(cached.result)
+            else:
+                tool_call.set_result(cached.result)
+            return cached.result
 
     # Fresh execution
     tool = tools_.get_tool(tool_call.tool_name)
     if tool is None:
         raise ValueError(f"Tool not found in registry: {tool_call.tool_name}")
 
-    # TODO catch validation error and json error
-    result = await tool.validate_and_call(tool_call.tool_args, rt)
-    tool_call.set_result(result)
+    try:
+        result = await tool.validate_and_call(tool_call.tool_args, rt)
+        tool_call.set_result(result)
+    except (json.JSONDecodeError, pydantic.ValidationError) as exc:
+        # LLM produced malformed JSON or args that don't match the schema.
+        # Report back as a tool error so the model can retry.
+        result = f"{type(exc).__name__}: {exc}"
+        tool_call.set_error(result)
 
     # Record for checkpoint
     if rt:
-        rt.record_tool(tool_call.tool_call_id, result)
+        rt.record_tool(tool_call.tool_call_id, result, status=tool_call.status)
 
-    # Emit updated message so UI sees status="result"
+    # Emit updated message so UI sees status change
     if rt and message:
         await rt.put_message(message.model_copy(deep=True))
 
@@ -288,7 +300,7 @@ class RunResult:
     """
 
     def __init__(self) -> None:
-        self._messages: AsyncGenerator[messages_.Message, None] | None = None
+        self._messages: AsyncGenerator[messages_.Message] | None = None
         self._runtime: Runtime | None = None
 
     @property
@@ -310,7 +322,7 @@ class RunResult:
             for label, sus in self._runtime._pending_hooks.items()
         }
 
-    async def __aiter__(self) -> AsyncGenerator[messages_.Message, None]:
+    async def __aiter__(self) -> AsyncGenerator[messages_.Message]:
         if self._messages is not None:
             async for msg in self._messages:
                 yield msg
@@ -347,7 +359,7 @@ def run(
     """
     result = RunResult()
 
-    async def _generate() -> AsyncGenerator[messages_.Message, None]:
+    async def _generate() -> AsyncGenerator[messages_.Message]:
         runtime = Runtime(checkpoint=checkpoint)
         result._runtime = runtime
         token_runtime = _runtime.set(runtime)
@@ -375,7 +387,7 @@ def run(
                         step_item = await asyncio.wait_for(
                             runtime._step_queue.get(), timeout=0.1
                         )
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         continue
 
                     if isinstance(step_item, Runtime._Sentinel):

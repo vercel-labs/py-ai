@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import traceback
 import pydantic
 
 import vercel_ai_sdk as ai
@@ -40,28 +39,21 @@ class Agent:
     async def _execute_tool(
         self, tc: ai.ToolPart, message: ai.Message | None = None
     ) -> None:
-        """Execute a single tool call with approval check and error handling."""
-        try:
-            # TODO this should be tucked away into the framework
-            # and done using Pydantic
-            approval = await ToolApproval.create(
-                f"approve_{tc.tool_call_id}",
-                metadata={"tool_name": tc.tool_name, "tool_args": tc.tool_args},
-            )
+        """Execute a single tool call with approval check.
 
-            if approval.granted:
-                await ai.execute_tool(tc, message=message)
-            else:
-                tc.set_result({"error": "Tool call was denied by the user."})
-                return
+        Tool execution errors are handled inside ``ai.execute_tool``.
+        """
+        # TODO this should be tucked away into the framework
+        # and done using Pydantic
+        approval = await ToolApproval.create(
+            f"approve_{tc.tool_call_id}",
+            metadata={"tool_name": tc.tool_name, "tool_args": tc.tool_args},
+        )
 
-        except Exception as exc:
-            tc.set_result(
-                {
-                    "error": f"{type(exc).__name__}: {exc}",
-                    "traceback": traceback.format_exc(),
-                }
-            )
+        if approval.granted:
+            await ai.execute_tool(tc, message=message)
+        else:
+            tc.set_error("Tool call was denied by the user.")
 
     async def _loop(
         self,

@@ -179,7 +179,7 @@ async def to_ui_message_stream(
             for part in state.close_open_blocks():
                 yield part
 
-            # Scan tool parts for new pending/result states
+            # Scan tool parts for new pending/completed states
             has_new_pending_tools = False
             has_new_tool_results = False
 
@@ -191,7 +191,7 @@ async def to_ui_message_stream(
                     ):
                         has_new_pending_tools = True
                     elif (
-                        part.status == "result"
+                        part.status in ("result", "error")
                         and part.tool_call_id not in state.emitted_tool_results
                     ):
                         has_new_tool_results = True
@@ -232,16 +232,18 @@ async def to_ui_message_stream(
                                 input=args,
                             )
 
-            # Pass 2: Tool results (same step as tool input per AI SDK protocol)
+            # Pass 2: Tool outputs (same step as tool input per AI SDK protocol)
             # Tool input and output are part of the same "step" (one LLM turn)
             if has_new_tool_results:
                 for part in msg.parts:
                     match part:
                         case core.messages.ToolPart(
-                            status="result",
                             tool_call_id=tc_id,
                             result=result,
-                        ) if tc_id not in state.emitted_tool_results:
+                        ) if (
+                            part.status in ("result", "error")
+                            and tc_id not in state.emitted_tool_results
+                        ):
                             state.emitted_tool_results.add(tc_id)
                             state.pending_tool_calls.discard(tc_id)
                             yield protocol.ToolOutputAvailablePart(
@@ -284,16 +286,19 @@ async def to_sse_stream(
 # Tool conversion helpers
 # ============================================================================
 
-_TOOL_RESULT_STATES: frozenset[str] = frozenset(
-    {"output-available", "output-error", "output-denied"}
-)
+_TOOL_RESULT_STATES: frozenset[str] = frozenset({"output-available"})
+_TOOL_ERROR_STATES: frozenset[str] = frozenset({"output-error", "output-denied"})
 
 
 def _map_tool_status(
     state: ui_message.UIToolInvocationState,
-) -> Literal["pending", "result"]:
+) -> Literal["pending", "result", "error"]:
     """Map AI SDK v6 tool invocation state to internal status."""
-    return "result" if state in _TOOL_RESULT_STATES else "pending"
+    if state in _TOOL_ERROR_STATES:
+        return "error"
+    if state in _TOOL_RESULT_STATES:
+        return "result"
+    return "pending"
 
 
 def _normalize_tool_args(tool_input: str | dict[str, Any] | None) -> str:

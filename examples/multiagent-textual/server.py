@@ -81,7 +81,7 @@ async def mothership_branch(llm: ai.LanguageModel, query: str):
                 if approval.granted:
                     await ai.execute_tool(tc, message=result.last_message)
                 else:
-                    tc.set_result(f"Denied: {approval.reason}")
+                    tc.set_error(f"Denied: {approval.reason}")
             else:
                 await ai.execute_tool(tc, message=result.last_message)
 
@@ -113,7 +113,7 @@ async def data_center_branch(llm: ai.LanguageModel, query: str):
                 if approval.granted:
                     await ai.execute_tool(tc, message=result.last_message)
                 else:
-                    tc.set_result(f"Access denied: {approval.reason}")
+                    tc.set_error(f"Access denied: {approval.reason}")
             else:
                 await ai.execute_tool(tc, message=result.last_message)
 

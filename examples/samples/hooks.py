@@ -43,7 +43,7 @@ async def graph(llm: ai.LanguageModel, query: str):
                 if approval.granted:
                     await ai.execute_tool(tc, message=result.last_message)
                 else:
-                    tc.set_result({"error": f"Rejected: {approval.reason}"})
+                    tc.set_error(f"Rejected: {approval.reason}")
             else:
                 await ai.execute_tool(tc, message=result.last_message)
 

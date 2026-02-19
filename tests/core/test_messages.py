@@ -1,4 +1,4 @@
-"""Message model: properties, ToolPart.set_result, make_messages."""
+"""Message model: properties, ToolPart.set_result/set_error, make_messages."""
 
 from vercel_ai_sdk.core.messages import (
     HookPart,
@@ -178,7 +178,7 @@ def test_get_hook_part_missing():
     assert m.get_hook_part("h-nope") is None
 
 
-# -- ToolPart.set_result ---------------------------------------------------
+# -- ToolPart.set_result / set_error ---------------------------------------
 
 
 def test_set_result():
@@ -187,6 +187,14 @@ def test_set_result():
     tp.set_result({"answer": 42})
     assert tp.status == "result"
     assert tp.result == {"answer": 42}
+
+
+def test_set_error():
+    tp = ToolPart(tool_call_id="tc1", tool_name="t", tool_args="{}")
+    assert tp.status == "pending"
+    tp.set_error("Something went wrong")
+    assert tp.status == "error"
+    assert tp.result == "Something went wrong"
 
 
 # -- make_messages ---------------------------------------------------------
