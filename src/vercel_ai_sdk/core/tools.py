@@ -11,10 +11,10 @@ if TYPE_CHECKING:
     from . import runtime as runtime_
 
 # Module-level tool registry - populated at decoration time
-_tool_registry: dict[str, Tool] = {}
+_tool_registry: dict[str, Tool[..., Any]] = {}
 
 
-def get_tool(name: str) -> Tool | None:
+def get_tool(name: str) -> Tool[..., Any] | None:
     """Look up a tool by name from the global registry."""
     return _tool_registry.get(name)
 
@@ -75,7 +75,7 @@ class Tool[**P, R]:
         # validate llm-generated inputs (skipped for MCP tools)
         if self._validator is not None:
             self._validator.model_validate(kwargs)
-        return await self._fn(**kwargs)  # type: ignore[arg-type]
+        return await self._fn(**kwargs)  # type: ignore[call-arg]
 
     @property
     def name(self) -> str:
@@ -97,7 +97,7 @@ def tool[**P, R](fn: Callable[P, Awaitable[R]]) -> Tool[P, R]:
     sig = inspect.signature(fn)
     hints = get_type_hints(fn) if hasattr(fn, "__annotations__") else {}
 
-    fields = {}
+    fields: dict[str, Any] = {}
 
     for param_name, param in sig.parameters.items():
         param_type = hints.get(param_name, str)
