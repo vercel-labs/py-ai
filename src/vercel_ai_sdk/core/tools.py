@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Awaitable
-from typing import Any, Callable, get_args, get_origin, get_type_hints, overload
+from collections.abc import Awaitable, Callable
+from typing import (
+    Any,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 import pydantic
 
 # Module-level tool registry - populated at decoration time
-_tool_registry: dict[str, "Tool"] = {}
+_tool_registry: dict[str, Tool] = {}
 
 
-def get_tool(name: str) -> "Tool | None":
+def get_tool(name: str) -> Tool | None:
     """Look up a tool by name from the global registry."""
     return _tool_registry.get(name)
 
@@ -41,76 +46,76 @@ def _is_optional(param_type: type) -> bool:
 
 
 class ToolSchema(pydantic.BaseModel):
-    """What the LLM sees: name, description, and JSON Schema for parameters.
-
-    This is the serializable, function-free description of a tool.
-    Use this when you need tool metadata without the callable (e.g. passing
-    tool schemas across a serialization boundary to an LLM activity).
-    """
+    """What the LLM sees: name, description, and JSON Schema for parameters."""
 
     name: str
     description: str
-    tool_schema: dict[str, Any]
+    param_schema: dict[str, Any]
+    return_type: Any
 
 
-class Tool(ToolSchema):
-    """A ToolSchema plus the async callable that implements it."""
+class Tool[**P, R]:
+    def __init__(self, fn: Callable[P, Awaitable[R]], schema: ToolSchema) -> None:
+        self._fn = fn
+        self.schema = schema
 
-    fn: Callable[..., Awaitable[Any]] = pydantic.Field(exclude=True)
+    async def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:
+        return await self._fn(*args, **kwargs)
 
-    model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
+    @property
+    def name(self) -> str:
+        return self.schema.name
+
+    @property
+    def description(self) -> str:
+        return self.schema.description
+
+    @property
+    def param_schema(self) -> dict[str, Any]:
+        return self.schema.param_schema
 
 
-@overload
-def tool(fn: Callable[..., Awaitable[Any]]) -> Tool: ...
-
-
-@overload
-def tool(fn: None = None) -> Callable[[Callable[..., Awaitable[Any]]], Tool]: ...
-
-
-def tool(
-    fn: Callable[..., Awaitable[Any]] | None = None,
-) -> Tool | Callable[[Callable[..., Awaitable[Any]]], Tool]:
+def tool[**P, R](fn: Callable[P, Awaitable[R]]) -> Tool[P, R]:
     """Decorator to define a tool from an async function."""
 
-    def make_tool(f: Callable[..., Awaitable[Any]]) -> Tool:
-        sig = inspect.signature(f)
-        hints = get_type_hints(f) if hasattr(f, "__annotations__") else {}
+    # 1. build tool schema by parsing the function
+    sig = inspect.signature(fn)
+    hints = get_type_hints(fn) if hasattr(fn, "__annotations__") else {}
 
-        properties = {}
-        required = []
+    properties = {}
+    required = []
 
-        for param_name, param in sig.parameters.items():
-            param_type = hints.get(param_name, str)
+    for param_name, param in sig.parameters.items():
+        param_type = hints.get(param_name, str)
 
-            # Skip Runtime-typed parameters - they're injected, not from LLM
-            if _is_runtime_type(param_type):
-                continue
-            properties[param_name] = _get_param_schema(param_type)
+        # Skip Runtime-typed parameters - they're injected, not from LLM
+        if _is_runtime_type(param_type):
+            continue
 
-            if param.default is inspect.Parameter.empty and not _is_optional(
-                param_type
-            ):
-                required.append(param_name)
+        properties[param_name] = _get_param_schema(param_type)
 
-        parameters = {
-            "type": "object",
-            "properties": properties,
-        }
-        if required:
-            parameters["required"] = required
+        if param.default is inspect.Parameter.empty and not _is_optional(param_type):
+            required.append(param_name)
 
-        t = Tool(
-            name=f.__name__,
-            description=inspect.getdoc(f) or "",
-            tool_schema=parameters,
-            fn=f,
-        )
-        # Register in global registry
-        _tool_registry[t.name] = t
-        return t
+    parameters = {
+        "type": "object",
+        "properties": properties,
+    }
 
-    if fn is not None:
-        return make_tool(fn)
-    return make_tool
+    if required:
+        parameters["required"] = required
+
+    # 2. instantiate the tool
+
+    schema = ToolSchema(
+        name=fn.__name__,
+        description=inspect.getdoc(fn) or "",
+        param_schema=parameters,
+        return_type=hints.get("return", None),
+    )
+
+    t = Tool(fn=fn, schema=schema)
+
+    # Register in global registry
+    _tool_registry[t.name] = t
+    return t
