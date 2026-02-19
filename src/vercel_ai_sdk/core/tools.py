@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, get_type_hints
+from typing import TYPE_CHECKING, Any, Protocol, get_type_hints, runtime_checkable
 
 import pydantic
 
@@ -25,6 +25,18 @@ def _is_runtime_type(hint: Any) -> bool:
     from .runtime import Runtime
 
     return hint is Runtime
+
+
+@runtime_checkable
+class ToolLike(Protocol):
+    """Anything the LLM layer can use as a tool definition."""
+
+    @property
+    def name(self) -> str: ...
+    @property
+    def description(self) -> str: ...
+    @property
+    def param_schema(self) -> dict[str, Any]: ...
 
 
 class ToolSchema(pydantic.BaseModel):

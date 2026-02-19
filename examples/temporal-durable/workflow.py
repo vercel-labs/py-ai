@@ -28,12 +28,12 @@ class DurableModel(ai.LanguageModel):
     async def stream(
         self,
         messages: list[ai.Message],
-        tools: Sequence[ai.ToolSchema] | None = None,
+        tools: Sequence[ai.ToolLike] | None = None,
     ) -> AsyncGenerator[ai.Message, None]:
         result = await self.call_fn(
             activities.LLMCallParams(
                 messages=[m.model_dump() for m in messages],
-                tool_schemas=[t.model_dump() for t in (tools or [])],
+                tool_schemas=[t.schema.model_dump() for t in (tools or [])],
             )
         )
         yield ai.Message.model_validate(result.message)

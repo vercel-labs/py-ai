@@ -215,7 +215,7 @@ class LanguageModel(abc.ABC):
     async def stream(
         self,
         messages: list[messages_.Message],
-        tools: Sequence[tools_.Tool] | None = None,
+        tools: Sequence[tools_.ToolLike] | None = None,
     ) -> AsyncGenerator[messages_.Message, None]:
         raise NotImplementedError
         yield
@@ -223,7 +223,7 @@ class LanguageModel(abc.ABC):
     async def buffer(
         self,
         messages: list[messages_.Message],
-        tools: Sequence[tools_.Tool] | None = None,
+        tools: Sequence[tools_.ToolLike] | None = None,
     ) -> messages_.Message:
         """Drain the stream and return the final message."""
         final = None

@@ -17,7 +17,7 @@ class MockLLM(ai.LanguageModel):
     async def stream(
         self,
         messages: list[messages.Message],
-        tools: Sequence[ai.Tool] | None = None,
+        tools: Sequence[ai.ToolLike] | None = None,
     ) -> AsyncGenerator[messages.Message, None]:
         if self._call_index >= len(self._responses):
             raise RuntimeError("MockLLM: no more responses configured")
