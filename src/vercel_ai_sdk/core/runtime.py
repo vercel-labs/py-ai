@@ -225,15 +225,8 @@ async def execute_tool(
     if tool is None:
         raise ValueError(f"Tool not found in registry: {tool_call.tool_name}")
 
-    kwargs: dict[str, Any] = (
-        json.loads(tool_call.tool_args) if tool_call.tool_args else {}
-    )
-
-    # Inject runtime if the tool has a Runtime-typed parameter
-    if rt and (runtime_param := _find_runtime_param(tool.fn)):
-        kwargs[runtime_param] = rt
-
-    result = await tool.fn(**kwargs)
+    # TODO catch validation error and json error
+    result = await tool.validate_and_call(tool_call.tool_args, rt)
     tool_call.set_result(result)
 
     # Record for checkpoint
