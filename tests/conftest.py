@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 
 import vercel_ai_sdk as ai
 from vercel_ai_sdk.core import messages
@@ -17,7 +17,7 @@ class MockLLM(ai.LanguageModel):
     async def stream(
         self,
         messages: list[messages.Message],
-        tools: list[ai.Tool] | None = None,
+        tools: Sequence[ai.Tool] | None = None,
     ) -> AsyncGenerator[messages.Message, None]:
         if self._call_index >= len(self._responses):
             raise RuntimeError("MockLLM: no more responses configured")

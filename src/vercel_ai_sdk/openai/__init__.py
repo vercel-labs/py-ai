@@ -9,7 +9,7 @@ import openai
 from .. import core
 
 
-def _tools_to_openai(tools: Sequence[core.tools.ToolSchema]) -> list[dict[str, Any]]:
+def _tools_to_openai(tools: Sequence[core.tools.Tool]) -> list[dict[str, Any]]:
     """Convert internal Tool objects to OpenAI tool schema format."""
     return [
         {
@@ -17,7 +17,7 @@ def _tools_to_openai(tools: Sequence[core.tools.ToolSchema]) -> list[dict[str, A
             "function": {
                 "name": tool.name,
                 "description": tool.description,
-                "parameters": tool.tool_schema,
+                "parameters": tool.param_schema,
             },
         }
         for tool in tools
@@ -132,7 +132,7 @@ class OpenAIModel(core.llm.LanguageModel):
     async def stream_events(
         self,
         messages: list[core.messages.Message],
-        tools: Sequence[core.tools.ToolSchema] | None = None,
+        tools: Sequence[core.tools.Tool] | None = None,
     ) -> AsyncGenerator[core.llm.StreamEvent, None]:
         """Yield raw stream events from OpenAI API."""
         openai_messages = _messages_to_openai(messages)
@@ -243,7 +243,7 @@ class OpenAIModel(core.llm.LanguageModel):
     async def stream(
         self,
         messages: list[core.messages.Message],
-        tools: Sequence[core.tools.ToolSchema] | None = None,
+        tools: Sequence[core.tools.Tool] | None = None,
     ) -> AsyncGenerator[core.messages.Message, None]:
         """Stream Messages (uses StreamHandler internally)."""
         handler = core.llm.StreamHandler()

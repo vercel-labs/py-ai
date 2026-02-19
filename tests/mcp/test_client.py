@@ -55,11 +55,11 @@ def test_mcp_tool_to_native_with_prefix():
 
 
 def test_mcp_tool_to_native_schema_preserved():
-    """The inputSchema from the MCP tool is passed through as tool_schema."""
+    """The inputSchema from the MCP tool is passed through as param_schema."""
     mcp_tool = _fake_mcp_tool()
     native = _mcp_tool_to_native(mcp_tool, "test:key", _noop_transport_factory, None)
 
-    assert native.tool_schema == mcp_tool.inputSchema
+    assert native.param_schema == mcp_tool.inputSchema
     assert native.description == "Echo input"
 
 
@@ -80,7 +80,7 @@ async def test_mcp_tool_executes_through_stream_loop():
     mcp_tool = _fake_mcp_tool(name="mcp_e2e_echo")
     native = _mcp_tool_to_native(mcp_tool, "test:key", _noop_transport_factory, None)
     # Replace the real fn (which would try to connect) with our fake
-    native.fn = fake_fn
+    native._fn = fake_fn
     _tool_registry[native.name] = native
 
     async def graph(llm: ai.LanguageModel):

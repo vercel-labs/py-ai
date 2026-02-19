@@ -10,13 +10,13 @@ import anthropic
 from .. import core
 
 
-def _tools_to_anthropic(tools: Sequence[core.tools.ToolSchema]) -> list[dict[str, Any]]:
+def _tools_to_anthropic(tools: Sequence[core.tools.Tool]) -> list[dict[str, Any]]:
     """Convert internal Tool objects to Anthropic tool schema format."""
     return [
         {
             "name": tool.name,
             "description": tool.description,
-            "input_schema": tool.tool_schema,
+            "input_schema": tool.param_schema,
         }
         for tool in tools
     ]
@@ -117,7 +117,7 @@ class AnthropicModel(core.llm.LanguageModel):
     async def stream_events(
         self,
         messages: list[core.messages.Message],
-        tools: Sequence[core.tools.ToolSchema] | None = None,
+        tools: Sequence[core.tools.Tool] | None = None,
     ) -> AsyncGenerator[core.llm.StreamEvent, None]:
         """Yield raw stream events from Anthropic API."""
         system_prompt, anthropic_messages = _messages_to_anthropic(messages)
@@ -206,7 +206,7 @@ class AnthropicModel(core.llm.LanguageModel):
     async def stream(
         self,
         messages: list[core.messages.Message],
-        tools: Sequence[core.tools.ToolSchema] | None = None,
+        tools: Sequence[core.tools.Tool] | None = None,
     ) -> AsyncGenerator[core.messages.Message, None]:
         """Stream Messages (uses StreamProcessor internally)."""
         handler = core.llm.StreamHandler()

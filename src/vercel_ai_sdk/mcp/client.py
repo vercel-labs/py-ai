@@ -5,8 +5,10 @@ import contextlib
 import contextvars
 import dataclasses
 import json
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
+import httpx
 import mcp.client.session
 import mcp.client.stdio
 import mcp.client.streamable_http
@@ -207,8 +209,9 @@ async def get_http_tools(
     connection_key = f"http:{url}"
 
     def transport_factory():
-        return mcp.client.streamable_http.streamablehttp_client(
-            url=url, headers=headers
+        http_client = httpx.AsyncClient(headers=headers) if headers else None
+        return mcp.client.streamable_http.streamable_http_client(
+            url=url, http_client=http_client
         )
 
     client = await _get_or_create_connection(connection_key, transport_factory)
@@ -231,11 +234,16 @@ def _mcp_tool_to_native(
     if tool_prefix:
         name = f"{tool_prefix}_{name}"
 
-    t = core.tools.Tool(
+    schema = core.tools.ToolSchema(
         name=name,
         description=mcp_tool.description or "",
-        tool_schema=mcp_tool.inputSchema,
+        param_schema=mcp_tool.inputSchema,
+        return_type=Any,
+    )
+
+    t = core.tools.Tool(
         fn=_make_tool_fn(connection_key, mcp_tool.name, transport_factory),
+        schema=schema,
     )
     # Register so execute_tool() can find it by name
     core.tools._tool_registry[name] = t

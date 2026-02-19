@@ -40,8 +40,8 @@ class Tool[**P, R]:
     def __init__(
         self,
         fn: Callable[P, Awaitable[R]],
-        validator: type[pydantic.BaseModel],
         schema: ToolSchema,
+        validator: type[pydantic.BaseModel] | None = None,
     ) -> None:
         self._fn = fn
         self._validator = validator
@@ -53,14 +53,17 @@ class Tool[**P, R]:
     async def validate_and_call(
         self, json_str: str, runtime: runtime_.Runtime | None
     ) -> R:
-        kwargs = json.loads(json_str)
+        from .runtime import _find_runtime_param
 
-        if runtime and (rt_param := runtime_._find_runtime_param(self._fn)):
+        kwargs = json.loads(json_str) if json_str else {}
+
+        if runtime and (rt_param := _find_runtime_param(self._fn)):
             kwargs[rt_param] = runtime
 
-        # validate llm-generated inputs
-        self._validator.model_validate(kwargs)
-        return await self(**kwargs)  # type: ignore[arg-type]
+        # validate llm-generated inputs (skipped for MCP tools)
+        if self._validator is not None:
+            self._validator.model_validate(kwargs)
+        return await self._fn(**kwargs)  # type: ignore[arg-type]
 
     @property
     def name(self) -> str:
@@ -105,7 +108,7 @@ def tool[**P, R](fn: Callable[P, Awaitable[R]]) -> Tool[P, R]:
         return_type=hints.get("return", None),
     )
 
-    t = Tool(fn=fn, validator=validator, schema=schema)
+    t = Tool(fn=fn, schema=schema, validator=validator)
 
     # 3. register in global registry
     _tool_registry[t.name] = t

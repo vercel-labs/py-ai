@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextvars
-
 import vercel_ai_sdk as ai
 from . import proto
 
