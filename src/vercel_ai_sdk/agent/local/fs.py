@@ -152,13 +152,13 @@ class LocalFilesystem(proto.Filesystem):
         )
         try:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError as exc:
             proc.kill()
             await proc.communicate()
             raise TimeoutError(
                 f"Command timed out after {timeout}s. "
                 "Try increasing the timeout or breaking the command into smaller steps."
-            )
+            ) from exc
 
         output = stdout.decode() if stdout else ""
         if proc.returncode != 0:

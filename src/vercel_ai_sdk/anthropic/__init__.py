@@ -119,7 +119,7 @@ class AnthropicModel(core.llm.LanguageModel):
         self,
         messages: list[core.messages.Message],
         tools: Sequence[core.tools.ToolLike] | None = None,
-    ) -> AsyncGenerator[core.llm.StreamEvent, None]:
+    ) -> AsyncGenerator[core.llm.StreamEvent]:
         """Yield raw stream events from Anthropic API."""
         system_prompt, anthropic_messages = _messages_to_anthropic(messages)
         anthropic_tools = _tools_to_anthropic(tools) if tools else None
@@ -208,7 +208,7 @@ class AnthropicModel(core.llm.LanguageModel):
         self,
         messages: list[core.messages.Message],
         tools: Sequence[core.tools.ToolLike] | None = None,
-    ) -> AsyncGenerator[core.messages.Message, None]:
+    ) -> AsyncGenerator[core.messages.Message]:
         """Stream Messages (uses StreamProcessor internally)."""
         handler = core.llm.StreamHandler()
         async for event in self.stream_events(messages, tools):

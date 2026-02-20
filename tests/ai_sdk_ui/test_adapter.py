@@ -16,7 +16,7 @@ from ..conftest import MockLLM
 async def get_event_types(msgs: list[messages.Message]) -> list[str]:
     """Stream messages through adapter and return event type sequence."""
 
-    async def stream() -> AsyncGenerator[messages.Message, None]:
+    async def stream() -> AsyncGenerator[messages.Message]:
         for m in msgs:
             yield m
 
@@ -205,7 +205,8 @@ async def test_text_then_tool_then_text() -> None:
 
     # Per AI SDK protocol, tool-input-available and tool-output-available
     # are in the SAME step (one LLM turn). Reference:
-    # process-ui-message-stream.test.ts "server-side tool roundtrip with multiple assistant texts"
+    # process-ui-message-stream.test.ts
+    # "server-side tool roundtrip with multiple assistant texts"
     assert await get_event_types(msgs) == [
         "start",
         "start-step",
@@ -305,8 +306,10 @@ async def test_runtime_tool_roundtrip() -> None:
     ]
 
     # This is what SHOULD happen:
-    # 1. First step yields tool call with status="pending" -> tool-input-start, tool-input-available
-    # 2. After tool execution, we yield the same message with status="result" -> tool-output-available
+    # 1. First step yields tool call with status="pending"
+    #    -> tool-input-start, tool-input-available
+    # 2. After tool execution, we yield the same message with
+    #    status="result" -> tool-output-available
     #    (same step because same message ID)
     # 3. Second LLM step yields final text -> text-start, text-end
     expected = [
@@ -329,7 +332,7 @@ async def test_runtime_tool_roundtrip() -> None:
 
 async def _async_iter(
     items: list[messages.Message],
-) -> AsyncGenerator[messages.Message, None]:
+) -> AsyncGenerator[messages.Message]:
     """Helper to convert a list to an async generator."""
     for item in items:
         yield item
@@ -362,7 +365,8 @@ def test_ui_to_internal_two_turn_with_tool() -> None:
                 {"type": "step-start"},
                 {
                     "type": "text",
-                    "text": "I'll check with the mothership about this important question.",
+                    "text": "I'll check with the mothership "
+                    "about this important question.",
                     "state": "done",
                 },
                 {

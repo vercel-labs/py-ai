@@ -62,7 +62,8 @@ def _messages_to_openai(messages: list[core.messages.Message]) -> list[dict[str,
                             },
                         }
                     )
-                    # If tool has completed (success or error), collect for tool messages
+                    # If tool has completed (success or error),
+                    # collect for tool messages
                     if part.status in ("result", "error") and part.result is not None:
                         tool_results.append(
                             {
@@ -114,13 +115,17 @@ class OpenAIModel(core.llm.LanguageModel):
         """Initialize OpenAI model adapter.
 
         Args:
-            model: Model identifier (e.g., 'openai/gpt-5.2', 'anthropic/claude-sonnet-4.5')
-            base_url: API base URL (e.g., 'https://ai-gateway.vercel.sh/v1')
+            model: Model identifier
+                (e.g., 'openai/gpt-5.2', 'anthropic/claude-sonnet-4.5')
+            base_url: API base URL
+                (e.g., 'https://ai-gateway.vercel.sh/v1')
             api_key: API key for authentication
             thinking: Enable reasoning/thinking output
-            budget_tokens: Max tokens for reasoning (mutually exclusive with reasoning_effort)
-            reasoning_effort: Effort level - 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'
-                             (mutually exclusive with budget_tokens)
+            budget_tokens: Max tokens for reasoning
+                (mutually exclusive with reasoning_effort)
+            reasoning_effort: Effort level — 'none', 'minimal',
+                'low', 'medium', 'high', 'xhigh'
+                (mutually exclusive with budget_tokens)
         """
         self._model = model
         self._thinking = thinking
@@ -133,7 +138,7 @@ class OpenAIModel(core.llm.LanguageModel):
         self,
         messages: list[core.messages.Message],
         tools: Sequence[core.tools.ToolLike] | None = None,
-    ) -> AsyncGenerator[core.llm.StreamEvent, None]:
+    ) -> AsyncGenerator[core.llm.StreamEvent]:
         """Yield raw stream events from OpenAI API."""
         openai_messages = _messages_to_openai(messages)
         openai_tools = _tools_to_openai(tools) if tools else None
@@ -244,7 +249,7 @@ class OpenAIModel(core.llm.LanguageModel):
         self,
         messages: list[core.messages.Message],
         tools: Sequence[core.tools.ToolLike] | None = None,
-    ) -> AsyncGenerator[core.messages.Message, None]:
+    ) -> AsyncGenerator[core.messages.Message]:
         """Stream Messages (uses StreamHandler internally)."""
         handler = core.llm.StreamHandler()
         async for event in self.stream_events(messages, tools):

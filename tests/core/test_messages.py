@@ -5,11 +5,9 @@ from vercel_ai_sdk.core.messages import (
     Message,
     ReasoningPart,
     TextPart,
-    ToolDelta,
     ToolPart,
     make_messages,
 )
-
 
 # -- is_done ---------------------------------------------------------------
 

@@ -1,13 +1,10 @@
 """@tool decorator: schema extraction, registry, Runtime parameter handling."""
 
-from typing import Optional
-
 import pytest
 
 import vercel_ai_sdk as ai
 from vercel_ai_sdk.core.runtime import Runtime
-from vercel_ai_sdk.core.tools import _tool_registry, get_tool
-
+from vercel_ai_sdk.core.tools import get_tool
 
 # -- Schema extraction from type hints ------------------------------------
 
@@ -28,7 +25,7 @@ def test_simple_types_produce_correct_schema() -> None:
 
 def test_optional_param_not_required() -> None:
     @ai.tool
-    async def search(query: str, limit: Optional[int] = None) -> str:
+    async def search(query: str, limit: int | None = None) -> str:
         """Search."""
         return query
 

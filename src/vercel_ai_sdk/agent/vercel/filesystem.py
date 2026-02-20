@@ -1,17 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
-
 from vercel.sandbox import AsyncSandbox
 from vercel.sandbox.models import WriteFile
-
-from .. import proto
 
 logger = logging.getLogger(__name__)
 
@@ -34,17 +31,16 @@ def _is_gone_error(exc: BaseException) -> bool:
     Detect stale/terminated sandbox errors.
     Mirrors isSandboxGoneError from agent-sdk.
     """
-    if isinstance(exc, httpx.HTTPStatusError):
-        if exc.response.status_code in (410, 422):
-            return True
+    if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (
+        410,
+        422,
+    ):
+        return True
 
     msg = str(exc)
     if "Expected a stream of command data" in msg:
         return True
-    if "Expected a stream of logs" in msg:
-        return True
-
-    return False
+    return "Expected a stream of logs" in msg
 
 
 @dataclass
@@ -151,10 +147,8 @@ class VercelSandbox:
         """Stop the sandbox VM."""
         if self._sandbox is None:
             return
-        try:
+        with contextlib.suppress(Exception):
             await self._sandbox.stop()
-        except Exception:
-            pass
         self._sandbox = None
         self._sandbox_task = None
 
@@ -233,11 +227,11 @@ class VercelSandbox:
                 sb.run_command(cmd, args or [], cwd=effective_cwd),
                 timeout=timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError as exc:
             raise TimeoutError(
                 f"Command timed out after {timeout}s. "
                 "Try increasing the timeout or breaking the command into smaller steps."
-            )
+            ) from exc
         except Exception as exc:
             if _is_gone_error(exc):
                 raise SandboxGoneError(str(exc)) from exc
@@ -338,7 +332,8 @@ class VercelSandbox:
 
     async def glob(self, pattern: str, *, path: str | None = None) -> list[str]:
         root = self._resolve_path(path or ".")
-        cmd = f"cd {_shell_quote(root)} && find . -path {_shell_quote(f'./{pattern}')} 2>/dev/null | sort"
+        find_expr = _shell_quote(f"./{pattern}")
+        cmd = f"cd {_shell_quote(root)} && find . -path {find_expr} 2>/dev/null | sort"
         stdout, _, _ = await self._run_command("bash", ["-c", cmd])
         if not stdout.strip():
             return []
