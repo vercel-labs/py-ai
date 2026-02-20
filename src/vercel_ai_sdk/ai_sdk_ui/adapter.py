@@ -13,7 +13,6 @@ from typing import Any, Literal
 from .. import core
 from . import protocol, ui_message
 
-
 # ============================================================================
 # Serialization utilities
 # ============================================================================
@@ -128,7 +127,7 @@ class _StreamState:
 
 async def to_ui_message_stream(
     messages: AsyncIterable[core.messages.Message],
-) -> AsyncGenerator[protocol.UIMessageStreamPart, None]:
+) -> AsyncGenerator[protocol.UIMessageStreamPart]:
     """
     Convert a proto_sdk message stream into AI SDK UI message stream parts.
 
@@ -183,16 +182,16 @@ async def to_ui_message_stream(
             has_new_pending_tools = False
             has_new_tool_results = False
 
-            for part in msg.parts:
-                if isinstance(part, core.messages.ToolPart):
+            for msg_part in msg.parts:
+                if isinstance(msg_part, core.messages.ToolPart):
                     if (
-                        part.status == "pending"
-                        and part.tool_call_id not in state.pending_tool_calls
+                        msg_part.status == "pending"
+                        and msg_part.tool_call_id not in state.pending_tool_calls
                     ):
                         has_new_pending_tools = True
                     elif (
-                        part.status in ("result", "error")
-                        and part.tool_call_id not in state.emitted_tool_results
+                        msg_part.status in ("result", "error")
+                        and msg_part.tool_call_id not in state.emitted_tool_results
                     ):
                         has_new_tool_results = True
 
@@ -201,8 +200,8 @@ async def to_ui_message_stream(
             # 2. Then handle tool results (which may need their own step)
 
             # Pass 1: Text and pending tool inputs
-            for part in msg.parts:
-                match part:
+            for msg_part in msg.parts:
+                match msg_part:
                     case core.messages.TextPart(text=text) if (
                         text
                         and not had_active_text
@@ -235,13 +234,14 @@ async def to_ui_message_stream(
             # Pass 2: Tool outputs (same step as tool input per AI SDK protocol)
             # Tool input and output are part of the same "step" (one LLM turn)
             if has_new_tool_results:
-                for part in msg.parts:
-                    match part:
+                for msg_part in msg.parts:
+                    match msg_part:
                         case core.messages.ToolPart(
                             tool_call_id=tc_id,
                             result=result,
+                            status=status,
                         ) if (
-                            part.status in ("result", "error")
+                            status in ("result", "error")
                             and tc_id not in state.emitted_tool_results
                         ):
                             state.emitted_tool_results.add(tc_id)
@@ -261,7 +261,7 @@ async def to_ui_message_stream(
 async def filter_by_label(
     messages: AsyncIterable[core.messages.Message],
     label: str | None = None,
-) -> AsyncGenerator[core.messages.Message, None]:
+) -> AsyncGenerator[core.messages.Message]:
     """Filter a message stream to a single agent label.
 
     If label is provided, only messages with that label pass through.
@@ -276,7 +276,7 @@ async def filter_by_label(
 
 async def to_sse_stream(
     messages: AsyncIterable[core.messages.Message],
-) -> AsyncGenerator[str, None]:
+) -> AsyncGenerator[str]:
     """Convert a proto_sdk message stream directly into SSE-formatted strings."""
     async for part in to_ui_message_stream(messages):
         yield format_sse(part)
@@ -379,7 +379,7 @@ def to_messages(
                 ):
                     pass  # Skip unsupported/boundary parts
 
-        # Validate user/system messages have content - OpenAI requires it for these roles.
+        # Validate user/system messages have content - OpenAI requires it there.
         # Assistant messages can have empty content if they have tool calls.
         if ui_msg.role in ("user", "system") and not internal_parts:
             raise ValueError(

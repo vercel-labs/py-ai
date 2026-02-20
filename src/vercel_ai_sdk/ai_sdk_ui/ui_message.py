@@ -10,7 +10,7 @@ AI SDK v6 uses a `parts` array instead of legacy `content` string.
 from __future__ import annotations
 
 import uuid
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import pydantic
 
@@ -172,7 +172,7 @@ def _parse_ui_part(part_data: dict[str, Any]) -> UIMessagePart | None:
     part_type = part_data.get("type", "")
 
     if model_cls := _STATIC_UI_PART_TYPES.get(part_type):
-        return model_cls.model_validate(part_data)
+        return cast(UIMessagePart, model_cls.model_validate(part_data))
 
     match part_type:
         case str() as t if t.startswith("tool-"):
