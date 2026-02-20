@@ -15,6 +15,8 @@ import json
 import os
 import warnings
 
+from typing import Any
+
 import fastapi
 import pydantic
 
@@ -58,7 +60,7 @@ class Approval(pydantic.BaseModel):
 # ---------------------------------------------------------------------------
 
 
-async def mothership_branch(llm: ai.LanguageModel, query: str):
+async def mothership_branch(llm: ai.LanguageModel, query: str) -> ai.StreamResult:
     """Agent that contacts the mothership, gated by an approval hook."""
     messages = ai.make_messages(
         system="You are assistant 1. Use contact_mothership when asked about the future.",
@@ -74,7 +76,10 @@ async def mothership_branch(llm: ai.LanguageModel, query: str):
 
         for tc in result.tool_calls:
             if tc.tool_name == "contact_mothership":
-                approval = await Approval.create(
+                # TODO: mypy doesn't support class decorators that change the
+                # class type — @ai.hook returns type[Hook[T]] but mypy still
+                # sees the original BaseModel.
+                approval = await Approval.create(  # type: ignore[attr-defined]
                     f"mothership_{tc.tool_call_id}",
                     metadata={"branch": "mothership", "tool": tc.tool_name},
                 )
@@ -85,12 +90,13 @@ async def mothership_branch(llm: ai.LanguageModel, query: str):
             else:
                 await ai.execute_tool(tc, message=result.last_message)
 
-        messages.append(result.last_message)
+        if result.last_message is not None:
+            messages.append(result.last_message)
 
     return result
 
 
-async def data_center_branch(llm: ai.LanguageModel, query: str):
+async def data_center_branch(llm: ai.LanguageModel, query: str) -> ai.StreamResult:
     """Agent that contacts data centers, gated by an approval hook."""
     messages = ai.make_messages(
         system="You are assistant 2. Use contact_data_centers when asked about the future.",
@@ -106,7 +112,10 @@ async def data_center_branch(llm: ai.LanguageModel, query: str):
 
         for tc in result.tool_calls:
             if tc.tool_name == "contact_data_centers":
-                approval = await Approval.create(
+                # TODO: mypy doesn't support class decorators that change the
+                # class type — @ai.hook returns type[Hook[T]] but mypy still
+                # sees the original BaseModel.
+                approval = await Approval.create(  # type: ignore[attr-defined]
                     f"data_centers_{tc.tool_call_id}",
                     metadata={"branch": "data_centers", "tool": tc.tool_name},
                 )
@@ -117,7 +126,8 @@ async def data_center_branch(llm: ai.LanguageModel, query: str):
             else:
                 await ai.execute_tool(tc, message=result.last_message)
 
-        messages.append(result.last_message)
+        if result.last_message is not None:
+            messages.append(result.last_message)
 
     return result
 
@@ -127,7 +137,7 @@ async def data_center_branch(llm: ai.LanguageModel, query: str):
 # ---------------------------------------------------------------------------
 
 
-async def multiagent(llm: ai.LanguageModel, query: str):
+async def multiagent(llm: ai.LanguageModel, query: str) -> ai.StreamResult:
     """Run two gated agents in parallel, then summarise their results."""
     r1, r2 = await asyncio.gather(
         mothership_branch(llm, query),
@@ -154,7 +164,7 @@ async def multiagent(llm: ai.LanguageModel, query: str):
 # ---------------------------------------------------------------------------
 
 
-def _normalise_message(data: dict) -> dict:
+def _normalise_message(data: dict[str, Any]) -> dict[str, Any]:
     """Ensure ToolPart.result is always a dict for safe deserialisation."""
     for part in data.get("parts", []):
         if part.get("type") == "tool" and isinstance(part.get("result"), str):
@@ -168,7 +178,7 @@ def _normalise_message(data: dict) -> dict:
 
 
 @app.websocket("/ws")
-async def ws_endpoint(websocket: fastapi.WebSocket):
+async def ws_endpoint(websocket: fastapi.WebSocket) -> None:
     await websocket.accept()
     print("Client connected")
 
@@ -181,13 +191,16 @@ async def ws_endpoint(websocket: fastapi.WebSocket):
     result = ai.run(multiagent, llm, "When will the robots take over?")
 
     # Background task: read hook resolutions from the client.
-    async def read_resolutions():
+    async def read_resolutions() -> None:
         try:
             while True:
                 raw = await websocket.receive_text()
                 data = json.loads(raw)
                 print(f"  Resolution received: {data['hook_id']}")
-                Approval.resolve(
+                # TODO: mypy doesn't support class decorators that change the
+                # class type — @ai.hook returns type[Hook[T]] but mypy still
+                # sees the original BaseModel.
+                Approval.resolve(  # type: ignore[attr-defined]
                     data["hook_id"],
                     {"granted": data["granted"], "reason": data["reason"]},
                 )
@@ -220,5 +233,5 @@ async def ws_endpoint(websocket: fastapi.WebSocket):
 
 
 @app.get("/api/health")
-async def health():
+async def health() -> dict[str, str]:
     return {"status": "ok"}

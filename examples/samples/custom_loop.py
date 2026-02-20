@@ -4,6 +4,8 @@ import asyncio
 import os
 from collections.abc import AsyncGenerator
 
+from typing import Any
+
 import vercel_ai_sdk as ai
 
 
@@ -25,7 +27,7 @@ async def get_population(city: str) -> int:
 async def custom_stream_step(
     llm: ai.LanguageModel,
     messages: list[ai.Message],
-    tools: list[ai.Tool],
+    tools: list[ai.Tool[..., Any]],
     label: str | None = None,
 ) -> AsyncGenerator[ai.Message, None]:
     """Wraps llm.stream to inject a label on every message."""
@@ -34,7 +36,7 @@ async def custom_stream_step(
         yield msg
 
 
-async def agent(llm: ai.LanguageModel, user_query: str):
+async def agent(llm: ai.LanguageModel, user_query: str) -> ai.StreamResult:
     """Custom agent loop with manual tool execution.
 
     Uses @ai.stream for custom streaming, stream_step-style while loop,
@@ -52,7 +54,8 @@ async def agent(llm: ai.LanguageModel, user_query: str):
         if not result.tool_calls:
             return result
 
-        messages.append(result.last_message)
+        if result.last_message is not None:
+            messages.append(result.last_message)
         await asyncio.gather(
             *(
                 ai.execute_tool(tc, message=result.last_message)
@@ -61,7 +64,7 @@ async def agent(llm: ai.LanguageModel, user_query: str):
         )
 
 
-async def main():
+async def main() -> None:
     llm = ai.anthropic.AnthropicModel(
         model="anthropic/claude-sonnet-4",
         base_url="https://ai-gateway.vercel.sh",

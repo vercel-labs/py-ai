@@ -44,7 +44,7 @@ class FileStorage:
         path = self._path(key)
         if not path.exists():
             return None
-        return json.loads(path.read_text())
+        return json.loads(path.read_text())  # type: ignore[no-any-return]
 
     async def put(self, key: str, value: dict[str, Any]) -> None:
         path = self._path(key)

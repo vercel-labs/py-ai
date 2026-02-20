@@ -22,7 +22,7 @@ async def talk_to_mothership(question: str, runtime: ai.Runtime) -> str:
     return "The mothership says: Soon."
 
 
-async def agent(llm: ai.LanguageModel, user_query: str):
+async def agent(llm: ai.LanguageModel, user_query: str) -> ai.StreamResult:
     return await ai.stream_loop(
         llm,
         messages=ai.make_messages(
@@ -33,7 +33,7 @@ async def agent(llm: ai.LanguageModel, user_query: str):
     )
 
 
-async def main():
+async def main() -> None:
     llm = ai.openai.OpenAIModel(
         model="anthropic/claude-sonnet-4",
         base_url="https://ai-gateway.vercel.sh/v1",

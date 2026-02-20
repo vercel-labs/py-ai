@@ -16,7 +16,7 @@ async def multiply_by_two(number: int) -> int:
     return number * 2
 
 
-async def multiagent(llm: ai.LanguageModel, user_query: str):
+async def multiagent(llm: ai.LanguageModel, user_query: str) -> ai.StreamResult:
     """Run two agents in parallel, then combine their results."""
 
     result1, result2 = await asyncio.gather(
@@ -53,7 +53,7 @@ async def multiagent(llm: ai.LanguageModel, user_query: str):
     )
 
 
-async def main():
+async def main() -> None:
     llm = ai.anthropic.AnthropicModel(
         model="anthropic/claude-haiku-4.5",
         base_url="https://ai-gateway.vercel.sh",

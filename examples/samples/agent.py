@@ -7,7 +7,7 @@ import vercel_ai_sdk as ai
 import vercel_ai_sdk.agent as agent
 
 
-async def main():
+async def main() -> None:
     llm = ai.openai.OpenAIModel(
         model="anthropic/claude-sonnet-4-20250514",
         base_url="https://ai-gateway.vercel.sh/v1",
@@ -25,7 +25,10 @@ async def main():
     async for msg in coding_agent.run(messages):
         # Auto-approve all tool calls
         if (hook := msg.get_hook_part()) and hook.status == "pending":
-            agent.ToolApproval.resolve(hook.hook_id, {"granted": True})
+            # TODO: mypy doesn't support class decorators that change the
+            # class type — @ai.hook returns type[Hook[T]] but mypy still
+            # sees the original BaseModel.
+            agent.ToolApproval.resolve(hook.hook_id, {"granted": True})  # type: ignore[attr-defined]
 
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)

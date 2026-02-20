@@ -20,7 +20,7 @@ class CommunicationApproval(pydantic.BaseModel):
     reason: str
 
 
-async def graph(llm: ai.LanguageModel, query: str):
+async def graph(llm: ai.LanguageModel, query: str) -> ai.StreamResult:
     messages = ai.make_messages(
         system="Use the contact_mothership tool when asked about the future.",
         user=query,
@@ -36,7 +36,10 @@ async def graph(llm: ai.LanguageModel, query: str):
         for tc in result.tool_calls:
             if tc.tool_name == "contact_mothership":
                 # Blocks until resolved (long-running) or cancelled (serverless)
-                approval = await CommunicationApproval.create(
+                # TODO: mypy doesn't support class decorators that change the
+                # class type — @ai.hook returns type[Hook[T]] but mypy still
+                # sees the original BaseModel.
+                approval = await CommunicationApproval.create(  # type: ignore[attr-defined]
                     f"approve_{tc.tool_call_id}",
                     metadata={"tool": tc.tool_name},
                 )
@@ -47,12 +50,13 @@ async def graph(llm: ai.LanguageModel, query: str):
             else:
                 await ai.execute_tool(tc, message=result.last_message)
 
-        messages.append(result.last_message)
+        if result.last_message is not None:
+            messages.append(result.last_message)
 
     return result
 
 
-async def main():
+async def main() -> None:
     llm = ai.openai.OpenAIModel(
         model="anthropic/claude-sonnet-4-20250514",
         base_url="https://ai-gateway.vercel.sh/v1",
@@ -63,7 +67,10 @@ async def main():
         # Hook parts arrive as pending, waiting for resolution
         if (hook := msg.get_hook_part()) and hook.status == "pending":
             answer = input(f"Approve {hook.hook_id}? [y/n] ")
-            CommunicationApproval.resolve(
+            # TODO: mypy doesn't support class decorators that change the
+            # class type — @ai.hook returns type[Hook[T]] but mypy still
+            # sees the original BaseModel.
+            CommunicationApproval.resolve(  # type: ignore[attr-defined]
                 hook.hook_id,
                 {
                     "granted": answer.strip().lower() in ("y", "yes"),

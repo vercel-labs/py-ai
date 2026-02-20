@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+
 import fastapi
 import fastapi.responses
 import pydantic
@@ -24,7 +26,7 @@ class ChatRequest(pydantic.BaseModel):
 
 
 @router.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest) -> fastapi.responses.StreamingResponse:
     """Handle chat requests and stream responses."""
     messages = ai.ai_sdk_ui.to_messages(request.messages)
     session_id = request.session_id or "default"
@@ -41,7 +43,7 @@ async def chat(request: ChatRequest):
 
     result = ai.run(agent.graph, llm, messages, agent.TOOLS, checkpoint=checkpoint)
 
-    async def stream_response():
+    async def stream_response() -> AsyncGenerator[str]:
         async for chunk in ai.ai_sdk_ui.to_sse_stream(result):
             yield chunk
 
