@@ -7,7 +7,6 @@ import pydantic
 import pytest
 
 import vercel_ai_sdk as ai
-from vercel_ai_sdk.core.hooks import _live_hooks, _pending_resolutions
 
 from ..conftest import MockLLM, text_msg
 
@@ -106,7 +105,7 @@ async def test_pre_registered_resolution_consumed() -> None:
 
     llm = MockLLM([[text_msg("OK")]])
     run_result = ai.run(graph, llm)
-    msgs = [m async for m in run_result]
+    [m async for m in run_result]
 
     # Should have completed with no pending hooks
     assert len(run_result.pending_hooks) == 0
@@ -163,7 +162,7 @@ async def test_hook_metadata_in_pending() -> None:
         await Confirmation.create("meta_test", metadata={"tool": "rm -rf", "path": "/"})  # type: ignore[attr-defined]
 
     run_result = ai.run(graph, MockLLM([[text_msg("OK")]]), cancel_on_hooks=True)
-    msgs = [m async for m in run_result]
+    [m async for m in run_result]
 
     info = run_result.pending_hooks["meta_test"]
     assert info.metadata == {"tool": "rm -rf", "path": "/"}

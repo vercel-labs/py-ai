@@ -4,6 +4,7 @@ import contextvars
 from typing import Any
 
 import vercel_ai_sdk as ai
+
 from . import proto
 
 _filesystem: contextvars.ContextVar[proto.Filesystem] = contextvars.ContextVar(
@@ -20,20 +21,29 @@ def _fs() -> proto.Filesystem:
 
 @ai.tool
 async def read(path: str, offset: int | None = None, limit: int | None = None) -> str:
-    """Read a file and return its contents with line numbers. For large files, use offset/limit to paginate."""
+    """Read file contents with line numbers.
+
+    For large files, use offset/limit to paginate.
+    """
     return await _fs().read(path, offset=offset, limit=limit)
 
 
 @ai.tool
 async def write(path: str, content: str) -> str:
-    """Write content to a file. Creates parent directories automatically. Overwrites existing files."""
+    """Write content to a file.
+
+    Creates parent directories automatically. Overwrites existing files.
+    """
     await _fs().write(path, content)
     return f"Wrote {len(content)} bytes to {path}"
 
 
 @ai.tool
 async def edit(path: str, old_string: str, new_string: str) -> str:
-    """Edit a file by replacing an exact string match. Fails if old_string is not found or appears multiple times."""
+    """Edit a file by replacing an exact string match.
+
+    Fails if old_string is not found or appears multiple times.
+    """
     await _fs().edit(path, old_string, new_string)
     return f"Edited {path}"
 
@@ -45,7 +55,10 @@ async def ls(
     pattern: str | None = None,
     include_hidden: bool = False,
 ) -> str:
-    """List directory contents recursively. Control depth to balance detail vs overview."""
+    """List directory contents recursively.
+
+    Control depth to balance detail vs overview.
+    """
     return await _fs().ls(
         path, depth=depth, pattern=pattern, include_hidden=include_hidden
     )
@@ -69,7 +82,10 @@ async def grep(
     max_count: int | None = None,
     case_sensitive: bool = True,
 ) -> str:
-    """Search file contents using regex (ripgrep syntax). Use include to filter by file pattern (e.g. '*.py')."""
+    """Search file contents using regex (ripgrep syntax).
+
+    Use include to filter by file pattern (e.g. '*.py').
+    """
     return await _fs().grep(
         pattern,
         path=path,
@@ -82,7 +98,10 @@ async def grep(
 
 @ai.tool
 async def bash(command: str, timeout: int | None = None) -> str:
-    """Execute a bash command in the workspace. Use timeout (seconds) to limit long-running commands."""
+    """Execute a bash command in the workspace.
+
+    Use timeout (seconds) to limit long-running commands.
+    """
     return await _fs().bash(command, timeout=timeout)
 
 

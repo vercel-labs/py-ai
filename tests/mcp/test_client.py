@@ -1,6 +1,5 @@
 """MCP client: tool registration in global registry, end-to-end execution."""
 
-import asyncio
 import contextlib
 from typing import Any
 
@@ -70,7 +69,7 @@ def test_mcp_tool_to_native_schema_preserved() -> None:
 
 @pytest.mark.asyncio
 async def test_mcp_tool_executes_through_stream_loop() -> None:
-    """An MCP-style tool registered via _mcp_tool_to_native can be called by the agent loop."""
+    """MCP-style tool via _mcp_tool_to_native can be called by the agent loop."""
     call_log: list[dict[str, str]] = []
 
     async def fake_fn(**kwargs: str) -> str:

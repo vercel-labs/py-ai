@@ -18,7 +18,7 @@ class MockLLM(ai.LanguageModel):
         self,
         messages: list[messages.Message],
         tools: Sequence[ai.ToolLike] | None = None,
-    ) -> AsyncGenerator[messages.Message, None]:
+    ) -> AsyncGenerator[messages.Message]:
         if self._call_index >= len(self._responses):
             raise RuntimeError("MockLLM: no more responses configured")
         self.call_count += 1

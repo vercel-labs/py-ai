@@ -1,7 +1,5 @@
 """StreamHandler: event accumulation, state transitions, message building."""
 
-import pytest
-
 from vercel_ai_sdk.core.llm import (
     MessageDone,
     ReasoningDelta,
@@ -16,7 +14,6 @@ from vercel_ai_sdk.core.llm import (
     ToolStart,
 )
 from vercel_ai_sdk.core.messages import ReasoningPart, TextPart, ToolPart
-
 
 # -- Text streaming --------------------------------------------------------
 

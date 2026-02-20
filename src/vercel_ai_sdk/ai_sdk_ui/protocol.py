@@ -3,7 +3,6 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Literal
 
-
 # necessary headers for the streaming integration to work
 UI_MESSAGE_STREAM_HEADERS = {
     "Content-Type": "text/event-stream",

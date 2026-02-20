@@ -1,8 +1,5 @@
 """@stream decorator: context requirement, replay, queue submission."""
 
-import asyncio
-from collections.abc import AsyncGenerator
-
 import pytest
 
 import vercel_ai_sdk as ai
@@ -10,7 +7,6 @@ from vercel_ai_sdk.core import messages
 from vercel_ai_sdk.core.streams import StreamResult
 
 from ..conftest import MockLLM, text_msg
-
 
 # -- StreamResult properties -----------------------------------------------
 

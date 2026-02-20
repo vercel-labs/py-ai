@@ -100,7 +100,10 @@ class UIToolPart(pydantic.BaseModel):
 
     @property
     def tool_name(self) -> str:
-        """Extract tool name from the type string (e.g., 'tool-get_weather' -> 'get_weather')."""
+        """Extract tool name from the type string.
+
+        E.g., 'tool-get_weather' -> 'get_weather'.
+        """
         if self.type.startswith("tool-"):
             return self.type[5:]
         return self.type

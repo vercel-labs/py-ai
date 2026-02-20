@@ -216,7 +216,7 @@ class LanguageModel(abc.ABC):
         self,
         messages: list[messages_.Message],
         tools: Sequence[tools_.ToolLike] | None = None,
-    ) -> AsyncGenerator[messages_.Message, None]:
+    ) -> AsyncGenerator[messages_.Message]:
         raise NotImplementedError
         yield
 

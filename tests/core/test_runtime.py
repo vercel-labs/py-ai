@@ -10,7 +10,6 @@ from vercel_ai_sdk.core.runtime import Runtime
 
 from ..conftest import MockLLM, text_msg, tool_msg
 
-
 # -- Tool definitions for tests --------------------------------------------
 
 
@@ -156,7 +155,10 @@ async def test_stream_loop_multi_turn() -> None:
 
 @pytest.mark.asyncio
 async def test_execute_tool_missing_raises() -> None:
-    """execute_tool with unknown tool name raises ValueError (wrapped in ExceptionGroup by TaskGroup)."""
+    """execute_tool with unknown tool name raises ValueError.
+
+    Wrapped in ExceptionGroup by TaskGroup.
+    """
     tc = messages.ToolPart(
         tool_call_id="tc-1", tool_name="nonexistent_tool_zzz", tool_args="{}"
     )
