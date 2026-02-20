@@ -80,27 +80,27 @@ async def test_tool_replay_skips_execution() -> None:
 async def test_hook_cancellation_pending() -> None:
     async def graph(llm: ai.LanguageModel) -> Any:
         await ai.stream_step(llm, ai.make_messages(system="t", user="go"))
-        return await Approval.create("my_approval", metadata={"tool": "test"})
+        return await Approval.create("my_approval", metadata={"tool": "test"})  # type: ignore[attr-defined]
 
     result = ai.run(graph, MockLLM([[text_msg("OK")]]), cancel_on_hooks=True)
     msgs = [msg async for msg in result]
     assert "my_approval" in result.pending_hooks
     hook_msgs = [m for m in msgs if any(isinstance(p, ai.HookPart) for p in m.parts)]
-    assert hook_msgs[0].parts[0].status == "pending"
+    assert hook_msgs[0].parts[0].status == "pending"  # type: ignore[union-attr]
 
 
 @pytest.mark.asyncio
 async def test_hook_resolution_on_reentry() -> None:
     async def graph(llm: ai.LanguageModel) -> Any:
         await ai.stream_step(llm, ai.make_messages(system="t", user="go"))
-        return await Approval.create("my_approval")
+        return await Approval.create("my_approval")  # type: ignore[attr-defined]
 
     resp = [text_msg("OK")]
     result1 = ai.run(graph, MockLLM([resp]), cancel_on_hooks=True)
     [msg async for msg in result1]
     cp = result1.checkpoint
 
-    Approval.resolve("my_approval", {"granted": True})
+    Approval.resolve("my_approval", {"granted": True})  # type: ignore[attr-defined]
     result2 = ai.run(graph, MockLLM([]), checkpoint=cp)
     [msg async for msg in result2]
     assert len(result2.pending_hooks) == 0
@@ -113,10 +113,10 @@ async def test_parallel_hooks_all_collected() -> None:
         await ai.stream_step(llm, ai.make_messages(system="t", user="go"))
 
         async def a() -> Any:
-            return await Approval.create("hook_a")
+            return await Approval.create("hook_a")  # type: ignore[attr-defined]
 
         async def b() -> Any:
-            return await Approval.create("hook_b")
+            return await Approval.create("hook_b")  # type: ignore[attr-defined]
 
         async with asyncio.TaskGroup() as tg:
             tg.create_task(a())
@@ -133,10 +133,10 @@ async def test_parallel_hooks_resolve_on_reentry() -> None:
         await ai.stream_step(llm, ai.make_messages(system="t", user="go"))
 
         async def a() -> Any:
-            return await Approval.create("hook_a")
+            return await Approval.create("hook_a")  # type: ignore[attr-defined]
 
         async def b() -> Any:
-            return await Approval.create("hook_b")
+            return await Approval.create("hook_b")  # type: ignore[attr-defined]
 
         async with asyncio.TaskGroup() as tg:
             ta = tg.create_task(a())
@@ -148,8 +148,8 @@ async def test_parallel_hooks_resolve_on_reentry() -> None:
     [msg async for msg in result1]
     cp = result1.checkpoint
 
-    Approval.resolve("hook_a", {"granted": True})
-    Approval.resolve("hook_b", {"granted": False})
+    Approval.resolve("hook_a", {"granted": True})  # type: ignore[attr-defined]
+    Approval.resolve("hook_b", {"granted": False})  # type: ignore[attr-defined]
     result2 = ai.run(graph, MockLLM([]), checkpoint=cp)
     [msg async for msg in result2]
     assert len(result2.pending_hooks) == 0

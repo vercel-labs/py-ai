@@ -29,7 +29,7 @@ async def test_resolve_live_future() -> None:
     async def graph(llm: ai.LanguageModel) -> None:
         nonlocal resolved_value
         await ai.stream_step(llm, ai.make_messages(user="go"))
-        result = await Confirmation.create("confirm_1")
+        result = await Confirmation.create("confirm_1")  # type: ignore[attr-defined]
         resolved_value = result
 
     llm = MockLLM([[text_msg("OK")]])
@@ -41,7 +41,7 @@ async def test_resolve_live_future() -> None:
         collected.append(msg)
         # When we see the pending hook message, resolve it
         if any(isinstance(p, ai.HookPart) and p.status == "pending" for p in msg.parts):
-            Confirmation.resolve(
+            Confirmation.resolve(  # type: ignore[attr-defined]
                 "confirm_1", {"approved": True, "reason": "looks good"}
             )
 
@@ -66,7 +66,7 @@ async def test_cancel_live_hook() -> None:
         nonlocal was_cancelled
         await ai.stream_step(llm, ai.make_messages(user="go"))
         try:
-            await Confirmation.create("cancel_me")
+            await Confirmation.create("cancel_me")  # type: ignore[attr-defined]
         except asyncio.CancelledError:
             was_cancelled = True
 
@@ -75,7 +75,7 @@ async def test_cancel_live_hook() -> None:
 
     async for msg in run_result:
         if any(isinstance(p, ai.HookPart) and p.status == "pending" for p in msg.parts):
-            await Confirmation.cancel("cancel_me", reason="denied")
+            await Confirmation.cancel("cancel_me", reason="denied")  # type: ignore[attr-defined]
 
     assert was_cancelled
 
@@ -86,7 +86,7 @@ async def test_cancel_live_hook() -> None:
 @pytest.mark.asyncio
 async def test_cancel_nonexistent_raises() -> None:
     with pytest.raises(ValueError, match="No pending hook"):
-        await Confirmation.cancel("does_not_exist_xyz")
+        await Confirmation.cancel("does_not_exist_xyz")  # type: ignore[attr-defined]
 
 
 # -- Pre-registration (serverless re-entry) --------------------------------
@@ -98,11 +98,11 @@ async def test_pre_registered_resolution_consumed() -> None:
 
     async def graph(llm: ai.LanguageModel) -> Any:
         await ai.stream_step(llm, ai.make_messages(user="go"))
-        result = await Confirmation.create("pre_reg_1")
+        result = await Confirmation.create("pre_reg_1")  # type: ignore[attr-defined]
         return result
 
     # Pre-register BEFORE run
-    Confirmation.resolve("pre_reg_1", {"approved": True})
+    Confirmation.resolve("pre_reg_1", {"approved": True})  # type: ignore[attr-defined]
 
     llm = MockLLM([[text_msg("OK")]])
     run_result = ai.run(graph, llm)
@@ -121,7 +121,7 @@ def test_resolve_validates_schema() -> None:
     """resolve() with invalid data raises from pydantic validation."""
     # 'approved' is required bool, passing string should raise
     with pytest.raises(pydantic.ValidationError):
-        Confirmation.resolve("schema_test", {"approved": "not_a_bool"})
+        Confirmation.resolve("schema_test", {"approved": "not_a_bool"})  # type: ignore[attr-defined]
 
 
 # -- Resolved hook emits message -------------------------------------------
@@ -133,7 +133,7 @@ async def test_resolved_hook_emits_message() -> None:
 
     async def graph(llm: ai.LanguageModel) -> None:
         await ai.stream_step(llm, ai.make_messages(user="go"))
-        await Confirmation.create("emit_test")
+        await Confirmation.create("emit_test")  # type: ignore[attr-defined]
 
     llm = MockLLM([[text_msg("OK")]])
     run_result = ai.run(graph, llm)
@@ -142,7 +142,7 @@ async def test_resolved_hook_emits_message() -> None:
     async for msg in run_result:
         msgs.append(msg)
         if any(isinstance(p, ai.HookPart) and p.status == "pending" for p in msg.parts):
-            Confirmation.resolve("emit_test", {"approved": False})
+            Confirmation.resolve("emit_test", {"approved": False})  # type: ignore[attr-defined]
 
     hook_msgs = [
         m
@@ -150,7 +150,7 @@ async def test_resolved_hook_emits_message() -> None:
         if any(isinstance(p, ai.HookPart) and p.status == "resolved" for p in m.parts)
     ]
     assert len(hook_msgs) == 1
-    assert hook_msgs[0].parts[0].resolution == {"approved": False, "reason": ""}
+    assert hook_msgs[0].parts[0].resolution == {"approved": False, "reason": ""}  # type: ignore[union-attr]
 
 
 # -- Hook metadata surfaces in pending message -----------------------------
@@ -160,7 +160,7 @@ async def test_resolved_hook_emits_message() -> None:
 async def test_hook_metadata_in_pending() -> None:
     async def graph(llm: ai.LanguageModel) -> None:
         await ai.stream_step(llm, ai.make_messages(user="go"))
-        await Confirmation.create("meta_test", metadata={"tool": "rm -rf", "path": "/"})
+        await Confirmation.create("meta_test", metadata={"tool": "rm -rf", "path": "/"})  # type: ignore[attr-defined]
 
     run_result = ai.run(graph, MockLLM([[text_msg("OK")]]), cancel_on_hooks=True)
     msgs = [m async for m in run_result]
