@@ -268,7 +268,8 @@ async def stream_loop(
             return result
 
         last_msg = result.last_message
-        local_messages.append(last_msg)
+        if last_msg is not None:
+            local_messages.append(last_msg)
 
         await asyncio.gather(
             *(execute_tool(tc, message=last_msg) for tc in result.tool_calls)

@@ -162,7 +162,7 @@ class OpenAIModel(core.llm.LanguageModel):
         # Track active blocks for Start/End events
         text_started = False
         reasoning_started = False
-        tool_calls: dict[int, dict] = {}  # index -> {id, name, started}
+        tool_calls: dict[int, dict[str, Any]] = {}  # index -> {id, name, started}
 
         async for chunk in stream:
             if not chunk.choices:
