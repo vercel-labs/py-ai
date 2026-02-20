@@ -74,7 +74,7 @@ async def test_cancel_live_hook():
 
     async for msg in run_result:
         if any(isinstance(p, ai.HookPart) and p.status == "pending" for p in msg.parts):
-            Confirmation.cancel("cancel_me", reason="denied")
+            await Confirmation.cancel("cancel_me", reason="denied")
 
     assert was_cancelled
 
@@ -82,9 +82,10 @@ async def test_cancel_live_hook():
 # -- Hook.cancel() on non-existent label raises ----------------------------
 
 
-def test_cancel_nonexistent_raises():
+@pytest.mark.asyncio
+async def test_cancel_nonexistent_raises():
     with pytest.raises(ValueError, match="No pending hook"):
-        Confirmation.cancel("does_not_exist_xyz")
+        await Confirmation.cancel("does_not_exist_xyz")
 
 
 # -- Pre-registration (serverless re-entry) --------------------------------

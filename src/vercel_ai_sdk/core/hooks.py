@@ -1,20 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, ClassVar, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import pydantic
 
 from . import messages as messages_
 
-T = TypeVar("T", bound=pydantic.BaseModel)
+if TYPE_CHECKING:
+    from . import runtime as runtime_
 
 
 # ---------------------------------------------------------------------------
 # Module-level hook registries
-#
-# These allow Hook.resolve() and Hook.cancel() to work from anywhere —
-# no ContextVar lookup, no RunResult handle, no copy_context().
 #
 # _live_hooks:
 #   Populated by Hook.create() when a hook suspends inside a running graph.
@@ -32,8 +30,9 @@ T = TypeVar("T", bound=pydantic.BaseModel)
 #   immediately without suspending.  Entries are removed on consumption.
 # ---------------------------------------------------------------------------
 
-_live_hooks: dict[str, tuple[asyncio.Future[Any], dict[str, Any], Any]] = {}
-# label -> (future, metadata, Runtime)
+_live_hooks: dict[
+    str, tuple[asyncio.Future[Any], dict[str, Any], runtime_.Runtime]
+] = {}
 
 _pending_resolutions: dict[str, dict[str, Any]] = {}
 # label -> validated resolution dict
@@ -46,17 +45,17 @@ def _cleanup_run(labels: set[str]) -> None:
         _pending_resolutions.pop(label, None)
 
 
-class Hook(Generic[T]):
+class Hook[T: pydantic.BaseModel]:
     """
     Hook: a suspension point that requires external input to continue.
 
-    Usage in graph code (identical in all modes):
+    Usage in graph code:
 
         approval = await ToolApproval.create("approve_delete", metadata={...})
         if approval.granted:
             ...
 
-    Resolution from outside the graph (any task, any context):
+    Resolution from outside the graph:
 
         ToolApproval.resolve("approve_delete", {"granted": True, ...})
 
@@ -92,9 +91,9 @@ class Hook(Generic[T]):
                    a single run.
             metadata: Optional metadata surfaced in the pending HookPart message.
         """
-        from . import runtime as runtime_
+        from . import runtime as rt_mod
 
-        rt = runtime_._runtime.get(None)
+        rt = rt_mod._runtime.get(None)
         if rt is None:
             raise ValueError("No Runtime context - must be called within ai.run()")
 
@@ -112,7 +111,7 @@ class Hook(Generic[T]):
 
         # Submit to step queue — run() decides what to do
         future: asyncio.Future[dict[str, Any]] = asyncio.Future()
-        suspension = runtime_.HookSuspension(
+        suspension = rt_mod.HookSuspension(
             label=label,
             hook_type=cls._hook_type,
             metadata=metadata or {},
@@ -169,9 +168,6 @@ class Hook(Generic[T]):
            replays the graph and Hook.create() executes, it finds the
            pre-registered resolution and returns without suspending.
 
-        Can be called from any task, any context — no ContextVar or
-        RunResult handle needed.
-
         Args:
             label: The hook label to resolve.
             data: Resolution payload (dict or pydantic model). Validated
@@ -201,7 +197,7 @@ class Hook(Generic[T]):
         _pending_resolutions[label] = resolution
 
     @classmethod
-    def cancel(cls, label: str, reason: str | None = None) -> None:
+    async def cancel(cls, label: str, reason: str | None = None) -> None:
         """Cancel a pending hook.
 
         Only works for live hooks (long-running mode). Raises if the
@@ -213,21 +209,22 @@ class Hook(Generic[T]):
         future, hook_metadata, rt = _live_hooks.pop(label)
         future.cancel(reason)
 
-        msg = messages_.Message(
-            role="assistant",
-            parts=[
-                messages_.HookPart(
-                    hook_id=label,
-                    hook_type=cls._hook_type,
-                    status="cancelled",
-                    metadata=hook_metadata,
-                )
-            ],
+        await rt.put_message(
+            messages_.Message(
+                role="assistant",
+                parts=[
+                    messages_.HookPart(
+                        hook_id=label,
+                        hook_type=cls._hook_type,
+                        status="cancelled",
+                        metadata=hook_metadata,
+                    )
+                ],
+            )
         )
-        asyncio.create_task(rt.put_message(msg))
 
 
-def hook(cls: type[T]) -> type[Hook[T]]:
+def hook[T: pydantic.BaseModel](cls: type[T]) -> type[Hook[T]]:
     """
     Decorator to create a Hook type from a pydantic model.
 
@@ -243,4 +240,4 @@ def hook(cls: type[T]) -> type[Hook[T]]:
         },
     )
 
-    return hook_impl  # type: ignore[return-value]
+    return hook_impl
