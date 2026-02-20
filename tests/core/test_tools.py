@@ -107,5 +107,7 @@ async def test_tool_fn_is_callable() -> None:
 # -- Helpers ---------------------------------------------------------------
 
 
-def search_required(tool: ai.Tool) -> list[str]:
-    return tool.param_schema.get("required", [])
+def search_required(tool: ai.Tool[..., object]) -> list[str]:
+    result = tool.param_schema.get("required", [])
+    assert isinstance(result, list)
+    return result

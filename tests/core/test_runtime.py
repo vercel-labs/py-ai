@@ -216,6 +216,7 @@ async def test_execute_tool_updates_message() -> None:
             for tc in result.tool_calls:
                 await ai.execute_tool(tc, message=msg)
             # Verify the tool part was mutated
+            assert msg is not None
             assert msg.tool_calls[0].status == "result"
             assert msg.tool_calls[0].result == 10
 

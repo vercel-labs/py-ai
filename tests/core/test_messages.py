@@ -143,8 +143,9 @@ def test_get_tool_part_found() -> None:
         role="assistant",
         parts=[ToolPart(tool_call_id="tc1", tool_name="t", tool_args="{}")],
     )
-    assert m.get_tool_part("tc1") is not None
-    assert m.get_tool_part("tc1").tool_name == "t"
+    tp = m.get_tool_part("tc1")
+    assert tp is not None
+    assert tp.tool_name == "t"
 
 
 def test_get_tool_part_missing() -> None:
@@ -185,7 +186,9 @@ def test_set_result() -> None:
     tp = ToolPart(tool_call_id="tc1", tool_name="t", tool_args="{}")
     assert tp.status == "pending"
     tp.set_result({"answer": 42})
-    assert tp.status == "result"
+    # mypy narrows status to Literal["pending"] from the constructor default and
+    # can't track that set_result() mutates it to "result"
+    assert tp.status == "result"  # type: ignore[comparison-overlap]
     assert tp.result == {"answer": 42}
 
 
@@ -193,7 +196,7 @@ def test_set_error() -> None:
     tp = ToolPart(tool_call_id="tc1", tool_name="t", tool_args="{}")
     assert tp.status == "pending"
     tp.set_error("Something went wrong")
-    assert tp.status == "error"
+    assert tp.status == "error"  # type: ignore[comparison-overlap]
     assert tp.result == "Something went wrong"
 
 

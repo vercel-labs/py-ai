@@ -45,7 +45,7 @@ def tool_msg(
     name: str = "test_tool",
     args: str = "{}",
     status: str = "pending",
-    result: dict | None = None,
+    result: dict[str, object] | None = None,
 ) -> messages.Message:
     return messages.Message(
         id=id,

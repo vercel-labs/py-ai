@@ -26,7 +26,9 @@ def test_stream_result_last_message() -> None:
     m1 = text_msg("first", id="m1")
     m2 = text_msg("second", id="m2")
     r = StreamResult(messages=[m1, m2])
-    assert r.last_message.id == "m2"
+    last = r.last_message
+    assert last is not None
+    assert last.id == "m2"
     assert r.text == "second"
 
 

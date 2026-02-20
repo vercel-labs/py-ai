@@ -1,6 +1,8 @@
 """MCP client: tool registration in global registry, end-to-end execution."""
 
 import asyncio
+import contextlib
+from typing import Any
 
 import mcp.types
 import pytest
@@ -27,7 +29,7 @@ def _fake_mcp_tool(
     )
 
 
-def _noop_transport_factory() -> None:
+def _noop_transport_factory() -> contextlib.AbstractAsyncContextManager[Any]:
     """Dummy transport factory — never actually called in these tests."""
     raise NotImplementedError("should not be called")
 
@@ -69,7 +71,7 @@ def test_mcp_tool_to_native_schema_preserved() -> None:
 @pytest.mark.asyncio
 async def test_mcp_tool_executes_through_stream_loop() -> None:
     """An MCP-style tool registered via _mcp_tool_to_native can be called by the agent loop."""
-    call_log: list[dict] = []
+    call_log: list[dict[str, str]] = []
 
     async def fake_fn(**kwargs: str) -> str:
         call_log.append(kwargs)
