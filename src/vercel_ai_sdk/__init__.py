@@ -12,7 +12,7 @@ from .core.messages import (
     HookPart,
     make_messages,
 )
-from .core.tools import ToolSchema, Tool, tool
+from .core.tools import ToolLike, ToolSchema, Tool, tool
 from .core.llm import LanguageModel
 from .core.streams import StreamResult, stream
 from .core.runtime import (
@@ -37,6 +37,7 @@ __all__ = [
     "ToolPart",
     "ToolDelta",
     "ReasoningPart",
+    "ToolLike",
     "ToolSchema",
     "Tool",
     "LanguageModel",

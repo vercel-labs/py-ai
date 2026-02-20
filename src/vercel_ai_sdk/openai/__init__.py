@@ -9,7 +9,7 @@ import openai
 from .. import core
 
 
-def _tools_to_openai(tools: Sequence[core.tools.ToolSchema]) -> list[dict[str, Any]]:
+def _tools_to_openai(tools: Sequence[core.tools.ToolLike]) -> list[dict[str, Any]]:
     """Convert internal Tool objects to OpenAI tool schema format."""
     return [
         {
@@ -17,7 +17,7 @@ def _tools_to_openai(tools: Sequence[core.tools.ToolSchema]) -> list[dict[str, A
             "function": {
                 "name": tool.name,
                 "description": tool.description,
-                "parameters": tool.tool_schema,
+                "parameters": tool.param_schema,
             },
         }
         for tool in tools
@@ -62,8 +62,8 @@ def _messages_to_openai(messages: list[core.messages.Message]) -> list[dict[str,
                             },
                         }
                     )
-                    # If tool has a result, collect it for separate tool messages
-                    if part.status == "result" and part.result is not None:
+                    # If tool has completed (success or error), collect for tool messages
+                    if part.status in ("result", "error") and part.result is not None:
                         tool_results.append(
                             {
                                 "role": "tool",
@@ -132,7 +132,7 @@ class OpenAIModel(core.llm.LanguageModel):
     async def stream_events(
         self,
         messages: list[core.messages.Message],
-        tools: Sequence[core.tools.ToolSchema] | None = None,
+        tools: Sequence[core.tools.ToolLike] | None = None,
     ) -> AsyncGenerator[core.llm.StreamEvent, None]:
         """Yield raw stream events from OpenAI API."""
         openai_messages = _messages_to_openai(messages)
@@ -162,7 +162,7 @@ class OpenAIModel(core.llm.LanguageModel):
         # Track active blocks for Start/End events
         text_started = False
         reasoning_started = False
-        tool_calls: dict[int, dict] = {}  # index -> {id, name, started}
+        tool_calls: dict[int, dict[str, Any]] = {}  # index -> {id, name, started}
 
         async for chunk in stream:
             if not chunk.choices:
@@ -243,7 +243,7 @@ class OpenAIModel(core.llm.LanguageModel):
     async def stream(
         self,
         messages: list[core.messages.Message],
-        tools: Sequence[core.tools.ToolSchema] | None = None,
+        tools: Sequence[core.tools.ToolLike] | None = None,
     ) -> AsyncGenerator[core.messages.Message, None]:
         """Stream Messages (uses StreamHandler internally)."""
         handler = core.llm.StreamHandler()

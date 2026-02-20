@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+
 import fastapi
 import fastapi.responses
 import pydantic
@@ -24,7 +26,7 @@ class ChatRequest(pydantic.BaseModel):
 
 
 @router.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest) -> fastapi.responses.StreamingResponse:
     """Handle chat requests and stream responses."""
     messages = ai.ai_sdk_ui.to_messages(request.messages)
     session_id = request.session_id or "default"
@@ -37,11 +39,11 @@ async def chat(request: ChatRequest):
     # run — the frontend carries the full message history — so we only
     # load a checkpoint when one was saved from a previous incomplete run.
     saved = await file_storage.get(checkpoint_key)
-    checkpoint = ai.Checkpoint.deserialize(saved) if saved else None
+    checkpoint = ai.Checkpoint.model_validate(saved) if saved else None
 
     result = ai.run(agent.graph, llm, messages, agent.TOOLS, checkpoint=checkpoint)
 
-    async def stream_response():
+    async def stream_response() -> AsyncGenerator[str]:
         async for chunk in ai.ai_sdk_ui.to_sse_stream(result):
             yield chunk
 
@@ -49,7 +51,7 @@ async def chat(request: ChatRequest):
         # so the next request starts fresh.  If hooks are pending, save
         # the checkpoint so the next request can resume from here.
         if result.pending_hooks:
-            await file_storage.put(checkpoint_key, result.checkpoint.serialize())
+            await file_storage.put(checkpoint_key, result.checkpoint.model_dump())
         else:
             await file_storage.delete(checkpoint_key)
 

@@ -5,7 +5,6 @@ from typing import Annotated, Any, Literal
 
 import pydantic
 
-
 # Streaming state for parts
 PartState = Literal["streaming", "done"]
 
@@ -22,7 +21,7 @@ class ToolPart(pydantic.BaseModel):
     tool_call_id: str
     tool_name: str
     tool_args: str
-    status: Literal["pending", "result"] = "pending"  # Execution status
+    status: Literal["pending", "result", "error"] = "pending"  # Execution status
     result: Any = None
     type: Literal["tool"] = "tool"
     # Streaming state (for args streaming)
@@ -33,6 +32,11 @@ class ToolPart(pydantic.BaseModel):
         """Set the tool result and mark as completed."""
         self.status = "result"
         self.result = result
+
+    def set_error(self, message: str) -> None:
+        """Set a tool error and mark as failed."""
+        self.status = "error"
+        self.result = message
 
 
 class ReasoningPart(pydantic.BaseModel):
@@ -85,9 +89,11 @@ class Message(pydantic.BaseModel):
     def is_done(self) -> bool:
         """Message is done when all parts are done (or have no streaming state)."""
         for part in self.parts:
-            if isinstance(part, (TextPart, ReasoningPart, ToolPart)):
-                if part.state == "streaming":
-                    return False
+            if (
+                isinstance(part, (TextPart, ReasoningPart, ToolPart))
+                and part.state == "streaming"
+            ):
+                return False
         return True
 
     @property
@@ -149,9 +155,10 @@ class Message(pydantic.BaseModel):
     def get_hook_part(self, hook_id: str | None = None) -> HookPart | None:
         """Find a HookPart by hook_id, or return the first HookPart if no id given."""
         for part in self.parts:
-            if isinstance(part, HookPart):
-                if hook_id is None or part.hook_id == hook_id:
-                    return part
+            if isinstance(part, HookPart) and (
+                hook_id is None or part.hook_id == hook_id
+            ):
+                return part
         return None
 
 

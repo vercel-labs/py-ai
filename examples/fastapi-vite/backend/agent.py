@@ -2,6 +2,8 @@
 
 import os
 
+from typing import Any
+
 import vercel_ai_sdk as ai
 
 
@@ -20,14 +22,14 @@ def get_llm() -> ai.LanguageModel:
     )
 
 
-TOOLS: list[ai.Tool] = [talk_to_mothership]
+TOOLS: list[ai.Tool[..., Any]] = [talk_to_mothership]
 
 
 async def graph(
     llm: ai.LanguageModel,
     messages: list[ai.Message],
-    tools: list[ai.Tool],
-):
+    tools: list[ai.Tool[..., Any]],
+) -> ai.StreamResult:
     """
     Agent graph: stream LLM, execute tools, repeat until done.
 

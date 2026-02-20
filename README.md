@@ -187,10 +187,10 @@ checkpoint = ai.get_checkpoint()
 ```python
 # After a run completes or suspends
 checkpoint = result.checkpoint
-data = checkpoint.serialize()   # dict, JSON-safe
+data = checkpoint.model_dump()   # dict, JSON-safe
 
 # Later: restore and resume
-checkpoint = ai.Checkpoint.deserialize(data)
+checkpoint = ai.Checkpoint.model_validate(data)
 result = ai.run(my_agent, llm, query, checkpoint=checkpoint)
 ```
 
@@ -277,7 +277,7 @@ return StreamingResponse(stream_response(), headers=UI_MESSAGE_STREAM_HEADERS)
 | `RunResult` | Return type of `run()`. Async-iterable for messages, then `.checkpoint` and `.pending_hooks` |
 | `HookInfo` | Pending hook info: `label`, `hook_type`, `metadata` |
 | `Hook` | Generic hook base with `.create()`, `.resolve()`, `.cancel()` class methods |
-| `Checkpoint` | Serializable snapshot of completed work: `steps[]`, `tools[]`, `hooks[]`. Has `.serialize()` / `.deserialize()` |
+| `Checkpoint` | Pydantic model — serializable snapshot of completed work: `steps[]`, `tools[]`, `hooks[]`. Use `.model_dump()` / `.model_validate()` |
 | `LanguageModel` | Abstract base class for LLM providers |
 
 ## Examples

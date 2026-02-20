@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import functools
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any
 
 from . import messages as messages_
@@ -31,13 +31,13 @@ class StreamResult:
         return ""
 
 
-Stream = Callable[[], AsyncGenerator[messages_.Message, None]]
+Stream = Callable[[], AsyncGenerator[messages_.Message]]
 # maybe it should have a name and an id inferred from LLM outputs
 
 
-def stream(
-    fn: Callable[..., AsyncGenerator[messages_.Message, None]],
-) -> Callable[..., Any]:
+def stream[**P](
+    fn: Callable[P, AsyncGenerator[messages_.Message]],
+) -> Callable[P, Awaitable[StreamResult]]:
     """
     Decorator to put an async generator into the Runtime queue.
 
@@ -64,7 +64,7 @@ def stream(
         # Fresh execution: submit to queue and wait
         future: asyncio.Future[StreamResult] = asyncio.Future()
 
-        async def stream_fn() -> AsyncGenerator[messages_.Message, None]:
+        async def stream_fn() -> AsyncGenerator[messages_.Message]:
             async for msg in fn(*args, **kwargs):
                 yield msg
 

@@ -1,6 +1,8 @@
 """MCP client: tool registration in global registry, end-to-end execution."""
 
 import asyncio
+import contextlib
+from typing import Any
 
 import mcp.types
 import pytest
@@ -27,7 +29,7 @@ def _fake_mcp_tool(
     )
 
 
-def _noop_transport_factory():
+def _noop_transport_factory() -> contextlib.AbstractAsyncContextManager[Any]:
     """Dummy transport factory — never actually called in these tests."""
     raise NotImplementedError("should not be called")
 
@@ -35,7 +37,7 @@ def _noop_transport_factory():
 # -- _mcp_tool_to_native registers in global registry ----------------------
 
 
-def test_mcp_tool_to_native_registers_in_global_registry():
+def test_mcp_tool_to_native_registers_in_global_registry() -> None:
     """Converting an MCP tool to native registers it in _tool_registry."""
     mcp_tool = _fake_mcp_tool(name="mcp_reg_test")
     native = _mcp_tool_to_native(mcp_tool, "test:key", _noop_transport_factory, None)
@@ -45,7 +47,7 @@ def test_mcp_tool_to_native_registers_in_global_registry():
     assert _tool_registry["mcp_reg_test"] is native
 
 
-def test_mcp_tool_to_native_with_prefix():
+def test_mcp_tool_to_native_with_prefix() -> None:
     """Tool prefix is prepended to the name and both name forms are correct."""
     mcp_tool = _fake_mcp_tool(name="echo")
     native = _mcp_tool_to_native(mcp_tool, "test:key", _noop_transport_factory, "ctx7")
@@ -54,12 +56,12 @@ def test_mcp_tool_to_native_with_prefix():
     assert get_tool("ctx7_echo") is native
 
 
-def test_mcp_tool_to_native_schema_preserved():
-    """The inputSchema from the MCP tool is passed through as tool_schema."""
+def test_mcp_tool_to_native_schema_preserved() -> None:
+    """The inputSchema from the MCP tool is passed through as param_schema."""
     mcp_tool = _fake_mcp_tool()
     native = _mcp_tool_to_native(mcp_tool, "test:key", _noop_transport_factory, None)
 
-    assert native.tool_schema == mcp_tool.inputSchema
+    assert native.param_schema == mcp_tool.inputSchema
     assert native.description == "Echo input"
 
 
@@ -67,11 +69,11 @@ def test_mcp_tool_to_native_schema_preserved():
 
 
 @pytest.mark.asyncio
-async def test_mcp_tool_executes_through_stream_loop():
+async def test_mcp_tool_executes_through_stream_loop() -> None:
     """An MCP-style tool registered via _mcp_tool_to_native can be called by the agent loop."""
-    call_log: list[dict] = []
+    call_log: list[dict[str, str]] = []
 
-    async def fake_fn(**kwargs):
+    async def fake_fn(**kwargs: str) -> str:
         call_log.append(kwargs)
         return f"echoed: {kwargs.get('text', '')}"
 
@@ -80,10 +82,10 @@ async def test_mcp_tool_executes_through_stream_loop():
     mcp_tool = _fake_mcp_tool(name="mcp_e2e_echo")
     native = _mcp_tool_to_native(mcp_tool, "test:key", _noop_transport_factory, None)
     # Replace the real fn (which would try to connect) with our fake
-    native.fn = fake_fn
+    native._fn = fake_fn
     _tool_registry[native.name] = native
 
-    async def graph(llm: ai.LanguageModel):
+    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
         return await ai.stream_loop(
             llm,
             messages=ai.make_messages(user="echo hello"),

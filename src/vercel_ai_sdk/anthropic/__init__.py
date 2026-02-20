@@ -10,13 +10,13 @@ import anthropic
 from .. import core
 
 
-def _tools_to_anthropic(tools: Sequence[core.tools.ToolSchema]) -> list[dict[str, Any]]:
+def _tools_to_anthropic(tools: Sequence[core.tools.ToolLike]) -> list[dict[str, Any]]:
     """Convert internal Tool objects to Anthropic tool schema format."""
     return [
         {
             "name": tool.name,
             "description": tool.description,
-            "input_schema": tool.tool_schema,
+            "input_schema": tool.param_schema,
         }
         for tool in tools
     ]
@@ -71,15 +71,16 @@ def _messages_to_anthropic(
                             "input": tool_input,
                         }
                     )
-                    # If tool has a result, collect it for a separate user message
-                    if part.status == "result" and part.result is not None:
-                        tool_results.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": part.tool_call_id,
-                                "content": str(part.result),
-                            }
-                        )
+                    # If tool has completed (success or error), collect for user message
+                    if part.status in ("result", "error") and part.result is not None:
+                        entry: dict[str, Any] = {
+                            "type": "tool_result",
+                            "tool_use_id": part.tool_call_id,
+                            "content": str(part.result),
+                        }
+                        if part.status == "error":
+                            entry["is_error"] = True
+                        tool_results.append(entry)
 
             if content:
                 result.append({"role": "assistant", "content": content})
@@ -117,7 +118,7 @@ class AnthropicModel(core.llm.LanguageModel):
     async def stream_events(
         self,
         messages: list[core.messages.Message],
-        tools: Sequence[core.tools.ToolSchema] | None = None,
+        tools: Sequence[core.tools.ToolLike] | None = None,
     ) -> AsyncGenerator[core.llm.StreamEvent, None]:
         """Yield raw stream events from Anthropic API."""
         system_prompt, anthropic_messages = _messages_to_anthropic(messages)
@@ -206,7 +207,7 @@ class AnthropicModel(core.llm.LanguageModel):
     async def stream(
         self,
         messages: list[core.messages.Message],
-        tools: Sequence[core.tools.ToolSchema] | None = None,
+        tools: Sequence[core.tools.ToolLike] | None = None,
     ) -> AsyncGenerator[core.messages.Message, None]:
         """Stream Messages (uses StreamProcessor internally)."""
         handler = core.llm.StreamHandler()

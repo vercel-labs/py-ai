@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextvars
+from typing import Any
 
 import vercel_ai_sdk as ai
 from . import proto
@@ -85,4 +86,4 @@ async def bash(command: str, timeout: int | None = None) -> str:
     return await _fs().bash(command, timeout=timeout)
 
 
-BUILTIN_TOOLS: list[ai.Tool] = [read, write, edit, ls, glob, grep, bash]
+BUILTIN_TOOLS: list[ai.Tool[..., Any]] = [read, write, edit, ls, glob, grep, bash]

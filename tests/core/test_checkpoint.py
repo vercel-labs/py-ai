@@ -1,6 +1,7 @@
 """Checkpoint replay, hook cancellation/resolution, serialization."""
 
 import asyncio
+from typing import Any
 
 import pydantic
 import pytest
@@ -20,8 +21,8 @@ class Approval(pydantic.BaseModel):
 
 
 @pytest.mark.asyncio
-async def test_step_replay_skips_llm():
-    async def graph(llm: ai.LanguageModel):
+async def test_step_replay_skips_llm() -> None:
+    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
         return await ai.stream_step(
             llm, messages=ai.make_messages(system="test", user="hello")
         )
@@ -39,7 +40,7 @@ async def test_step_replay_skips_llm():
 
 
 @pytest.mark.asyncio
-async def test_tool_replay_skips_execution():
+async def test_tool_replay_skips_execution() -> None:
     execution_count = 0
 
     @ai.tool
@@ -49,7 +50,7 @@ async def test_tool_replay_skips_execution():
         execution_count += 1
         return x + 1
 
-    async def graph(llm: ai.LanguageModel):
+    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
         result = await ai.stream_step(llm, ai.make_messages(system="t", user="go"))
         if result.tool_calls:
             await asyncio.gather(
@@ -76,30 +77,30 @@ async def test_tool_replay_skips_execution():
 
 
 @pytest.mark.asyncio
-async def test_hook_cancellation_pending():
-    async def graph(llm: ai.LanguageModel):
+async def test_hook_cancellation_pending() -> None:
+    async def graph(llm: ai.LanguageModel) -> Any:
         await ai.stream_step(llm, ai.make_messages(system="t", user="go"))
-        return await Approval.create("my_approval", metadata={"tool": "test"})
+        return await Approval.create("my_approval", metadata={"tool": "test"})  # type: ignore[attr-defined]
 
     result = ai.run(graph, MockLLM([[text_msg("OK")]]), cancel_on_hooks=True)
     msgs = [msg async for msg in result]
     assert "my_approval" in result.pending_hooks
     hook_msgs = [m for m in msgs if any(isinstance(p, ai.HookPart) for p in m.parts)]
-    assert hook_msgs[0].parts[0].status == "pending"
+    assert hook_msgs[0].parts[0].status == "pending"  # type: ignore[union-attr]
 
 
 @pytest.mark.asyncio
-async def test_hook_resolution_on_reentry():
-    async def graph(llm: ai.LanguageModel):
+async def test_hook_resolution_on_reentry() -> None:
+    async def graph(llm: ai.LanguageModel) -> Any:
         await ai.stream_step(llm, ai.make_messages(system="t", user="go"))
-        return await Approval.create("my_approval")
+        return await Approval.create("my_approval")  # type: ignore[attr-defined]
 
     resp = [text_msg("OK")]
     result1 = ai.run(graph, MockLLM([resp]), cancel_on_hooks=True)
     [msg async for msg in result1]
     cp = result1.checkpoint
 
-    Approval.resolve("my_approval", {"granted": True})
+    Approval.resolve("my_approval", {"granted": True})  # type: ignore[attr-defined]
     result2 = ai.run(graph, MockLLM([]), checkpoint=cp)
     [msg async for msg in result2]
     assert len(result2.pending_hooks) == 0
@@ -107,15 +108,15 @@ async def test_hook_resolution_on_reentry():
 
 
 @pytest.mark.asyncio
-async def test_parallel_hooks_all_collected():
-    async def graph(llm: ai.LanguageModel):
+async def test_parallel_hooks_all_collected() -> None:
+    async def graph(llm: ai.LanguageModel) -> None:
         await ai.stream_step(llm, ai.make_messages(system="t", user="go"))
 
-        async def a():
-            return await Approval.create("hook_a")
+        async def a() -> Any:
+            return await Approval.create("hook_a")  # type: ignore[attr-defined]
 
-        async def b():
-            return await Approval.create("hook_b")
+        async def b() -> Any:
+            return await Approval.create("hook_b")  # type: ignore[attr-defined]
 
         async with asyncio.TaskGroup() as tg:
             tg.create_task(a())
@@ -127,15 +128,15 @@ async def test_parallel_hooks_all_collected():
 
 
 @pytest.mark.asyncio
-async def test_parallel_hooks_resolve_on_reentry():
-    async def graph(llm: ai.LanguageModel):
+async def test_parallel_hooks_resolve_on_reentry() -> None:
+    async def graph(llm: ai.LanguageModel) -> Any:
         await ai.stream_step(llm, ai.make_messages(system="t", user="go"))
 
-        async def a():
-            return await Approval.create("hook_a")
+        async def a() -> Any:
+            return await Approval.create("hook_a")  # type: ignore[attr-defined]
 
-        async def b():
-            return await Approval.create("hook_b")
+        async def b() -> Any:
+            return await Approval.create("hook_b")  # type: ignore[attr-defined]
 
         async with asyncio.TaskGroup() as tg:
             ta = tg.create_task(a())
@@ -147,8 +148,8 @@ async def test_parallel_hooks_resolve_on_reentry():
     [msg async for msg in result1]
     cp = result1.checkpoint
 
-    Approval.resolve("hook_a", {"granted": True})
-    Approval.resolve("hook_b", {"granted": False})
+    Approval.resolve("hook_a", {"granted": True})  # type: ignore[attr-defined]
+    Approval.resolve("hook_b", {"granted": False})  # type: ignore[attr-defined]
     result2 = ai.run(graph, MockLLM([]), checkpoint=cp)
     [msg async for msg in result2]
     assert len(result2.pending_hooks) == 0
@@ -157,24 +158,24 @@ async def test_parallel_hooks_resolve_on_reentry():
 # -- Serialization ---------------------------------------------------------
 
 
-def test_checkpoint_serialization_roundtrip():
+def test_checkpoint_serialization_roundtrip() -> None:
     cp = Checkpoint(
         steps=[
             StepEvent(
                 index=0,
                 messages=[
-                    {
-                        "id": "m1",
-                        "role": "assistant",
-                        "parts": [{"type": "text", "text": "hi"}],
-                    }
+                    ai.Message(
+                        id="m1",
+                        role="assistant",
+                        parts=[ai.TextPart(text="hi")],
+                    )
                 ],
             )
         ],
         tools=[ToolEvent(tool_call_id="tc-1", result=42)],
         hooks=[HookEvent(label="h1", resolution={"granted": True})],
     )
-    cp2 = Checkpoint.deserialize(cp.serialize())
+    cp2 = Checkpoint.model_validate(cp.model_dump())
     assert cp2.steps[0].index == 0
     assert cp2.tools[0].result == 42
     assert cp2.hooks[0].label == "h1"

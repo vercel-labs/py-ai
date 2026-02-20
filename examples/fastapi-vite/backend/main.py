@@ -22,6 +22,6 @@ app.include_router(chat.router, prefix="/api")
 
 
 @app.get("/api/health")
-async def health():
+async def health() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "ok"}

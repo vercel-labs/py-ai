@@ -15,22 +15,24 @@ from ..conftest import MockLLM, text_msg
 # -- StreamResult properties -----------------------------------------------
 
 
-def test_stream_result_empty():
+def test_stream_result_empty() -> None:
     r = StreamResult()
     assert r.last_message is None
     assert r.tool_calls == []
     assert r.text == ""
 
 
-def test_stream_result_last_message():
+def test_stream_result_last_message() -> None:
     m1 = text_msg("first", id="m1")
     m2 = text_msg("second", id="m2")
     r = StreamResult(messages=[m1, m2])
-    assert r.last_message.id == "m2"
+    last = r.last_message
+    assert last is not None
+    assert last.id == "m2"
     assert r.text == "second"
 
 
-def test_stream_result_tool_calls():
+def test_stream_result_tool_calls() -> None:
     m = messages.Message(
         id="m1",
         role="assistant",
@@ -51,7 +53,7 @@ def test_stream_result_tool_calls():
 
 
 @pytest.mark.asyncio
-async def test_stream_outside_run_raises():
+async def test_stream_outside_run_raises() -> None:
     """@stream-decorated fn called without ai.run() should raise."""
     with pytest.raises(ValueError, match="No Runtime context"):
         await ai.stream_step(
@@ -64,10 +66,10 @@ async def test_stream_outside_run_raises():
 
 
 @pytest.mark.asyncio
-async def test_stream_step_replays_from_checkpoint():
+async def test_stream_step_replays_from_checkpoint() -> None:
     """stream_step inside ai.run with a checkpoint replays without calling LLM."""
 
-    async def graph(llm: ai.LanguageModel):
+    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
         return await ai.stream_step(llm, ai.make_messages(user="hello"))
 
     # First run

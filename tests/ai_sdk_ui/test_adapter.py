@@ -16,7 +16,7 @@ from ..conftest import MockLLM
 async def get_event_types(msgs: list[messages.Message]) -> list[str]:
     """Stream messages through adapter and return event type sequence."""
 
-    async def stream():
+    async def stream() -> AsyncGenerator[messages.Message, None]:
         for m in msgs:
             yield m
 
@@ -29,7 +29,7 @@ async def get_event_types(msgs: list[messages.Message]) -> list[str]:
 
 
 @pytest.mark.asyncio
-async def test_text_streaming():
+async def test_text_streaming() -> None:
     """Text: start -> start-step -> text-start/delta/end -> finish-step -> finish"""
     msgs = [
         messages.Message(
@@ -66,7 +66,7 @@ async def test_text_streaming():
 
 
 @pytest.mark.asyncio
-async def test_tool_roundtrip():
+async def test_tool_roundtrip() -> None:
     """Server-side tool: input-available -> output-available -> text response.
 
     Reference: process-ui-message-stream.test.ts "server-side tool roundtrip"
@@ -127,7 +127,7 @@ async def test_tool_roundtrip():
 
 
 @pytest.mark.asyncio
-async def test_text_then_tool_then_text():
+async def test_text_then_tool_then_text() -> None:
     """Full mothership scenario: text -> tool -> result -> final text.
 
     Input: "when will the robots take over?"
@@ -250,7 +250,7 @@ async def mock_agent(
 
 
 @pytest.mark.asyncio
-async def test_runtime_tool_roundtrip():
+async def test_runtime_tool_roundtrip() -> None:
     """
     Integration test: run a mock agent loop through ai.run() and verify
     that tool-input-available and tool-output-available events are emitted.
@@ -340,7 +340,7 @@ async def _async_iter(
 # -----------------------------------------------------------------------------
 
 
-def test_ui_to_internal_two_turn_with_tool():
+def test_ui_to_internal_two_turn_with_tool() -> None:
     """Test converting a realistic two-turn conversation with tool call.
 
     This test uses the exact payload structure from a real AI SDK frontend
@@ -443,7 +443,7 @@ def test_ui_to_internal_two_turn_with_tool():
     assert internal[2].text == "this is a test run. can you remember the first turn?"
 
 
-def test_ui_tool_part_with_dict_input():
+def test_ui_tool_part_with_dict_input() -> None:
     """Test that tool parts with dict input (not JSON string) are handled."""
     raw_message = {
         "id": "msg-1",
@@ -468,7 +468,7 @@ def test_ui_tool_part_with_dict_input():
     assert tool_part.status == "pending"  # input-available maps to pending
 
 
-def test_ui_skips_unsupported_parts():
+def test_ui_skips_unsupported_parts() -> None:
     """Test that unsupported part types are skipped gracefully."""
     raw_message = {
         "id": "msg-1",
