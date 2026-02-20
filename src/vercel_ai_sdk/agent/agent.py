@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+from typing import Any
+
 import pydantic
 
 import vercel_ai_sdk as ai
-from .tools import _filesystem, BUILTIN_TOOLS
+
 from . import proto
+from .tools import BUILTIN_TOOLS, _filesystem
 
 
 @ai.hook
@@ -34,7 +37,7 @@ class Agent:
     model: ai.LanguageModel
     filesystem: proto.Filesystem
     system: str = ""
-    tools: list[ai.Tool] = dataclasses.field(default_factory=list)
+    tools: list[ai.Tool[..., Any]] = dataclasses.field(default_factory=list)
 
     async def _execute_tool(
         self, tc: ai.ToolPart, message: ai.Message | None = None
@@ -43,9 +46,9 @@ class Agent:
 
         Tool execution errors are handled inside ``ai.execute_tool``.
         """
-        # TODO this should be tucked away into the framework
-        # and done using Pydantic
-        approval = await ToolApproval.create(
+        # TODO: mypy doesn't support class decorators that change the class type —
+        # @ai.hook returns type[Hook[T]] but mypy still sees the original BaseModel.
+        approval = await ToolApproval.create(  # type: ignore[attr-defined]
             f"approve_{tc.tool_call_id}",
             metadata={"tool_name": tc.tool_name, "tool_args": tc.tool_args},
         )
@@ -58,7 +61,7 @@ class Agent:
     async def _loop(
         self,
         messages: list[ai.Message],
-        tools: list[ai.Tool],
+        tools: list[ai.Tool[..., Any]],
         label: str | None = None,
     ) -> ai.StreamResult:
         local_messages = list(messages)
@@ -72,6 +75,7 @@ class Agent:
                 return result
 
             last_msg = result.last_message
+            assert last_msg is not None, "tool_calls present but no last_message"
             local_messages.append(last_msg)
 
             await asyncio.gather(
