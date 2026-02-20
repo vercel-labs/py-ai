@@ -98,8 +98,10 @@ def _make_tool_fn(
                 client.call_tool(tool_name, kwargs),
                 timeout=30.0,
             )
-        except asyncio.TimeoutError:
-            raise RuntimeError(f"MCP tool call timed out after 30 seconds: {tool_name}")
+        except TimeoutError as e:
+            raise RuntimeError(
+                f"MCP tool call timed out after 30 seconds: {tool_name}"
+            ) from e
 
         # Handle error responses
         if result.isError:
@@ -137,7 +139,7 @@ async def get_stdio_tools(
     env: dict[str, str] | None = None,
     cwd: str | None = None,
     tool_prefix: str | None = None,
-) -> list[core.tools.Tool]:
+) -> list[core.tools.Tool[..., Any]]:
     """
     Get tools from an MCP server running as a subprocess.
 
@@ -161,7 +163,7 @@ async def get_stdio_tools(
     """
     connection_key = f"stdio:{command}:{':'.join(args)}"
 
-    def transport_factory():
+    def transport_factory() -> contextlib.AbstractAsyncContextManager[Any]:
         return mcp.client.stdio.stdio_client(
             mcp.client.stdio.StdioServerParameters(
                 command=command,
@@ -185,7 +187,7 @@ async def get_http_tools(
     *,
     headers: dict[str, str] | None = None,
     tool_prefix: str | None = None,
-) -> list[core.tools.Tool]:
+) -> list[core.tools.Tool[..., Any]]:
     """
     Get tools from an MCP server over HTTP (Streamable HTTP transport).
 
@@ -208,7 +210,7 @@ async def get_http_tools(
     """
     connection_key = f"http:{url}"
 
-    def transport_factory():
+    def transport_factory() -> contextlib.AbstractAsyncContextManager[Any]:
         http_client = httpx.AsyncClient(headers=headers) if headers else None
         return mcp.client.streamable_http.streamable_http_client(
             url=url, http_client=http_client
@@ -228,7 +230,7 @@ def _mcp_tool_to_native(
     connection_key: str,
     transport_factory: Callable[[], contextlib.AbstractAsyncContextManager[Any]],
     tool_prefix: str | None,
-) -> core.tools.Tool:
+) -> core.tools.Tool[..., Any]:
     """Convert an MCP tool to a native Tool."""
     name = mcp_tool.name
     if tool_prefix:
