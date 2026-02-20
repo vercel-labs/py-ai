@@ -1,6 +1,7 @@
 """Hooks: live resolution, cancellation, pre-registration, schema validation."""
 
 import asyncio
+from typing import Any
 
 import pydantic
 import pytest
@@ -21,11 +22,11 @@ class Confirmation(pydantic.BaseModel):
 
 
 @pytest.mark.asyncio
-async def test_resolve_live_future():
+async def test_resolve_live_future() -> None:
     """In long-running mode, Hook.resolve() unblocks the awaiting coroutine."""
     resolved_value = None
 
-    async def graph(llm: ai.LanguageModel):
+    async def graph(llm: ai.LanguageModel) -> None:
         nonlocal resolved_value
         await ai.stream_step(llm, ai.make_messages(user="go"))
         result = await Confirmation.create("confirm_1")
@@ -57,11 +58,11 @@ async def test_resolve_live_future():
 
 
 @pytest.mark.asyncio
-async def test_cancel_live_hook():
+async def test_cancel_live_hook() -> None:
     """Hook.cancel() cancels the future, causing CancelledError in graph."""
     was_cancelled = False
 
-    async def graph(llm: ai.LanguageModel):
+    async def graph(llm: ai.LanguageModel) -> None:
         nonlocal was_cancelled
         await ai.stream_step(llm, ai.make_messages(user="go"))
         try:
@@ -83,7 +84,7 @@ async def test_cancel_live_hook():
 
 
 @pytest.mark.asyncio
-async def test_cancel_nonexistent_raises():
+async def test_cancel_nonexistent_raises() -> None:
     with pytest.raises(ValueError, match="No pending hook"):
         await Confirmation.cancel("does_not_exist_xyz")
 
@@ -92,10 +93,10 @@ async def test_cancel_nonexistent_raises():
 
 
 @pytest.mark.asyncio
-async def test_pre_registered_resolution_consumed():
+async def test_pre_registered_resolution_consumed() -> None:
     """Pre-registered resolution is consumed by Hook.create() without suspending."""
 
-    async def graph(llm: ai.LanguageModel):
+    async def graph(llm: ai.LanguageModel) -> Any:
         await ai.stream_step(llm, ai.make_messages(user="go"))
         result = await Confirmation.create("pre_reg_1")
         return result
@@ -116,7 +117,7 @@ async def test_pre_registered_resolution_consumed():
 # -- Schema validation on resolve -----------------------------------------
 
 
-def test_resolve_validates_schema():
+def test_resolve_validates_schema() -> None:
     """resolve() with invalid data raises from pydantic validation."""
     # 'approved' is required bool, passing string should raise
     with pytest.raises(pydantic.ValidationError):
@@ -127,10 +128,10 @@ def test_resolve_validates_schema():
 
 
 @pytest.mark.asyncio
-async def test_resolved_hook_emits_message():
+async def test_resolved_hook_emits_message() -> None:
     """After resolution, a 'resolved' HookPart message is emitted."""
 
-    async def graph(llm: ai.LanguageModel):
+    async def graph(llm: ai.LanguageModel) -> None:
         await ai.stream_step(llm, ai.make_messages(user="go"))
         await Confirmation.create("emit_test")
 
@@ -156,8 +157,8 @@ async def test_resolved_hook_emits_message():
 
 
 @pytest.mark.asyncio
-async def test_hook_metadata_in_pending():
-    async def graph(llm: ai.LanguageModel):
+async def test_hook_metadata_in_pending() -> None:
+    async def graph(llm: ai.LanguageModel) -> None:
         await ai.stream_step(llm, ai.make_messages(user="go"))
         await Confirmation.create("meta_test", metadata={"tool": "rm -rf", "path": "/"})
 

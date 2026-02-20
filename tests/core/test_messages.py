@@ -14,7 +14,7 @@ from vercel_ai_sdk.core.messages import (
 # -- is_done ---------------------------------------------------------------
 
 
-def test_is_done_all_done():
+def test_is_done_all_done() -> None:
     m = Message(
         id="m1",
         role="assistant",
@@ -26,7 +26,7 @@ def test_is_done_all_done():
     assert m.is_done is True
 
 
-def test_is_done_streaming():
+def test_is_done_streaming() -> None:
     m = Message(
         id="m1",
         role="assistant",
@@ -35,7 +35,7 @@ def test_is_done_streaming():
     assert m.is_done is False
 
 
-def test_is_done_no_state():
+def test_is_done_no_state() -> None:
     """Parts without state (restored from storage) count as done."""
     m = Message(id="m1", role="assistant", parts=[TextPart(text="hi")])
     assert m.is_done is True
@@ -44,7 +44,7 @@ def test_is_done_no_state():
 # -- text / reasoning properties -------------------------------------------
 
 
-def test_text_returns_first_text_part():
+def test_text_returns_first_text_part() -> None:
     m = Message(
         id="m1",
         role="assistant",
@@ -56,7 +56,7 @@ def test_text_returns_first_text_part():
     assert m.text == "first"
 
 
-def test_text_empty_when_no_text_parts():
+def test_text_empty_when_no_text_parts() -> None:
     m = Message(
         id="m1",
         role="assistant",
@@ -65,7 +65,7 @@ def test_text_empty_when_no_text_parts():
     assert m.text == ""
 
 
-def test_reasoning_returns_first():
+def test_reasoning_returns_first() -> None:
     m = Message(
         id="m1",
         role="assistant",
@@ -77,7 +77,7 @@ def test_reasoning_returns_first():
 # -- deltas ----------------------------------------------------------------
 
 
-def test_text_delta():
+def test_text_delta() -> None:
     m = Message(
         id="m1",
         role="assistant",
@@ -86,12 +86,12 @@ def test_text_delta():
     assert m.text_delta == "b"
 
 
-def test_text_delta_empty_when_no_delta():
+def test_text_delta_empty_when_no_delta() -> None:
     m = Message(id="m1", role="assistant", parts=[TextPart(text="done", state="done")])
     assert m.text_delta == ""
 
 
-def test_reasoning_delta():
+def test_reasoning_delta() -> None:
     m = Message(
         id="m1",
         role="assistant",
@@ -100,7 +100,7 @@ def test_reasoning_delta():
     assert m.reasoning_delta == "b"
 
 
-def test_tool_deltas():
+def test_tool_deltas() -> None:
     m = Message(
         id="m1",
         role="assistant",
@@ -123,7 +123,7 @@ def test_tool_deltas():
 # -- tool_calls / get_tool_part -------------------------------------------
 
 
-def test_tool_calls():
+def test_tool_calls() -> None:
     m = Message(
         id="m1",
         role="assistant",
@@ -137,7 +137,7 @@ def test_tool_calls():
     assert m.tool_calls[0].tool_call_id == "tc1"
 
 
-def test_get_tool_part_found():
+def test_get_tool_part_found() -> None:
     m = Message(
         id="m1",
         role="assistant",
@@ -147,7 +147,7 @@ def test_get_tool_part_found():
     assert m.get_tool_part("tc1").tool_name == "t"
 
 
-def test_get_tool_part_missing():
+def test_get_tool_part_missing() -> None:
     m = Message(id="m1", role="assistant", parts=[TextPart(text="no tools")])
     assert m.get_tool_part("tc-nope") is None
 
@@ -155,7 +155,7 @@ def test_get_tool_part_missing():
 # -- get_hook_part ---------------------------------------------------------
 
 
-def test_get_hook_part_found():
+def test_get_hook_part_found() -> None:
     """get_hook_part returns the HookPart when present."""
     hook = HookPart(hook_id="h1", hook_type="Approval", status="pending")
     m = Message(id="m1", role="assistant", parts=[hook])
@@ -163,7 +163,7 @@ def test_get_hook_part_found():
     assert m.get_hook_part("h1") is hook
 
 
-def test_get_hook_part_by_id():
+def test_get_hook_part_by_id() -> None:
     """get_hook_part with a specific hook_id skips non-matching hooks."""
     h1 = HookPart(hook_id="h1", hook_type="Approval", status="pending")
     h2 = HookPart(hook_id="h2", hook_type="Approval", status="resolved")
@@ -171,7 +171,7 @@ def test_get_hook_part_by_id():
     assert m.get_hook_part("h2") is h2
 
 
-def test_get_hook_part_missing():
+def test_get_hook_part_missing() -> None:
     """get_hook_part returns None when no HookPart exists."""
     m = Message(id="m1", role="assistant", parts=[TextPart(text="no hooks")])
     assert m.get_hook_part() is None
@@ -181,7 +181,7 @@ def test_get_hook_part_missing():
 # -- ToolPart.set_result / set_error ---------------------------------------
 
 
-def test_set_result():
+def test_set_result() -> None:
     tp = ToolPart(tool_call_id="tc1", tool_name="t", tool_args="{}")
     assert tp.status == "pending"
     tp.set_result({"answer": 42})
@@ -189,7 +189,7 @@ def test_set_result():
     assert tp.result == {"answer": 42}
 
 
-def test_set_error():
+def test_set_error() -> None:
     tp = ToolPart(tool_call_id="tc1", tool_name="t", tool_args="{}")
     assert tp.status == "pending"
     tp.set_error("Something went wrong")
@@ -200,7 +200,7 @@ def test_set_error():
 # -- make_messages ---------------------------------------------------------
 
 
-def test_make_messages_system_and_user():
+def test_make_messages_system_and_user() -> None:
     msgs = make_messages(system="You are helpful.", user="Hi")
     assert len(msgs) == 2
     assert msgs[0].role == "system"
@@ -209,7 +209,7 @@ def test_make_messages_system_and_user():
     assert msgs[1].text == "Hi"
 
 
-def test_make_messages_user_only():
+def test_make_messages_user_only() -> None:
     msgs = make_messages(user="Hi")
     assert len(msgs) == 1
     assert msgs[0].role == "user"

@@ -12,7 +12,7 @@ from vercel_ai_sdk.core.tools import _tool_registry, get_tool
 # -- Schema extraction from type hints ------------------------------------
 
 
-def test_simple_types_produce_correct_schema():
+def test_simple_types_produce_correct_schema() -> None:
     @ai.tool
     async def greet(name: str, count: int) -> str:
         """Say hello."""
@@ -26,7 +26,7 @@ def test_simple_types_produce_correct_schema():
     assert set(greet.param_schema["required"]) == {"name", "count"}
 
 
-def test_optional_param_not_required():
+def test_optional_param_not_required() -> None:
     @ai.tool
     async def search(query: str, limit: Optional[int] = None) -> str:
         """Search."""
@@ -38,7 +38,7 @@ def test_optional_param_not_required():
     assert "limit" in search.param_schema["properties"]
 
 
-def test_default_value_not_required():
+def test_default_value_not_required() -> None:
     @ai.tool
     async def fetch(url: str, timeout: int = 30) -> str:
         """Fetch URL."""
@@ -48,7 +48,7 @@ def test_default_value_not_required():
     assert "timeout" not in search_required(fetch)
 
 
-def test_complex_type_schema():
+def test_complex_type_schema() -> None:
     @ai.tool
     async def send(recipients: list[str], urgent: bool = False) -> str:
         """Send message."""
@@ -62,7 +62,7 @@ def test_complex_type_schema():
 # -- Runtime parameter skipping -------------------------------------------
 
 
-def test_runtime_param_excluded_from_schema():
+def test_runtime_param_excluded_from_schema() -> None:
     @ai.tool
     async def needs_runtime(query: str, rt: Runtime) -> str:
         """Tool that needs runtime."""
@@ -77,7 +77,7 @@ def test_runtime_param_excluded_from_schema():
 # -- Registry -------------------------------------------------------------
 
 
-def test_tool_registered_on_decoration():
+def test_tool_registered_on_decoration() -> None:
     @ai.tool
     async def unique_tool_abc() -> str:
         """Unique."""
@@ -86,7 +86,7 @@ def test_tool_registered_on_decoration():
     assert get_tool("unique_tool_abc") is unique_tool_abc
 
 
-def test_get_tool_returns_none_for_missing():
+def test_get_tool_returns_none_for_missing() -> None:
     assert get_tool("nonexistent_tool_xyz") is None
 
 
@@ -94,7 +94,7 @@ def test_get_tool_returns_none_for_missing():
 
 
 @pytest.mark.asyncio
-async def test_tool_fn_is_callable():
+async def test_tool_fn_is_callable() -> None:
     @ai.tool
     async def add(a: int, b: int) -> int:
         """Add two numbers."""

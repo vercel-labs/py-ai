@@ -21,7 +21,7 @@ from vercel_ai_sdk.core.messages import ReasoningPart, TextPart, ToolPart
 # -- Text streaming --------------------------------------------------------
 
 
-def test_text_lifecycle():
+def test_text_lifecycle() -> None:
     h = StreamHandler(message_id="m1")
     m = h.handle_event(TextStart(block_id="b1"))
     assert len(m.parts) == 1
@@ -46,7 +46,7 @@ def test_text_lifecycle():
 # -- Reasoning streaming ---------------------------------------------------
 
 
-def test_reasoning_lifecycle():
+def test_reasoning_lifecycle() -> None:
     h = StreamHandler(message_id="m1")
     h.handle_event(ReasoningStart(block_id="r1"))
     m = h.handle_event(ReasoningDelta(block_id="r1", delta="thinking"))
@@ -62,7 +62,7 @@ def test_reasoning_lifecycle():
 # -- Tool streaming --------------------------------------------------------
 
 
-def test_tool_lifecycle():
+def test_tool_lifecycle() -> None:
     h = StreamHandler(message_id="m1")
     h.handle_event(ToolStart(tool_call_id="tc1", tool_name="get_weather"))
     m = h.handle_event(ToolArgsDelta(tool_call_id="tc1", delta='{"ci'))
@@ -83,7 +83,7 @@ def test_tool_lifecycle():
 # -- Multi-part messages ---------------------------------------------------
 
 
-def test_reasoning_then_text_then_tool():
+def test_reasoning_then_text_then_tool() -> None:
     """Full message: reasoning block, text block, tool call."""
     h = StreamHandler(message_id="m1")
     h.handle_event(ReasoningStart(block_id="r1"))
@@ -105,7 +105,7 @@ def test_reasoning_then_text_then_tool():
     assert all(p.state == "done" for p in m.parts)
 
 
-def test_multiple_tool_calls():
+def test_multiple_tool_calls() -> None:
     """Parallel tool calls in one message."""
     h = StreamHandler(message_id="m1")
     h.handle_event(ToolStart(tool_call_id="tc1", tool_name="read_file"))
@@ -128,7 +128,7 @@ def test_multiple_tool_calls():
 # -- MessageDone -----------------------------------------------------------
 
 
-def test_message_done_finalizes_all():
+def test_message_done_finalizes_all() -> None:
     h = StreamHandler(message_id="m1")
     h.handle_event(TextStart(block_id="t1"))
     h.handle_event(TextDelta(block_id="t1", delta="hello"))
@@ -141,13 +141,13 @@ def test_message_done_finalizes_all():
 # -- Message properties propagate ------------------------------------------
 
 
-def test_message_id_propagates():
+def test_message_id_propagates() -> None:
     h = StreamHandler(message_id="custom-id")
     m = h.handle_event(TextStart(block_id="b1"))
     assert m.id == "custom-id"
 
 
-def test_deltas_only_on_active_blocks():
+def test_deltas_only_on_active_blocks() -> None:
     """Delta should be None on inactive blocks, present only on active."""
     h = StreamHandler(message_id="m1")
     h.handle_event(TextStart(block_id="t1"))

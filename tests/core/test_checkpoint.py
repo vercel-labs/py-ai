@@ -1,6 +1,7 @@
 """Checkpoint replay, hook cancellation/resolution, serialization."""
 
 import asyncio
+from typing import Any
 
 import pydantic
 import pytest
@@ -20,8 +21,8 @@ class Approval(pydantic.BaseModel):
 
 
 @pytest.mark.asyncio
-async def test_step_replay_skips_llm():
-    async def graph(llm: ai.LanguageModel):
+async def test_step_replay_skips_llm() -> None:
+    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
         return await ai.stream_step(
             llm, messages=ai.make_messages(system="test", user="hello")
         )
@@ -39,7 +40,7 @@ async def test_step_replay_skips_llm():
 
 
 @pytest.mark.asyncio
-async def test_tool_replay_skips_execution():
+async def test_tool_replay_skips_execution() -> None:
     execution_count = 0
 
     @ai.tool
@@ -49,7 +50,7 @@ async def test_tool_replay_skips_execution():
         execution_count += 1
         return x + 1
 
-    async def graph(llm: ai.LanguageModel):
+    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
         result = await ai.stream_step(llm, ai.make_messages(system="t", user="go"))
         if result.tool_calls:
             await asyncio.gather(
@@ -76,8 +77,8 @@ async def test_tool_replay_skips_execution():
 
 
 @pytest.mark.asyncio
-async def test_hook_cancellation_pending():
-    async def graph(llm: ai.LanguageModel):
+async def test_hook_cancellation_pending() -> None:
+    async def graph(llm: ai.LanguageModel) -> Any:
         await ai.stream_step(llm, ai.make_messages(system="t", user="go"))
         return await Approval.create("my_approval", metadata={"tool": "test"})
 
@@ -89,8 +90,8 @@ async def test_hook_cancellation_pending():
 
 
 @pytest.mark.asyncio
-async def test_hook_resolution_on_reentry():
-    async def graph(llm: ai.LanguageModel):
+async def test_hook_resolution_on_reentry() -> None:
+    async def graph(llm: ai.LanguageModel) -> Any:
         await ai.stream_step(llm, ai.make_messages(system="t", user="go"))
         return await Approval.create("my_approval")
 
@@ -107,14 +108,14 @@ async def test_hook_resolution_on_reentry():
 
 
 @pytest.mark.asyncio
-async def test_parallel_hooks_all_collected():
-    async def graph(llm: ai.LanguageModel):
+async def test_parallel_hooks_all_collected() -> None:
+    async def graph(llm: ai.LanguageModel) -> None:
         await ai.stream_step(llm, ai.make_messages(system="t", user="go"))
 
-        async def a():
+        async def a() -> Any:
             return await Approval.create("hook_a")
 
-        async def b():
+        async def b() -> Any:
             return await Approval.create("hook_b")
 
         async with asyncio.TaskGroup() as tg:
@@ -127,14 +128,14 @@ async def test_parallel_hooks_all_collected():
 
 
 @pytest.mark.asyncio
-async def test_parallel_hooks_resolve_on_reentry():
-    async def graph(llm: ai.LanguageModel):
+async def test_parallel_hooks_resolve_on_reentry() -> None:
+    async def graph(llm: ai.LanguageModel) -> Any:
         await ai.stream_step(llm, ai.make_messages(system="t", user="go"))
 
-        async def a():
+        async def a() -> Any:
             return await Approval.create("hook_a")
 
-        async def b():
+        async def b() -> Any:
             return await Approval.create("hook_b")
 
         async with asyncio.TaskGroup() as tg:
@@ -157,7 +158,7 @@ async def test_parallel_hooks_resolve_on_reentry():
 # -- Serialization ---------------------------------------------------------
 
 
-def test_checkpoint_serialization_roundtrip():
+def test_checkpoint_serialization_roundtrip() -> None:
     cp = Checkpoint(
         steps=[
             StepEvent(

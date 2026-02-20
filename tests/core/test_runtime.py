@@ -30,10 +30,10 @@ async def concat(a: str, b: str) -> str:
 
 
 @pytest.mark.asyncio
-async def test_stream_loop_text_only():
+async def test_stream_loop_text_only() -> None:
     """stream_loop with no tool calls returns after one LLM call."""
 
-    async def graph(llm: ai.LanguageModel):
+    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
         return await ai.stream_loop(
             llm,
             messages=ai.make_messages(user="Hi"),
@@ -51,10 +51,10 @@ async def test_stream_loop_text_only():
 
 
 @pytest.mark.asyncio
-async def test_stream_loop_tool_then_text():
+async def test_stream_loop_tool_then_text() -> None:
     """stream_loop calls tool, feeds result back, gets final text."""
 
-    async def graph(llm: ai.LanguageModel):
+    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
         return await ai.stream_loop(
             llm,
             messages=ai.make_messages(user="Double 5"),
@@ -80,10 +80,10 @@ async def test_stream_loop_tool_then_text():
 
 
 @pytest.mark.asyncio
-async def test_stream_loop_parallel_tools():
+async def test_stream_loop_parallel_tools() -> None:
     """LLM returns two tool calls in one message; both execute."""
 
-    async def graph(llm: ai.LanguageModel):
+    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
         return await ai.stream_loop(
             llm,
             messages=ai.make_messages(user="Double 3 and 7"),
@@ -129,10 +129,10 @@ async def test_stream_loop_parallel_tools():
 
 
 @pytest.mark.asyncio
-async def test_stream_loop_multi_turn():
+async def test_stream_loop_multi_turn() -> None:
     """LLM calls a tool, then calls another tool, then returns text."""
 
-    async def graph(llm: ai.LanguageModel):
+    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
         return await ai.stream_loop(
             llm,
             messages=ai.make_messages(user="Concat then double"),
@@ -155,13 +155,13 @@ async def test_stream_loop_multi_turn():
 
 
 @pytest.mark.asyncio
-async def test_execute_tool_missing_raises():
+async def test_execute_tool_missing_raises() -> None:
     """execute_tool with unknown tool name raises ValueError (wrapped in ExceptionGroup by TaskGroup)."""
     tc = messages.ToolPart(
         tool_call_id="tc-1", tool_name="nonexistent_tool_zzz", tool_args="{}"
     )
 
-    async def graph(llm: ai.LanguageModel):
+    async def graph(llm: ai.LanguageModel) -> None:
         await ai.execute_tool(tc)
 
     result = ai.run(graph, MockLLM([]))
@@ -174,7 +174,7 @@ async def test_execute_tool_missing_raises():
 
 
 @pytest.mark.asyncio
-async def test_execute_tool_injects_runtime():
+async def test_execute_tool_injects_runtime() -> None:
     """Tools with a Runtime parameter get the active runtime injected."""
     received_rt = None
 
@@ -185,7 +185,7 @@ async def test_execute_tool_injects_runtime():
         received_rt = rt
         return "ok"
 
-    async def graph(llm: ai.LanguageModel):
+    async def graph(llm: ai.LanguageModel) -> None:
         result = await ai.stream_step(llm, ai.make_messages(user="go"))
         if result.tool_calls:
             await asyncio.gather(
@@ -206,10 +206,10 @@ async def test_execute_tool_injects_runtime():
 
 
 @pytest.mark.asyncio
-async def test_execute_tool_updates_message():
+async def test_execute_tool_updates_message() -> None:
     """After execute_tool, the ToolPart in the message has status=result."""
 
-    async def graph(llm: ai.LanguageModel):
+    async def graph(llm: ai.LanguageModel) -> None:
         result = await ai.stream_step(llm, ai.make_messages(user="go"))
         if result.tool_calls:
             msg = result.last_message
@@ -228,10 +228,10 @@ async def test_execute_tool_updates_message():
 
 
 @pytest.mark.asyncio
-async def test_stream_loop_checkpoint_records_tools():
+async def test_stream_loop_checkpoint_records_tools() -> None:
     """stream_loop's tool executions are recorded in the checkpoint."""
 
-    async def graph(llm: ai.LanguageModel):
+    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
         return await ai.stream_loop(
             llm,
             messages=ai.make_messages(user="Double 4"),
