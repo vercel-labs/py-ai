@@ -129,15 +129,24 @@ class FilePart:
 
 @dataclasses.dataclass
 class DataPart:
-    """Custom data parts allow streaming of arbitrary structured data with type-specific handling.
+    """
+    Custom data parts allow streaming of arbitrary structured data with type-specific
+    handling.
 
-    The type will be formatted as 'data-{data_type}' in the output.
+    The wire type is ``data-{data_type}`` (e.g. ``data-custom``), exposed
+    via the ``type`` property so that ``DataPart`` is uniform with every
+    other ``UIMessageStreamPart`` variant.
     """
 
     data_type: str
     data: Any
     id: str | None = None
     transient: bool | None = None
+
+    @property
+    def type(self) -> str:
+        """Wire type for the AI SDK SSE protocol."""
+        return f"data-{self.data_type}"
 
 
 @dataclasses.dataclass

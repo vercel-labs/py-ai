@@ -32,6 +32,11 @@ def _generate_id(prefix: str = "id") -> str:
 def serialize_part(part: protocol.UIMessageStreamPart) -> str:
     """Serialize a stream part to JSON with camelCase keys."""
     d = dataclasses.asdict(part)
+    if isinstance(part, protocol.DataPart):
+        # DataPart's wire type is computed (``data-{data_type}``); replace
+        # the raw ``data_type`` field with the protocol ``type`` key.
+        d["type"] = part.type
+        del d["data_type"]
     camel_dict = {_to_camel_case(k): v for k, v in d.items() if v is not None}
     return json.dumps(camel_dict)
 
