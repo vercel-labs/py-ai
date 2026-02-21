@@ -1,5 +1,6 @@
 """@stream decorator: context requirement, replay, queue submission."""
 
+import pydantic
 import pytest
 
 import vercel_ai_sdk as ai
@@ -7,6 +8,12 @@ from vercel_ai_sdk.core import messages
 from vercel_ai_sdk.core.streams import StreamResult
 
 from ..conftest import MockLLM, text_msg
+
+
+class _Weather(pydantic.BaseModel):
+    city: str
+    temperature: float
+
 
 # -- StreamResult properties -----------------------------------------------
 
@@ -79,3 +86,24 @@ async def test_stream_step_replays_from_checkpoint() -> None:
     r2 = ai.run(graph, llm2, checkpoint=cp)
     [msg async for msg in r2]
     assert llm2.call_count == 0
+
+
+# -- StreamResult.output ---------------------------------------------------
+
+
+def test_stream_result_output_from_last_message() -> None:
+    """StreamResult.output delegates to the last message's StructuredOutputPart."""
+    m = messages.Message(
+        id="m1",
+        role="assistant",
+        parts=[
+            messages.TextPart(text="{}", state="done"),
+            messages.StructuredOutputPart(
+                data={"city": "SF", "temperature": 62.0},
+                output_type_name=f"{_Weather.__module__}.{_Weather.__qualname__}",
+            ),
+        ],
+    )
+    r = StreamResult(messages=[text_msg("streaming..."), m])
+    assert r.output is not None
+    assert r.output.city == "SF"

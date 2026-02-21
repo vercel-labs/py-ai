@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import AsyncGenerator, Sequence
 from typing import Any, override
 
 import openai
+import pydantic
 
 from .. import core
 
@@ -138,6 +140,7 @@ class OpenAIModel(core.llm.LanguageModel):
         self,
         messages: list[core.messages.Message],
         tools: Sequence[core.tools.ToolLike] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
     ) -> AsyncGenerator[core.llm.StreamEvent]:
         """Yield raw stream events from OpenAI API."""
         openai_messages = _messages_to_openai(messages)
@@ -150,6 +153,18 @@ class OpenAIModel(core.llm.LanguageModel):
         }
         if openai_tools:
             kwargs["tools"] = openai_tools
+
+        if output_type is not None:
+            from openai.lib._pydantic import to_strict_json_schema
+
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": output_type.__name__,
+                    "schema": to_strict_json_schema(output_type),
+                    "strict": True,
+                },
+            }
 
         # Enable reasoning/thinking via Vercel AI Gateway's unified format
         # See: https://vercel.com/docs/ai-gateway/openai-compat/advanced
@@ -249,8 +264,23 @@ class OpenAIModel(core.llm.LanguageModel):
         self,
         messages: list[core.messages.Message],
         tools: Sequence[core.tools.ToolLike] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
     ) -> AsyncGenerator[core.messages.Message]:
         """Stream Messages (uses StreamHandler internally)."""
         handler = core.llm.StreamHandler()
-        async for event in self.stream_events(messages, tools):
-            yield handler.handle_event(event)
+        msg: core.messages.Message | None = None
+        async for event in self.stream_events(messages, tools, output_type=output_type):
+            msg = handler.handle_event(event)
+            yield msg
+
+        # After stream completes, validate and attach structured output part
+        if output_type is not None and msg is not None and msg.text:
+            data = json.loads(msg.text)
+            output_type.model_validate(data)  # fail fast on bad data
+            part = core.messages.StructuredOutputPart(
+                data=data,
+                output_type_name=f"{output_type.__module__}.{output_type.__qualname__}",
+            )
+            msg = msg.model_copy()
+            msg.parts = [*msg.parts, part]
+            yield msg

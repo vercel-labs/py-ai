@@ -1,13 +1,27 @@
-"""Message model: properties, ToolPart.set_result/set_error, make_messages."""
+"""Message model: properties, ToolPart.set_result/set_error, make_messages,
+StructuredOutputPart."""
+
+import pydantic
+import pytest
 
 from vercel_ai_sdk.core.messages import (
     HookPart,
     Message,
     ReasoningPart,
+    StructuredOutputPart,
     TextPart,
     ToolPart,
     make_messages,
 )
+
+
+class _Weather(pydantic.BaseModel):
+    city: str
+    temperature: float
+
+
+_WEATHER_DATA = {"city": "SF", "temperature": 62.0}
+_WEATHER_TYPE_NAME = f"{_Weather.__module__}.{_Weather.__qualname__}"
 
 # -- is_done ---------------------------------------------------------------
 
@@ -214,3 +228,57 @@ def test_make_messages_user_only() -> None:
     msgs = make_messages(user="Hi")
     assert len(msgs) == 1
     assert msgs[0].role == "user"
+
+
+# -- StructuredOutputPart --------------------------------------------------
+
+
+def test_structured_output_part_value() -> None:
+    """Lazy hydration: resolves class, validates data, caches result."""
+    part = StructuredOutputPart(data=_WEATHER_DATA, output_type_name=_WEATHER_TYPE_NAME)
+    val = part.value
+    assert isinstance(val, _Weather)
+    assert val.city == "SF"
+    assert part.value is val  # cached
+
+
+def test_structured_output_part_bad_class_name() -> None:
+    """Unresolvable class name raises ImportError on access."""
+    part = StructuredOutputPart(
+        data=_WEATHER_DATA, output_type_name="nonexistent.module.Cls"
+    )
+    with pytest.raises(ImportError):
+        _ = part.value
+
+
+def test_message_output_from_part() -> None:
+    """Message.output property delegates to StructuredOutputPart.value."""
+    m = Message(
+        id="m1",
+        role="assistant",
+        parts=[
+            TextPart(text="{}"),
+            StructuredOutputPart(
+                data=_WEATHER_DATA, output_type_name=_WEATHER_TYPE_NAME
+            ),
+        ],
+    )
+    assert isinstance(m.output, _Weather)
+    assert m.output.city == "SF"
+
+
+def test_structured_output_round_trip() -> None:
+    """StructuredOutputPart survives model_dump -> model_validate."""
+    m = Message(
+        id="m1",
+        role="assistant",
+        parts=[
+            TextPart(text="{}"),
+            StructuredOutputPart(
+                data=_WEATHER_DATA, output_type_name=_WEATHER_TYPE_NAME
+            ),
+        ],
+    )
+    restored = Message.model_validate(m.model_dump())
+    assert isinstance(restored.output, _Weather)
+    assert restored.output.city == "SF"

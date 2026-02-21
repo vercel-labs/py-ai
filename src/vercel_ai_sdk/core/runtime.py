@@ -193,9 +193,12 @@ async def stream_step(
     messages: list[messages_.Message],
     tools: Sequence[tools_.ToolLike] | None = None,
     label: str | None = None,
+    output_type: type[pydantic.BaseModel] | None = None,
 ) -> AsyncGenerator[messages_.Message]:
     """Single LLM call that streams to Runtime."""
-    async for msg in llm.stream(messages=messages, tools=tools):
+    async for msg in llm.stream(
+        messages=messages, tools=tools, output_type=output_type
+    ):
         msg.label = label
         yield msg
 
@@ -257,12 +260,15 @@ async def stream_loop(
     messages: list[messages_.Message],
     tools: Sequence[tools_.ToolLike],
     label: str | None = None,
+    output_type: type[pydantic.BaseModel] | None = None,
 ) -> streams_.StreamResult:
     """Agent loop: stream LLM, execute tools, repeat until done."""
     local_messages = list(messages)
 
     while True:
-        result = await stream_step(llm, local_messages, tools, label=label)
+        result = await stream_step(
+            llm, local_messages, tools, label=label, output_type=output_type
+        )
 
         if not result.tool_calls:
             return result

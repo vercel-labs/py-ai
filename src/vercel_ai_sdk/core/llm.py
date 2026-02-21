@@ -4,6 +4,8 @@ import abc
 import dataclasses
 from collections.abc import AsyncGenerator, Sequence
 
+import pydantic
+
 from . import messages as messages_
 from . import tools as tools_
 
@@ -216,6 +218,7 @@ class LanguageModel(abc.ABC):
         self,
         messages: list[messages_.Message],
         tools: Sequence[tools_.ToolLike] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
     ) -> AsyncGenerator[messages_.Message]:
         raise NotImplementedError
         yield
@@ -224,10 +227,11 @@ class LanguageModel(abc.ABC):
         self,
         messages: list[messages_.Message],
         tools: Sequence[tools_.ToolLike] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
     ) -> messages_.Message:
         """Drain the stream and return the final message."""
         final = None
-        async for msg in self.stream(messages, tools):
+        async for msg in self.stream(messages, tools, output_type=output_type):
             final = msg
         if final is None:
             raise ValueError("LLM produced no messages")
