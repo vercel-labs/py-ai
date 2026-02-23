@@ -9,7 +9,6 @@ uv add vercel-ai-sdk
 ```
 
 ```python
-import os
 import vercel_ai_sdk as ai
 
 @ai.tool
@@ -27,11 +26,7 @@ async def agent(llm, query):
         tools=[talk_to_mothership],
     )
 
-llm = ai.openai.OpenAIModel(
-    model="anthropic/claude-opus-4.6",
-    base_url="https://ai-gateway.vercel.sh/v1",
-    api_key=os.environ["AI_GATEWAY_API_KEY"],
-)
+llm = ai.ai_gateway.GatewayModel(model="anthropic/claude-opus-4.6")
 
 async for msg in ai.run(agent, llm, "When will the robots take over?"):
     print(msg.text_delta, end="")
@@ -204,22 +199,30 @@ Three event types are tracked:
 #### LLM Providers
 
 ```python
-# OpenAI-compatible (including Vercel AI Gateway)
-llm = ai.openai.OpenAIModel(
+# Vercel AI Gateway (recommended)
+# Uses AI_GATEWAY_API_KEY env var by default
+llm = ai.ai_gateway.GatewayModel(
     model="anthropic/claude-opus-4.6",
-    base_url="https://ai-gateway.vercel.sh/v1",
-    api_key=os.environ["AI_GATEWAY_API_KEY"],
     thinking=True,           # enable reasoning output
     budget_tokens=10000,     # or reasoning_effort="medium"
 )
 
-# Anthropic (native client)
+# OpenAI (direct)
+llm = ai.openai.OpenAIModel(
+    model="gpt-4o",
+    thinking=True,
+    reasoning_effort="medium",
+)
+
+# Anthropic (direct)
 llm = ai.anthropic.AnthropicModel(
-    model="claude-opus-4.6-20250916",
+    model="claude-opus-4-6-20250916",
     thinking=True,
     budget_tokens=10000,
 )
 ```
+
+The gateway provider automatically routes Anthropic models through the native Anthropic API for full feature support, and falls back to the OpenAI-compatible endpoint for structured output and non-Anthropic models.
 
 #### MCP
 

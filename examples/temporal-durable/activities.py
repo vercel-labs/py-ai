@@ -8,13 +8,11 @@ The LLM activity uses ToolSchema (no dummy fn) and llm.buffer()
 from __future__ import annotations
 
 import dataclasses
-import os
 from typing import Any
 
 import temporalio.activity
 
 import vercel_ai_sdk as ai
-import vercel_ai_sdk.anthropic
 
 # ── Tool activities (one per tool, plain functions) ───────────────
 
@@ -48,11 +46,7 @@ class LLMCallResult:
 @temporalio.activity.defn(name="llm_call")
 async def llm_call_activity(params: LLMCallParams) -> LLMCallResult:
     """Call the LLM, drain the stream, return the final message."""
-    llm = ai.anthropic.AnthropicModel(
-        model="anthropic/claude-sonnet-4",
-        base_url="https://ai-gateway.vercel.sh",
-        api_key=os.environ.get("AI_GATEWAY_API_KEY"),
-    )
+    llm = ai.ai_gateway.GatewayModel(model="anthropic/claude-opus-4.6")
 
     messages = [ai.Message.model_validate(m) for m in params.messages]
     tools = [ai.ToolSchema.model_validate(t) for t in params.tool_schemas]

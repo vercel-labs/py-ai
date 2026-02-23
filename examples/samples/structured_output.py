@@ -1,5 +1,4 @@
 import asyncio
-import os
 
 import pydantic
 
@@ -15,18 +14,7 @@ class WeatherForecast(pydantic.BaseModel):
 
 
 async def main() -> None:
-    # OpenAI-compatible provider
-    # llm = ai.openai.OpenAIModel(
-    #     model="anthropic/claude-opus-4.6",
-    #     base_url="https://ai-gateway.vercel.sh/v1",
-    #     api_key=os.environ.get("AI_GATEWAY_API_KEY"),
-    # )
-
-    # Anthropic provider
-    llm = ai.anthropic.AnthropicModel(
-        model="claude-opus-4-6",
-        api_key=os.environ.get("ANTHROPIC_API_KEY"),
-    )
+    llm = ai.ai_gateway.GatewayModel(model="anthropic/claude-opus-4.6")
 
     messages = ai.make_messages(
         system="You are a weather assistant. Respond with realistic weather data.",

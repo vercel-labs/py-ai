@@ -1,7 +1,6 @@
 """Human-in-the-loop approval hooks."""
 
 import asyncio
-import os
 
 import pydantic
 
@@ -57,11 +56,7 @@ async def graph(llm: ai.LanguageModel, query: str) -> ai.StreamResult:
 
 
 async def main() -> None:
-    llm = ai.openai.OpenAIModel(
-        model="anthropic/claude-sonnet-4-20250514",
-        base_url="https://ai-gateway.vercel.sh/v1",
-        api_key=os.environ.get("AI_GATEWAY_API_KEY"),
-    )
+    llm = ai.ai_gateway.GatewayModel(model="anthropic/claude-opus-4.6")
 
     async for msg in ai.run(graph, llm, "When will the robots take over?"):
         # Hook parts arrive as pending, waiting for resolution

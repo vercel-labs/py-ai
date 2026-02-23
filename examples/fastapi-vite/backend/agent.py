@@ -1,6 +1,5 @@
 """Agent logic for the chat demo."""
 
-import os
 from typing import Any
 
 import vercel_ai_sdk as ai
@@ -14,11 +13,7 @@ async def talk_to_mothership(question: str) -> str:
 
 def get_llm() -> ai.LanguageModel:
     """Create the LLM instance."""
-    return ai.openai.OpenAIModel(
-        model="anthropic/claude-sonnet-4",
-        base_url="https://ai-gateway.vercel.sh/v1",
-        api_key=os.environ.get("AI_GATEWAY_API_KEY"),
-    )
+    return ai.ai_gateway.GatewayModel(model="anthropic/claude-opus-4.6")
 
 
 TOOLS: list[ai.Tool[..., Any]] = [talk_to_mothership]
