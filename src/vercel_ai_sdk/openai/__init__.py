@@ -153,6 +153,7 @@ class OpenAIModel(core.llm.LanguageModel):
         }
         if openai_tools:
             kwargs["tools"] = openai_tools
+        kwargs["stream_options"] = {"include_usage": True}
 
         if output_type is not None:
             from openai.lib._pydantic import to_strict_json_schema
@@ -183,8 +184,35 @@ class OpenAIModel(core.llm.LanguageModel):
         text_started = False
         reasoning_started = False
         tool_calls: dict[int, dict[str, Any]] = {}  # index -> {id, name, started}
+        finish_reason: str | None = None
+        usage: core.messages.Usage | None = None
 
         async for chunk in stream:
+            # Extract usage from any chunk that carries it (typically the final
+            # chunk when stream_options.include_usage is True).
+            if chunk.usage is not None:
+                raw = chunk.usage.model_dump(exclude_none=True)
+                # Extract optional breakdowns
+                reasoning_tokens: int | None = None
+                cache_read: int | None = None
+                completion_details = getattr(
+                    chunk.usage, "completion_tokens_details", None
+                )
+                if completion_details:
+                    reasoning_tokens = getattr(
+                        completion_details, "reasoning_tokens", None
+                    )
+                prompt_details = getattr(chunk.usage, "prompt_tokens_details", None)
+                if prompt_details:
+                    cache_read = getattr(prompt_details, "cached_tokens", None)
+                usage = core.messages.Usage(
+                    input_tokens=chunk.usage.prompt_tokens or 0,
+                    output_tokens=chunk.usage.completion_tokens or 0,
+                    reasoning_tokens=reasoning_tokens,
+                    cache_read_tokens=cache_read,
+                    raw=raw,
+                )
+
             if not chunk.choices:
                 continue
 
@@ -247,6 +275,7 @@ class OpenAIModel(core.llm.LanguageModel):
                                 )
 
             if choice.finish_reason is not None:
+                finish_reason = choice.finish_reason
                 # Close any open blocks
                 if reasoning_started:
                     yield core.llm.ReasoningEnd(block_id="reasoning")
@@ -256,8 +285,10 @@ class OpenAIModel(core.llm.LanguageModel):
                     if tc["started"] and tc["id"]:
                         yield core.llm.ToolEnd(tool_call_id=tc["id"])
 
-                yield core.llm.MessageDone(finish_reason=choice.finish_reason)
-                return
+                # Don't return yet — the usage chunk may arrive after
+                # finish_reason. We'll emit MessageDone after the loop.
+
+        yield core.llm.MessageDone(finish_reason=finish_reason, usage=usage)
 
     @override
     async def stream(

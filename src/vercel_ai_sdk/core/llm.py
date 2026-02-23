@@ -63,6 +63,7 @@ class ToolEnd:
 @dataclasses.dataclass
 class MessageDone:
     finish_reason: str | None = None
+    usage: messages_.Usage | None = None
 
 
 StreamEvent = (
@@ -104,6 +105,7 @@ class StreamHandler:
     _active_tool_ids: set[str] = dataclasses.field(default_factory=set)
 
     _is_done: bool = False
+    _usage: messages_.Usage | None = None
 
     def handle_event(self, event: StreamEvent) -> messages_.Message:
         """Process event and return current Message state."""
@@ -153,8 +155,9 @@ class StreamHandler:
             case ToolEnd(tool_call_id=tcid):
                 self._active_tool_ids.discard(tcid)
 
-            case MessageDone():
+            case MessageDone(usage=usage):
                 self._is_done = True
+                self._usage = usage
                 self._active_text_id = None
                 self._active_reasoning_id = None
                 self._active_tool_ids.clear()
@@ -209,6 +212,7 @@ class StreamHandler:
             id=self.message_id,
             role="assistant",
             parts=parts,
+            usage=self._usage if self._is_done else None,
         )
 
 

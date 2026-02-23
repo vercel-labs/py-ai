@@ -208,8 +208,21 @@ class AnthropicModel(core.llm.LanguageModel):
                         if tool_id:
                             yield core.llm.ToolEnd(tool_call_id=tool_id)
 
-                elif event.type == "message_stop":
-                    yield core.llm.MessageDone()
+            # The Anthropic SDK accumulates usage across message_start and
+            # message_delta events into current_message_snapshot.  Read it
+            # once here instead of tracking state ourselves.
+            snapshot = stream.current_message_snapshot
+            sdk_usage = snapshot.usage
+            usage = core.messages.Usage(
+                input_tokens=sdk_usage.input_tokens or 0,
+                output_tokens=sdk_usage.output_tokens or 0,
+                cache_read_tokens=getattr(sdk_usage, "cache_read_input_tokens", None),
+                cache_write_tokens=getattr(
+                    sdk_usage, "cache_creation_input_tokens", None
+                ),
+                raw=sdk_usage.model_dump(exclude_none=True) or None,
+            )
+            yield core.llm.MessageDone(usage=usage)
 
     @override
     async def stream(

@@ -37,6 +37,27 @@ class StreamResult:
             return self.last_message.output
         return None
 
+    @property
+    def usage(self) -> messages_.Usage | None:
+        """Token usage from the last (most recent) LLM call."""
+        if self.last_message:
+            return self.last_message.usage
+        return None
+
+    @property
+    def total_usage(self) -> messages_.Usage | None:
+        """Accumulated token usage across all LLM calls in this result.
+
+        Sums usage from every message that carries it (i.e. assistant
+        messages produced by LLM calls).  Returns ``None`` if no message
+        reported usage.
+        """
+        total: messages_.Usage | None = None
+        for msg in self.messages:
+            if msg.usage is not None:
+                total = msg.usage if total is None else total + msg.usage
+        return total
+
 
 Stream = Callable[[], AsyncGenerator[messages_.Message]]
 # maybe it should have a name and an id inferred from LLM outputs
