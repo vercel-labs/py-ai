@@ -12,12 +12,12 @@ from __future__ import annotations
 import asyncio
 import json
 
+import rich.text
 import textual
 import textual.app
 import textual.containers
 import textual.widgets
 import textual.worker
-import rich.text
 import websockets
 
 import vercel_ai_sdk as ai

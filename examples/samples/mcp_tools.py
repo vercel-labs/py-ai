@@ -2,10 +2,9 @@
 
 import asyncio
 import os
+from typing import Any
 
 import rich
-
-from typing import Any
 
 import vercel_ai_sdk as ai
 

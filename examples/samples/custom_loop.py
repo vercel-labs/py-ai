@@ -3,7 +3,6 @@
 import asyncio
 import os
 from collections.abc import AsyncGenerator
-
 from typing import Any
 
 import vercel_ai_sdk as ai
@@ -29,7 +28,7 @@ async def custom_stream_step(
     messages: list[ai.Message],
     tools: list[ai.Tool[..., Any]],
     label: str | None = None,
-) -> AsyncGenerator[ai.Message, None]:
+) -> AsyncGenerator[ai.Message]:
     """Wraps llm.stream to inject a label on every message."""
     async for msg in llm.stream(messages=messages, tools=tools):
         msg.label = label

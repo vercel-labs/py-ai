@@ -16,7 +16,6 @@ import temporalio.activity
 import vercel_ai_sdk as ai
 import vercel_ai_sdk.anthropic
 
-
 # ── Tool activities (one per tool, plain functions) ───────────────
 
 

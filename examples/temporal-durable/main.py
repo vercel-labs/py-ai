@@ -15,10 +15,9 @@ import asyncio
 import sys
 import uuid
 
+import activities
 import temporalio.client
 import temporalio.worker
-
-import activities
 import workflow
 
 TASK_QUEUE = "agent-durable"
