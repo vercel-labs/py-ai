@@ -142,28 +142,16 @@ class AnthropicModel(core.llm.LanguageModel):
                 "budget_tokens": self._budget_tokens,
             }
 
-        # Structured output: use beta API with output_format
-        use_beta = False
+        # Structured output: SDK handles schema transformation internally
         if output_type is not None:
-            from anthropic.lib._parse._transform import transform_schema
-
-            kwargs["output_format"] = {
-                "type": "json_schema",
-                "schema": transform_schema(output_type),
-            }
-            kwargs["betas"] = ["structured-outputs-2025-11-13"]
-            use_beta = True
+            kwargs["output_format"] = output_type
 
         # Track block types by index to know what End event to emit
         block_types: dict[int, str] = {}  # index -> "text" | "thinking" | "tool_use"
         tool_ids: dict[int, str] = {}  # index -> tool_call_id
         signature_buffer: dict[int, str] = {}  # index -> accumulated signature
 
-        stream_cm: Any  # BetaAsyncMessageStreamManager | AsyncMessageStreamManager
-        if use_beta:
-            stream_cm = self._client.beta.messages.stream(**kwargs)
-        else:
-            stream_cm = self._client.messages.stream(**kwargs)
+        stream_cm = self._client.messages.stream(**kwargs)
 
         async with stream_cm as stream:
             async for event in stream:

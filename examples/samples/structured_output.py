@@ -15,18 +15,18 @@ class WeatherForecast(pydantic.BaseModel):
 
 
 async def main() -> None:
-    # OpenAI-compatible provider (works with any model via Vercel AI Gateway)
-    llm = ai.openai.OpenAIModel(
-        model="anthropic/claude-sonnet-4",
-        base_url="https://ai-gateway.vercel.sh/v1",
-        api_key=os.environ.get("AI_GATEWAY_API_KEY"),
-    )
-
-    # # Anthropic provider (native structured output via beta API)
-    # llm = ai.anthropic.AnthropicModel(
-    #     model="claude-sonnet-4-20250514",
-    #     api_key=os.environ.get("ANTHROPIC_API_KEY"),
+    # OpenAI-compatible provider
+    # llm = ai.openai.OpenAIModel(
+    #     model="anthropic/claude-opus-4.6",
+    #     base_url="https://ai-gateway.vercel.sh/v1",
+    #     api_key=os.environ.get("AI_GATEWAY_API_KEY"),
     # )
+
+    # Anthropic provider
+    llm = ai.anthropic.AnthropicModel(
+        model="claude-opus-4-6",
+        api_key=os.environ.get("ANTHROPIC_API_KEY"),
+    )
 
     messages = ai.make_messages(
         system="You are a weather assistant. Respond with realistic weather data.",
