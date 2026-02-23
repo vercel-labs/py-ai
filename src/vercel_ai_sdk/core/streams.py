@@ -30,6 +30,13 @@ class StreamResult:
             return self.last_message.text
         return ""
 
+    @property
+    def output(self) -> Any:
+        """Parsed structured output from the last message, if available."""
+        if self.last_message:
+            return self.last_message.output
+        return None
+
 
 Stream = Callable[[], AsyncGenerator[messages_.Message]]
 # maybe it should have a name and an id inferred from LLM outputs

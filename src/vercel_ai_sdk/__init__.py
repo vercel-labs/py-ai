@@ -10,6 +10,7 @@ from .core.messages import (
     Part,
     PartState,
     ReasoningPart,
+    StructuredOutputPart,
     TextPart,
     ToolDelta,
     ToolPart,
@@ -47,6 +48,7 @@ __all__ = [
     "StreamResult",
     "Hook",
     "HookPart",
+    "StructuredOutputPart",
     "Checkpoint",
     # Functions
     "tool",

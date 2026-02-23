@@ -6,13 +6,14 @@ import datetime
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from typing import override
 
+import pydantic
 import temporalio.common
 import temporalio.workflow
 
 with temporalio.workflow.unsafe.imports_passed_through():
-    import vercel_ai_sdk as ai
-
     import activities
+
+    import vercel_ai_sdk as ai
 
 
 class DurableModel(ai.LanguageModel):
@@ -29,7 +30,8 @@ class DurableModel(ai.LanguageModel):
         self,
         messages: list[ai.Message],
         tools: Sequence[ai.ToolLike] | None = None,
-    ) -> AsyncGenerator[ai.Message, None]:
+        output_type: type[pydantic.BaseModel] | None = None,
+    ) -> AsyncGenerator[ai.Message]:
         result = await self.call_fn(
             activities.LLMCallParams(
                 messages=[m.model_dump() for m in messages],

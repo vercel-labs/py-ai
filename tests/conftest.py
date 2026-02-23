@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncGenerator, Sequence
+
+import pydantic
 
 import vercel_ai_sdk as ai
 from vercel_ai_sdk.core import messages
+from vercel_ai_sdk.core.messages import StructuredOutputPart
 
 
 class MockLLM(ai.LanguageModel):
@@ -18,13 +22,27 @@ class MockLLM(ai.LanguageModel):
         self,
         messages: list[messages.Message],
         tools: Sequence[ai.ToolLike] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
     ) -> AsyncGenerator[messages.Message]:
         if self._call_index >= len(self._responses):
             raise RuntimeError("MockLLM: no more responses configured")
         self.call_count += 1
         seq = self._responses[self._call_index]
         self._call_index += 1
+        msg = None
         for msg in seq:
+            yield msg
+
+        # Simulate structured output validation (matching real provider behavior)
+        if output_type is not None and msg is not None and msg.text:
+            data = json.loads(msg.text)
+            output_type.model_validate(data)  # fail fast on bad data
+            part = StructuredOutputPart(
+                data=data,
+                output_type_name=f"{output_type.__module__}.{output_type.__qualname__}",
+            )
+            msg = msg.model_copy()
+            msg.parts = [*msg.parts, part]
             yield msg
 
 

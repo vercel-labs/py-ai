@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator, Sequence
 from typing import Any, override
 
 import anthropic
+import pydantic
 
 from .. import core
 
@@ -119,6 +120,7 @@ class AnthropicModel(core.llm.LanguageModel):
         self,
         messages: list[core.messages.Message],
         tools: Sequence[core.tools.ToolLike] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
     ) -> AsyncGenerator[core.llm.StreamEvent]:
         """Yield raw stream events from Anthropic API."""
         system_prompt, anthropic_messages = _messages_to_anthropic(messages)
@@ -140,12 +142,18 @@ class AnthropicModel(core.llm.LanguageModel):
                 "budget_tokens": self._budget_tokens,
             }
 
+        # Structured output: SDK handles schema transformation internally
+        if output_type is not None:
+            kwargs["output_format"] = output_type
+
         # Track block types by index to know what End event to emit
         block_types: dict[int, str] = {}  # index -> "text" | "thinking" | "tool_use"
         tool_ids: dict[int, str] = {}  # index -> tool_call_id
         signature_buffer: dict[int, str] = {}  # index -> accumulated signature
 
-        async with self._client.messages.stream(**kwargs) as stream:
+        stream_cm = self._client.messages.stream(**kwargs)
+
+        async with stream_cm as stream:
             async for event in stream:
                 if event.type == "content_block_start":
                     block = event.content_block
@@ -208,8 +216,23 @@ class AnthropicModel(core.llm.LanguageModel):
         self,
         messages: list[core.messages.Message],
         tools: Sequence[core.tools.ToolLike] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
     ) -> AsyncGenerator[core.messages.Message]:
-        """Stream Messages (uses StreamProcessor internally)."""
+        """Stream Messages (uses StreamHandler internally)."""
         handler = core.llm.StreamHandler()
-        async for event in self.stream_events(messages, tools):
-            yield handler.handle_event(event)
+        msg: core.messages.Message | None = None
+        async for event in self.stream_events(messages, tools, output_type=output_type):
+            msg = handler.handle_event(event)
+            yield msg
+
+        # After stream completes, validate and attach structured output part
+        if output_type is not None and msg is not None and msg.text:
+            data = json.loads(msg.text)
+            output_type.model_validate(data)  # fail fast on bad data
+            part = core.messages.StructuredOutputPart(
+                data=data,
+                output_type_name=f"{output_type.__module__}.{output_type.__qualname__}",
+            )
+            msg = msg.model_copy()
+            msg.parts = [*msg.parts, part]
+            yield msg

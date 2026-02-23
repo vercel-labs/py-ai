@@ -1,7 +1,6 @@
 """Agent logic for the chat demo."""
 
 import os
-
 from typing import Any
 
 import vercel_ai_sdk as ai
