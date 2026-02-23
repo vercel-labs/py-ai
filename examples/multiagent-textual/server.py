@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import warnings
 from typing import Any
 
@@ -181,11 +180,7 @@ async def ws_endpoint(websocket: fastapi.WebSocket) -> None:
     await websocket.accept()
     print("Client connected")
 
-    llm = ai.anthropic.AnthropicModel(
-        model="anthropic/claude-haiku-4.5",
-        base_url="https://ai-gateway.vercel.sh",
-        api_key=os.environ.get("AI_GATEWAY_API_KEY"),
-    )
+    llm = ai.ai_gateway.GatewayModel(model="anthropic/claude-opus-4.6")
 
     result = ai.run(multiagent, llm, "When will the robots take over?")
 

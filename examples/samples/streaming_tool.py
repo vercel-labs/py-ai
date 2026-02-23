@@ -1,7 +1,6 @@
 """Streaming from inside a tool via runtime.put_message()."""
 
 import asyncio
-import os
 
 import vercel_ai_sdk as ai
 
@@ -34,11 +33,7 @@ async def agent(llm: ai.LanguageModel, user_query: str) -> ai.StreamResult:
 
 
 async def main() -> None:
-    llm = ai.openai.OpenAIModel(
-        model="anthropic/claude-sonnet-4",
-        base_url="https://ai-gateway.vercel.sh/v1",
-        api_key=os.environ.get("AI_GATEWAY_API_KEY"),
-    )
+    llm = ai.ai_gateway.GatewayModel(model="anthropic/claude-opus-4.6")
 
     async for msg in ai.run(agent, llm, "When will the robots take over?"):
         if msg.label == "tool_progress":

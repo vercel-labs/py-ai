@@ -1,4 +1,4 @@
-from . import ai_sdk_ui, anthropic, mcp, openai
+from . import ai_gateway, ai_sdk_ui, anthropic, mcp, openai
 from .core.checkpoint import Checkpoint
 from .core.hooks import Hook, hook
 from .core.llm import LanguageModel
@@ -61,6 +61,7 @@ __all__ = [
     "make_messages",
     "hook",
     # Submodules
+    "ai_gateway",
     "anthropic",
     "mcp",
     "openai",

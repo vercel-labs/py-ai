@@ -1,7 +1,6 @@
 """Custom agent loop with @ai.stream and manual tool execution."""
 
 import asyncio
-import os
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -64,11 +63,7 @@ async def agent(llm: ai.LanguageModel, user_query: str) -> ai.StreamResult:
 
 
 async def main() -> None:
-    llm = ai.anthropic.AnthropicModel(
-        model="anthropic/claude-sonnet-4",
-        base_url="https://ai-gateway.vercel.sh",
-        api_key=os.environ.get("AI_GATEWAY_API_KEY"),
-    )
+    llm = ai.ai_gateway.GatewayModel(model="anthropic/claude-opus-4.6")
 
     async for msg in ai.run(
         agent, llm, "What's the weather and population of New York and Los Angeles?"

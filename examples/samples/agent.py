@@ -1,18 +1,13 @@
 """Coding agent with local filesystem tools."""
 
 import asyncio
-import os
 
 import vercel_ai_sdk as ai
 import vercel_ai_sdk.agent as agent
 
 
 async def main() -> None:
-    llm = ai.openai.OpenAIModel(
-        model="anthropic/claude-sonnet-4-20250514",
-        base_url="https://ai-gateway.vercel.sh/v1",
-        api_key=os.environ.get("AI_GATEWAY_API_KEY"),
-    )
+    llm = ai.ai_gateway.GatewayModel(model="anthropic/claude-opus-4.6")
 
     coding_agent = agent.Agent(
         model=llm,
