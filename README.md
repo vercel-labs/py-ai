@@ -1,5 +1,8 @@
 # vercel-ai-sdk
 
+> [!WARNING]
+> This SDK is **experimental**. It is not stable and is not guaranteed to be maintained in the future. For evaluation purposes only.
+
 A Python version of the [AI SDK](https://ai-sdk.dev/).
 
 ## Quick Start
@@ -295,7 +298,8 @@ See the `examples/` directory:
 - `streaming_tool.py` — Tool that streams progress via Runtime
 - `multiagent.py` — Parallel agents with labels, then summarization
 - `custom_loop.py` — Custom step with `@ai.stream`
-- `mcp.py` — MCP integration (Context7)
+- `mcp_tools.py` — MCP integration (Context7)
+- `structured_output.py` — Structured output with Pydantic models
 
 **Projects**:
 
