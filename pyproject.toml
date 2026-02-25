@@ -1,6 +1,6 @@
 [project]
 name = "vercel-ai-sdk"
-version = "0.0.1.dev4"
+version = "0.0.1.dev5"
 description = "The AI Toolkit for Python"
 readme = "README.md"
 authors = [
