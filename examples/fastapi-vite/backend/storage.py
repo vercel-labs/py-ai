@@ -10,6 +10,7 @@ rest of the app.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 from typing import Any, Protocol, runtime_checkable
 
@@ -31,7 +32,9 @@ class FileStorage:
     local development; replace with a real database for production.
     """
 
-    def __init__(self, directory: str | pathlib.Path = "./data") -> None:
+    def __init__(self, directory: str | pathlib.Path | None = None) -> None:
+        if directory is None:
+            directory = "/tmp/data" if os.environ.get("VERCEL") else "./data"
         self._dir = pathlib.Path(directory)
         self._dir.mkdir(parents=True, exist_ok=True)
 

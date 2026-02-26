@@ -5,8 +5,5 @@ description = "Chat demo using Python Vercel AI SDK with FastAPI"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi[standard]>=0.128.1",
-    "vercel-ai-sdk",
+    "vercel-ai-sdk>=0.0.1.dev5",
 ]
-
-[tool.uv.sources]
-vercel-ai-sdk = { path = "../../..", editable = true }
