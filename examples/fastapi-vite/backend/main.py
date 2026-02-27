@@ -3,14 +3,14 @@
 import fastapi
 import fastapi.middleware.cors
 
-from .routes import chat
+from routes import chat
 
-app = fastapi.FastAPI(
+api = fastapi.FastAPI(
     title="py-ai-fastapi-chat",
     description="Chat demo using Python Vercel AI SDK",
 )
 
-app.add_middleware(
+api.add_middleware(
     fastapi.middleware.cors.CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
@@ -18,10 +18,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(chat.router, prefix="/api")
+api.include_router(chat.router)
 
 
-@app.get("/api/health")
+@api.get("/health")
 async def health() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+app = fastapi.FastAPI()
+app.mount("/api", api)

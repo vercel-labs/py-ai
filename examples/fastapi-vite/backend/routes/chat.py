@@ -11,7 +11,8 @@ import pydantic
 import vercel_ai_sdk as ai
 import vercel_ai_sdk.ai_sdk_ui
 
-from .. import agent, storage
+import agent
+import storage
 
 router = fastapi.APIRouter()
 file_storage = storage.FileStorage()
