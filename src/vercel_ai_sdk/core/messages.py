@@ -115,13 +115,6 @@ Part = Annotated[
 ]
 
 
-def _add_optional(a: int | None, b: int | None) -> int | None:
-    """Add two optional ints. Returns None only if both are None."""
-    if a is None and b is None:
-        return None
-    return (a or 0) + (b or 0)
-
-
 class Usage(pydantic.BaseModel):
     """Normalized token usage from a single LLM call.
 
@@ -149,6 +142,13 @@ class Usage(pydantic.BaseModel):
 
     def __add__(self, other: Usage) -> Usage:
         """Accumulate usage across multiple LLM calls."""
+
+        def _add_optional(a: int | None, b: int | None) -> int | None:
+            """Add two optional ints. Returns None only if both are None."""
+            if a is None and b is None:
+                return None
+            return (a or 0) + (b or 0)
+
         return Usage(
             input_tokens=self.input_tokens + other.input_tokens,
             output_tokens=self.output_tokens + other.output_tokens,
