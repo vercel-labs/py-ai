@@ -11,6 +11,7 @@ from vercel_ai_sdk.core.messages import (
     StructuredOutputPart,
     TextPart,
     ToolPart,
+    Usage,
     make_messages,
 )
 
@@ -282,3 +283,37 @@ def test_structured_output_round_trip() -> None:
     restored = Message.model_validate(m.model_dump())
     assert isinstance(restored.output, _Weather)
     assert restored.output.city == "SF"
+
+
+# -- Usage -----------------------------------------------------------------
+
+
+def test_usage_add_merges_optional_fields() -> None:
+    """__add__ accumulates tokens and treats None vs populated correctly."""
+    a = Usage(
+        input_tokens=100,
+        output_tokens=50,
+        cache_read_tokens=20,
+        # reasoning_tokens and cache_write_tokens left as None
+    )
+    b = Usage(
+        input_tokens=200,
+        output_tokens=80,
+        reasoning_tokens=10,
+        # cache_read_tokens left as None, cache_write_tokens left as None
+    )
+    total = a + b
+
+    assert total.input_tokens == 300
+    assert total.output_tokens == 130
+    assert total.total_tokens == 430
+
+    # None + int -> int (not None)
+    assert total.reasoning_tokens == 10
+    # int + None -> int (not None)
+    assert total.cache_read_tokens == 20
+    # None + None -> None (not zero)
+    assert total.cache_write_tokens is None
+
+    # raw is intentionally not merged
+    assert total.raw is None

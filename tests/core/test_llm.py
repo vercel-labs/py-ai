@@ -20,7 +20,7 @@ from vercel_ai_sdk.core.llm import (
     ToolEnd,
     ToolStart,
 )
-from vercel_ai_sdk.core.messages import ReasoningPart, TextPart, ToolPart
+from vercel_ai_sdk.core.messages import ReasoningPart, TextPart, ToolPart, Usage
 
 from ..conftest import MockLLM, text_msg
 
@@ -173,6 +173,24 @@ def test_message_done_finalizes_all() -> None:
     assert isinstance(part, TextPart)
     assert part.state == "done"
     assert m.is_done
+
+
+def test_message_done_propagates_usage() -> None:
+    """Usage on MessageDone surfaces on the built Message."""
+    usage = Usage(input_tokens=10, output_tokens=20)
+    h = StreamHandler(message_id="m1")
+    h.handle_event(TextStart(block_id="t1"))
+    h.handle_event(TextDelta(block_id="t1", delta="hi"))
+
+    # Before MessageDone, usage should not be on the message
+    m = h.handle_event(TextEnd(block_id="t1"))
+    assert m.usage is None
+
+    m = h.handle_event(MessageDone(usage=usage))
+    assert m.usage is not None
+    assert m.usage.input_tokens == 10
+    assert m.usage.output_tokens == 20
+    assert m.usage.total_tokens == 30
 
 
 # -- Message properties propagate ------------------------------------------
