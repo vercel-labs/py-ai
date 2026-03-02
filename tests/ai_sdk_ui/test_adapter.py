@@ -8,7 +8,7 @@ import pytest
 
 import vercel_ai_sdk as ai
 from vercel_ai_sdk.ai_sdk_ui import adapter, ui_message
-from vercel_ai_sdk.core import messages
+from vercel_ai_sdk.core import hooks, messages
 
 from ..conftest import MockLLM
 
@@ -492,3 +492,88 @@ def test_ui_skips_unsupported_parts() -> None:
 
     internal = adapter.to_messages([ui_msg])
     assert len(internal[0].parts) == 2
+
+
+# -----------------------------------------------------------------------------
+# Tool approval (human-in-the-loop) tests
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_tool_approval_hook_emits_approval_request() -> None:
+    """Pending ToolApproval HookPart emits tool-approval-request on the wire."""
+    msgs = [
+        # Tool pending (args complete, awaiting approval)
+        messages.Message(
+            id="msg-1",
+            role="assistant",
+            parts=[
+                messages.ToolPart(
+                    tool_call_id="tc-1",
+                    tool_name="rm_rf",
+                    tool_args='{"path": "/"}',
+                    status="pending",
+                    state="done",
+                ),
+            ],
+        ),
+        # Hook pending (approval requested)
+        messages.Message(
+            id="msg-1",
+            role="assistant",
+            parts=[
+                messages.HookPart(
+                    hook_id="approve_tc-1",
+                    hook_type=hooks.ToolApproval.hook_type,  # type: ignore[attr-defined]
+                    status="pending",
+                    metadata={"tool_name": "rm_rf", "tool_args": '{"path": "/"}'},
+                ),
+            ],
+        ),
+    ]
+
+    event_types = await get_event_types(msgs)
+    assert event_types == [
+        "start",
+        "start-step",
+        "tool-input-start",
+        "tool-input-available",
+        "tool-approval-request",
+        "finish-step",
+        "finish",
+    ]
+
+
+def test_approval_responded_resolves_hook() -> None:
+    """to_messages() resolves the ToolApproval hook for approval-responded parts."""
+    label = "approve_tc-42"
+    raw_messages = [
+        {
+            "id": "msg-1",
+            "role": "assistant",
+            "parts": [
+                {
+                    "type": "tool-dangerous_action",
+                    "toolCallId": "tc-42",
+                    "state": "approval-responded",
+                    "input": '{"x": 1}',
+                    "approval": {
+                        "id": label,
+                        "approved": True,
+                        "reason": "looks safe",
+                    },
+                }
+            ],
+        },
+    ]
+
+    # Clean up any leftover state from other tests
+    hooks._pending_resolutions.pop(label, None)
+
+    ui_msgs = [ui_message.UIMessage.model_validate(m) for m in raw_messages]
+    adapter.to_messages(ui_msgs)
+
+    # The side-effect should have pre-registered the resolution
+    assert label in hooks._pending_resolutions
+    resolution = hooks._pending_resolutions.pop(label)
+    assert resolution == {"granted": True, "reason": "looks safe"}

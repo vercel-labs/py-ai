@@ -1,7 +1,7 @@
 from . import ai_gateway, ai_sdk_ui, anthropic, mcp, openai
 from .core import telemetry
 from .core.checkpoint import Checkpoint
-from .core.hooks import Hook, hook
+from .core.hooks import Hook, ToolApproval, hook
 from .core.llm import LanguageModel
 
 # Re-export core types
@@ -51,6 +51,7 @@ __all__ = [
     "StreamResult",
     "Hook",
     "HookPart",
+    "ToolApproval",
     "StructuredOutputPart",
     "Checkpoint",
     # Functions

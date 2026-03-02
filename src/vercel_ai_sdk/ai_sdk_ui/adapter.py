@@ -11,6 +11,7 @@ from collections.abc import AsyncGenerator, AsyncIterable
 from typing import Any, Literal
 
 from .. import core
+from ..core import hooks
 from . import protocol, ui_message
 
 # ============================================================================
@@ -69,6 +70,7 @@ class _StreamState:
         self.started_tool_calls: set[str] = set()
         self.emitted_tool_results: set[str] = set()
         self.pending_tool_calls: set[str] = set()
+        self.emitted_approval_requests: set[str] = set()
 
     def close_open_blocks(self) -> list[protocol.UIMessageStreamPart]:
         """Close any open reasoning/text blocks, returning parts to emit."""
@@ -94,6 +96,7 @@ class _StreamState:
         self.started_tool_calls = set()
         self.emitted_tool_results = set()
         self.pending_tool_calls = set()
+        self.emitted_approval_requests = set()
 
     def begin_message(
         self, msg: core.messages.Message
@@ -128,6 +131,22 @@ class _StreamState:
             self.message_id = msg.id
 
         return parts
+
+
+def _tool_call_id_from_approval_hook(
+    hook_part: core.messages.HookPart,
+) -> str | None:
+    """Extract tool_call_id from a ToolApproval HookPart.
+
+    Returns the tool_call_id if this is a ToolApproval hook whose hook_id
+    follows the ``approve_{tool_call_id}`` convention, otherwise None.
+    """
+    if hook_part.hook_type != hooks.ToolApproval.hook_type:  # type: ignore[attr-defined]
+        return None
+    prefix = "approve_"
+    if hook_part.hook_id.startswith(prefix):
+        return hook_part.hook_id[len(prefix) :]
+    return None
 
 
 async def to_ui_message_stream(
@@ -256,6 +275,33 @@ async def to_ui_message_stream(
                                 output=result,
                             )
 
+            # Pass 3: Hook-based tool approvals
+            for msg_part in msg.parts:
+                if not isinstance(msg_part, core.messages.HookPart):
+                    continue
+                approval_tc_id = _tool_call_id_from_approval_hook(msg_part)
+                if approval_tc_id is None:
+                    continue
+
+                if msg_part.status == "pending":
+                    if approval_tc_id not in state.emitted_approval_requests:
+                        state.emitted_approval_requests.add(approval_tc_id)
+                        yield protocol.ToolApprovalRequestPart(
+                            approval_id=msg_part.hook_id,
+                            tool_call_id=approval_tc_id,
+                        )
+                elif msg_part.status == "resolved":
+                    resolution = msg_part.resolution or {}
+                    if not resolution.get("granted", False):
+                        yield protocol.ToolOutputDeniedPart(
+                            tool_call_id=approval_tc_id,
+                        )
+                elif msg_part.status == "cancelled":
+                    yield protocol.ToolOutputErrorPart(
+                        tool_call_id=approval_tc_id,
+                        error_text="Hook cancelled",
+                    )
+
     # Final cleanup
     for part in state.finish_step():
         yield part
@@ -333,6 +379,10 @@ def to_messages(
 ) -> list[core.messages.Message]:
     """Convert AI SDK v6 UI messages to internal Message format.
 
+    As a side-effect, tool parts in ``approval-responded`` state trigger
+    ``ToolApproval.resolve()`` so the agent loop can resume execution
+    without the caller needing to handle approval routing explicitly.
+
     Args:
         ui_messages: List of UIMessage objects from the AI SDK v6 frontend.
 
@@ -375,6 +425,20 @@ def to_messages(
                             result=_normalize_tool_result(tp.output),
                         )
                     )
+                    # Side-effect: resolve ToolApproval hooks from approval
+                    # responses so the agent loop can resume execution.
+                    if (
+                        tp.state == "approval-responded"
+                        and tp.approval is not None
+                        and tp.approval.approved is not None
+                    ):
+                        hooks.ToolApproval.resolve(  # type: ignore[attr-defined]
+                            tp.approval.id,
+                            {
+                                "granted": tp.approval.approved,
+                                "reason": tp.approval.reason,
+                            },
+                        )
 
                 case (
                     ui_message.UIStepStartPart()

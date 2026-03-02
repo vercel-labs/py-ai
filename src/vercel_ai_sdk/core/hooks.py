@@ -72,7 +72,7 @@ class Hook[T: pydantic.BaseModel]:
     """
 
     _schema: ClassVar[type[pydantic.BaseModel]]
-    _hook_type: ClassVar[str]
+    hook_type: ClassVar[str]
 
     @classmethod
     async def create(cls, label: str, metadata: dict[str, Any] | None = None) -> T:
@@ -113,7 +113,7 @@ class Hook[T: pydantic.BaseModel]:
         future: asyncio.Future[dict[str, Any]] = asyncio.Future()
         suspension = rt_mod.HookSuspension(
             label=label,
-            hook_type=cls._hook_type,
+            hook_type=cls.hook_type,
             metadata=metadata or {},
             future=future,
         )
@@ -142,7 +142,7 @@ class Hook[T: pydantic.BaseModel]:
                 parts=[
                     messages_.HookPart(
                         hook_id=label,
-                        hook_type=cls._hook_type,
+                        hook_type=cls.hook_type,
                         status="resolved",
                         metadata=hook_metadata,
                         resolution=resolution,
@@ -215,7 +215,7 @@ class Hook[T: pydantic.BaseModel]:
                 parts=[
                     messages_.HookPart(
                         hook_id=label,
-                        hook_type=cls._hook_type,
+                        hook_type=cls.hook_type,
                         status="cancelled",
                         metadata=hook_metadata,
                     )
@@ -235,9 +235,22 @@ def hook[T: pydantic.BaseModel](cls: type[T]) -> type[Hook[T]]:
         (Hook,),
         {
             "_schema": cls,
-            "_hook_type": cls.__name__,
+            "hook_type": cls.__name__,
             "__doc__": cls.__doc__,
         },
     )
 
     return hook_impl
+
+
+@hook
+class ToolApproval(pydantic.BaseModel):
+    """Prewired hook for tool call approval.
+
+    Used by the AI SDK UI adapter to bridge the protocol's
+    tool-approval-request / approval-responded flow to the
+    hook system.
+    """
+
+    granted: bool
+    reason: str | None = None
