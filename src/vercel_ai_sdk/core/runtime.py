@@ -15,6 +15,7 @@ from . import hooks as hooks_
 from . import llm as llm_
 from . import messages as messages_
 from . import streams as streams_
+from . import telemetry as telemetry_
 from . import tools as tools_
 
 # ── Queue item types ──────────────────────────────────────────────
@@ -230,11 +231,21 @@ async def execute_tool(
                 tool_call.set_result(cached.result)
             return cached.result
 
+    telemetry_.handle(
+        telemetry_.ToolCallStartEvent(
+            tool_name=tool_call.tool_name,
+            tool_call_id=tool_call.tool_call_id,
+            args=tool_call.tool_args,
+        )
+    )
+    t0 = telemetry_.time_ms()
+
     # Fresh execution
     tool = tools_.get_tool(tool_call.tool_name)
     if tool is None:
         raise ValueError(f"Tool not found in registry: {tool_call.tool_name}")
 
+    error_str: str | None = None
     try:
         result = await tool.validate_and_call(tool_call.tool_args, rt)
         tool_call.set_result(result)
@@ -242,7 +253,18 @@ async def execute_tool(
         # LLM produced malformed JSON or args that don't match the schema.
         # Report back as a tool error so the model can retry.
         result = f"{type(exc).__name__}: {exc}"
+        error_str = result
         tool_call.set_error(result)
+
+    telemetry_.handle(
+        telemetry_.ToolCallFinishEvent(
+            tool_name=tool_call.tool_name,
+            tool_call_id=tool_call.tool_call_id,
+            result=result,
+            error=error_str,
+            duration_ms=telemetry_.time_ms() - t0,
+        )
+    )
 
     # Record for checkpoint
     if rt:
@@ -370,6 +392,9 @@ def run(
         runtime = Runtime(checkpoint=checkpoint)
         result._runtime = runtime
         token_runtime = _runtime.set(runtime)
+        token_run_id = telemetry_.start_run()
+
+        telemetry_.handle(telemetry_.RunStartEvent())
 
         mcp_pool: dict[str, mcp.client._Connection] = {}
         mcp_token = mcp.client._pool.set(mcp_pool)
@@ -377,6 +402,9 @@ def run(
         kwargs: dict[str, Any] = {}
         if runtime_param := _find_runtime_param(root):
             kwargs[runtime_param] = runtime
+
+        run_error: BaseException | None = None
+        total_usage: messages_.Usage | None = None
 
         try:
             async with asyncio.TaskGroup() as tg:
@@ -445,6 +473,12 @@ def run(
                     # ── Regular step ───────────────────────────
                     step_fn, future = step_item
 
+                    telemetry_.handle(
+                        telemetry_.StepStartEvent(
+                            step_index=runtime._step_index,
+                        )
+                    )
+
                     for tool_msg in runtime.get_all_messages():
                         yield tool_msg
 
@@ -461,11 +495,39 @@ def run(
                     step_result = streams_.StreamResult(messages=result_messages)
                     future.set_result(step_result)
 
+                    telemetry_.handle(
+                        telemetry_.StepFinishEvent(
+                            step_index=runtime._step_index,
+                            result=step_result,
+                        )
+                    )
+
+                    # Accumulate usage for run-level telemetry
+                    step_usage = step_result.usage
+                    if step_usage is not None:
+                        total_usage = (
+                            step_usage
+                            if total_usage is None
+                            else total_usage + step_usage
+                        )
+
                     await asyncio.sleep(0)
                     for tool_msg in runtime.get_all_messages():
                         yield tool_msg
 
+        except BaseException as exc:
+            run_error = exc
+            raise
+
         finally:
+            telemetry_.handle(
+                telemetry_.RunFinishEvent(
+                    usage=total_usage,
+                    error=run_error,
+                )
+            )
+            telemetry_.end_run(token_run_id)
+
             # Clean up module-level hook registries for this run
             hooks_._cleanup_run(runtime._hook_labels)
 

@@ -2,7 +2,6 @@
 
 import fastapi
 import fastapi.middleware.cors
-
 from routes import chat
 
 api = fastapi.FastAPI(
