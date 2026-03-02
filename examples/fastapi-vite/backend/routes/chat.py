@@ -4,15 +4,14 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
+import agent
 import fastapi
 import fastapi.responses
 import pydantic
+import storage
 
 import vercel_ai_sdk as ai
 import vercel_ai_sdk.ai_sdk_ui
-
-import agent
-import storage
 
 router = fastapi.APIRouter()
 file_storage = storage.FileStorage()
