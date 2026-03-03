@@ -1,10 +1,10 @@
 """Anthropic provider: _messages_to_anthropic conversion tests."""
 
 from vercel_ai_sdk.anthropic import _messages_to_anthropic
-from vercel_ai_sdk.core.messages import Message, ReasoningPart, TextPart, ToolPart
+from vercel_ai_sdk.core.messages import Message, TextPart, ToolPart
 
 
-def test_tool_result_none_still_emits_tool_result():
+def test_tool_result_none_still_emits_tool_result() -> None:
     """A tool that returns None must still produce a tool_result block.
 
     Regression: when part.result is None the converter skipped the tool_result,
@@ -26,7 +26,8 @@ def test_tool_result_none_still_emits_tool_result():
 
     # Should have: assistant message with tool_use, then user message with tool_result
     assert len(anthropic_msgs) == 2, (
-        f"Expected 2 messages (assistant + user/tool_result), got {len(anthropic_msgs)}: {anthropic_msgs}"
+        f"Expected 2 messages (assistant + user/tool_result), "
+        f"got {len(anthropic_msgs)}: {anthropic_msgs}"
     )
 
     assistant_msg = anthropic_msgs[0]
@@ -40,7 +41,7 @@ def test_tool_result_none_still_emits_tool_result():
     assert tool_results[0]["tool_use_id"] == "toolu_01abc"
 
 
-def test_tool_with_normal_result():
+def test_tool_with_normal_result() -> None:
     """Baseline: a tool with a normal result produces the correct pair."""
     tool_part = ToolPart(
         tool_call_id="toolu_02xyz",
@@ -59,7 +60,7 @@ def test_tool_with_normal_result():
     assert anthropic_msgs[1]["content"][0]["content"] == "{'temp': 62}"
 
 
-def test_tool_error_produces_tool_result():
+def test_tool_error_produces_tool_result() -> None:
     """Tool errors must also produce a tool_result block (with is_error=True)."""
     tool_part = ToolPart(
         tool_call_id="toolu_03err",
@@ -81,7 +82,7 @@ def test_tool_error_produces_tool_result():
     assert tool_result["content"] == "Connection timeout"
 
 
-def test_multiple_tools_one_returns_none():
+def test_multiple_tools_one_returns_none() -> None:
     """When one of several tools returns None, all must have tool_results."""
     tool_a = ToolPart(
         tool_call_id="toolu_a",
@@ -122,7 +123,7 @@ def test_multiple_tools_one_returns_none():
 # -- Multi-turn: consecutive user messages (tool_result + next user) -------
 
 
-def test_multi_turn_no_consecutive_same_role_messages():
+def test_multi_turn_no_consecutive_same_role_messages() -> None:
     """Multi-turn with tools must not produce consecutive same-role messages.
 
     Regression: when a previous assistant turn includes a tool call (with
@@ -169,7 +170,7 @@ def test_multi_turn_no_consecutive_same_role_messages():
         )
 
 
-def test_multi_turn_tool_result_before_user_merged():
+def test_multi_turn_tool_result_before_user_merged() -> None:
     """When tool_result (user) is followed by a user message, they merge.
 
     The merged user message should contain both the tool_result blocks
@@ -204,7 +205,7 @@ def test_multi_turn_tool_result_before_user_merged():
     assert tool_results[0]["tool_use_id"] == "toolu_01abc"
 
 
-def test_stream_loop_second_iteration_messages():
+def test_stream_loop_second_iteration_messages() -> None:
     """Simulates what stream_loop sends on the 2nd LLM call in a multi-turn.
 
     After the first stream_step returns a tool call, stream_loop appends
@@ -242,7 +243,7 @@ def test_stream_loop_second_iteration_messages():
     assert len(tool_results) == 1
 
 
-def test_pending_tool_does_not_emit_tool_result():
+def test_pending_tool_does_not_emit_tool_result() -> None:
     """A tool with status='pending' must not produce a tool_result block.
 
     When stream_step returns a message mid-stream (before tool execution),

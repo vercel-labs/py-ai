@@ -10,8 +10,6 @@ from typing import Any, get_type_hints
 
 import pydantic
 
-logger = logging.getLogger(__name__)
-
 from .. import mcp
 from . import checkpoint as checkpoint_
 from . import hooks as hooks_
@@ -20,6 +18,8 @@ from . import messages as messages_
 from . import streams as streams_
 from . import telemetry as telemetry_
 from . import tools as tools_
+
+logger = logging.getLogger(__name__)
 
 # ── Queue item types ──────────────────────────────────────────────
 
