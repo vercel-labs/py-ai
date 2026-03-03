@@ -419,33 +419,31 @@ def test_ui_to_internal_two_turn_with_tool() -> None:
     # Convert to internal format
     internal = adapter.to_messages(ui_messages)
 
-    # Verify conversion
-    assert len(internal) == 3
+    # The single UI assistant message contains [text, tool(done), text] from
+    # two stream_loop iterations.  to_messages splits at the tool-result
+    # boundary so LLM adapters receive one message per iteration.
+    assert len(internal) == 4
     assert internal[0].role == "user"
     assert internal[0].text == "when will the robots take over?"
 
+    # First iteration: text + tool call
     assert internal[1].role == "assistant"
-    # Should have text parts (non-empty) and tool part
-    # step-start and empty text parts should be skipped
-    text_parts = [p for p in internal[1].parts if isinstance(p, messages.TextPart)]
-    tool_parts = internal[1].tool_calls
-
-    assert len(text_parts) == 2  # Two non-empty text parts
-    assert (
-        text_parts[0].text
-        == "I'll check with the mothership about this important question."
+    assert internal[1].text == (
+        "I'll check with the mothership about this important question."
     )
-    assert text_parts[1].text == "The mothership has spoken: Soon."
+    assert len(internal[1].tool_calls) == 1
+    assert internal[1].tool_calls[0].tool_name == "talk_to_mothership"
+    assert internal[1].tool_calls[0].tool_call_id == "toolu_01FiXNXhq1kHx4TegRjSaJyv"
+    assert internal[1].tool_calls[0].status == "result"
+    assert internal[1].tool_calls[0].result == {"value": "Soon."}
 
-    assert len(tool_parts) == 1
-    assert tool_parts[0].tool_name == "talk_to_mothership"
-    assert tool_parts[0].tool_call_id == "toolu_01FiXNXhq1kHx4TegRjSaJyv"
-    assert tool_parts[0].status == "result"  # output-available maps to result
-    # Non-dict results are wrapped in {"value": ...} for internal ToolPart compatibility
-    assert tool_parts[0].result == {"value": "Soon."}
+    # Second iteration: follow-up text
+    assert internal[2].role == "assistant"
+    assert internal[2].text == "The mothership has spoken: Soon."
+    assert len(internal[2].tool_calls) == 0
 
-    assert internal[2].role == "user"
-    assert internal[2].text == "this is a test run. can you remember the first turn?"
+    assert internal[3].role == "user"
+    assert internal[3].text == "this is a test run. can you remember the first turn?"
 
 
 def test_ui_tool_part_with_dict_input() -> None:

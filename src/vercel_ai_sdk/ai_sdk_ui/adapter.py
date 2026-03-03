@@ -474,12 +474,56 @@ def to_messages(
                 "User and system messages require non-empty content."
             )
 
-        result.append(
-            core.messages.Message(
-                id=ui_msg.id,
-                role=ui_msg.role,
-                parts=internal_parts,
+        # The UI sends one assistant message per conversation turn, but a
+        # single turn may span multiple stream_loop iterations (e.g.
+        # [text, tool(done), text, tool(done), text]).  LLM APIs expect
+        # one message per iteration, so split at completed-tool boundaries.
+        if ui_msg.role == "assistant":
+            result.extend(_split_assistant_parts(internal_parts, msg_id=ui_msg.id))
+        else:
+            result.append(
+                core.messages.Message(
+                    id=ui_msg.id,
+                    role=ui_msg.role,
+                    parts=internal_parts,
+                )
             )
-        )
 
     return result
+
+
+def _split_assistant_parts(
+    parts: list[core.messages.Part],
+    msg_id: str,
+) -> list[core.messages.Message]:
+    """Split assistant parts at completed-tool → non-tool boundaries.
+
+    Returns one ``Message`` per ``stream_loop`` iteration so that LLM
+    adapters receive correctly-shaped single-iteration messages.
+    """
+    messages: list[core.messages.Message] = []
+    current: list[core.messages.Part] = []
+    has_completed_tool = False
+
+    for part in parts:
+        if has_completed_tool and not isinstance(part, core.messages.ToolPart):
+            messages.append(
+                core.messages.Message(role="assistant", parts=current, id=msg_id)
+            )
+            current = []
+            has_completed_tool = False
+
+        current.append(part)
+
+        if isinstance(part, core.messages.ToolPart) and part.status in (
+            "result",
+            "error",
+        ):
+            has_completed_tool = True
+
+    if current:
+        messages.append(
+            core.messages.Message(role="assistant", parts=current, id=msg_id)
+        )
+
+    return messages
