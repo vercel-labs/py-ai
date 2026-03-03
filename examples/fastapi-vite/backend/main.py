@@ -44,29 +44,6 @@ class ChatRequest(pydantic.BaseModel):
     session_id: str | None = None
 
 
-def _has_matching_approval(
-    ui_messages: list[ai.ai_sdk_ui.UIMessage],
-    pending_hooks: list[str],
-) -> bool:
-    """True when the incoming messages resolve at least one pending hook.
-
-    Hook labels follow the ``approve_{tool_call_id}`` convention set by
-    ``_execute_with_approval`` in the agent graph.
-    """
-    pending = set(pending_hooks)
-    for msg in ui_messages:
-        for part in msg.parts:
-            state = getattr(part, "state", None)
-            tcid = getattr(part, "tool_call_id", None)
-            if (
-                state == "approval-responded"
-                and tcid is not None
-                and f"approve_{tcid}" in pending
-            ):
-                return True
-    return False
-
-
 @app.post("/chat")
 async def chat(request: ChatRequest) -> fastapi.responses.StreamingResponse:
     """Handle chat requests and stream responses."""
@@ -76,24 +53,10 @@ async def chat(request: ChatRequest) -> fastapi.responses.StreamingResponse:
 
     llm = agent.get_llm()
 
-    # Only load a checkpoint when this request is actually resuming
-    # an interrupted run — i.e. the frontend is sending back an
-    # approval response that matches a pending hook.  Otherwise
-    # discard stale checkpoints so fresh turns aren't poisoned.
     checkpoint = None
     saved = await file_storage.get(checkpoint_key)
     if saved:
-        pending = saved.get("pending_hooks", [])
-        if _has_matching_approval(request.messages, pending):
-            checkpoint = ai.Checkpoint.model_validate(saved["checkpoint"])
-            # The frontend sends the full message history including the
-            # assistant message from the interrupted run.  The checkpoint
-            # will replay that same step, so strip the trailing assistant
-            # message to avoid sending a duplicate tool_use to the LLM.
-            if messages and messages[-1].role == "assistant":
-                messages = messages[:-1]
-        else:
-            await file_storage.delete(checkpoint_key)
+        checkpoint = ai.Checkpoint.model_validate(saved)
 
     result = ai.run(
         agent.graph,
@@ -108,15 +71,10 @@ async def chat(request: ChatRequest) -> fastapi.responses.StreamingResponse:
         async for chunk in ai.ai_sdk_ui.to_sse_stream(result):
             yield chunk
 
-        # Save checkpoint + pending hook labels so the next request
-        # can decide whether it's a resume or a fresh turn.
-        if result.pending_hooks:
+        if result.checkpoint.pending_hooks:
             await file_storage.put(
                 checkpoint_key,
-                {
-                    "checkpoint": result.checkpoint.model_dump(),
-                    "pending_hooks": list(result.pending_hooks.keys()),
-                },
+                result.checkpoint.model_dump(),
             )
         else:
             await file_storage.delete(checkpoint_key)

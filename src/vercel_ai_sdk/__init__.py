@@ -1,6 +1,6 @@
 from . import ai_gateway, ai_sdk_ui, anthropic, mcp, openai
 from .core import telemetry
-from .core.checkpoint import Checkpoint
+from .core.checkpoint import Checkpoint, PendingHookInfo
 from .core.hooks import Hook, ToolApproval, hook
 from .core.llm import LanguageModel
 
@@ -54,6 +54,7 @@ __all__ = [
     "ToolApproval",
     "StructuredOutputPart",
     "Checkpoint",
+    "PendingHookInfo",
     # Functions
     "tool",
     "stream",

@@ -162,6 +162,14 @@ class Runtime:
             steps=list(self._checkpoint.steps) + self._step_log,
             tools=list(self._checkpoint.tools) + self._tool_log,
             hooks=list(self._checkpoint.hooks) + self._hook_log,
+            pending_hooks=[
+                checkpoint_.PendingHookInfo(
+                    label=sus.label,
+                    hook_type=sus.hook_type,
+                    metadata=sus.metadata,
+                )
+                for sus in self._pending_hooks.values()
+            ],
         )
 
 
@@ -388,8 +396,19 @@ def run(
     """
     result = RunResult()
 
+    # Discard stale checkpoints: if the checkpoint has pending hooks but
+    # none of them have been resolved (via Hook.resolve() / to_messages()),
+    # this isn't a resume — it's a fresh turn with an outdated checkpoint.
+    effective_checkpoint = checkpoint
+    if checkpoint and checkpoint.pending_hooks:
+        has_resolution = any(
+            ph.label in hooks_._pending_resolutions for ph in checkpoint.pending_hooks
+        )
+        if not has_resolution:
+            effective_checkpoint = None
+
     async def _generate() -> AsyncGenerator[messages_.Message]:
-        runtime = Runtime(checkpoint=checkpoint)
+        runtime = Runtime(checkpoint=effective_checkpoint)
         result._runtime = runtime
         token_runtime = _runtime.set(runtime)
         token_run_id = telemetry_.start_run()

@@ -401,6 +401,10 @@ def to_messages(
     ``ToolApproval.resolve()`` so the agent loop can resume execution
     without the caller needing to handle approval routing explicitly.
 
+    When approvals are resolved, the trailing assistant message is
+    automatically stripped.  The checkpoint will replay that step, so
+    including it would send duplicate tool-use content to the LLM.
+
     Args:
         ui_messages: List of UIMessage objects from the AI SDK v6 frontend.
 
@@ -408,6 +412,7 @@ def to_messages(
         List of internal Message objects ready for use with the runtime.
     """
     result: list[core.messages.Message] = []
+    resolved_any_approval = False
 
     for ui_msg in ui_messages:
         internal_parts: list[core.messages.Part] = []
@@ -457,6 +462,7 @@ def to_messages(
                                 "reason": tp.approval.reason,
                             },
                         )
+                        resolved_any_approval = True
 
                 case (
                     ui_message.UIStepStartPart()
@@ -488,6 +494,13 @@ def to_messages(
                     parts=internal_parts,
                 )
             )
+
+    # When resuming from a checkpoint (approvals were resolved above),
+    # the frontend sends the full history including the assistant message
+    # from the interrupted run.  The checkpoint replays that step, so
+    # strip the trailing assistant message to avoid duplicate tool-use.
+    if resolved_any_approval and result and result[-1].role == "assistant":
+        result = result[:-1]
 
     return result
 
