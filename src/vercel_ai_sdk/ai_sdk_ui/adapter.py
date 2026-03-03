@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterable
 from typing import Any, Literal
@@ -13,6 +14,8 @@ from typing import Any, Literal
 from .. import core
 from ..core import hooks
 from . import protocol, ui_message
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # Serialization utilities
@@ -500,6 +503,9 @@ def to_messages(
     # from the interrupted run.  The checkpoint replays that step, so
     # strip the trailing assistant message to avoid duplicate tool-use.
     if resolved_any_approval and result and result[-1].role == "assistant":
+        logger.info(
+            "Stripping trailing assistant message (checkpoint will replay this step)"
+        )
         result = result[:-1]
 
     return result
