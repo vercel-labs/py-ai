@@ -461,18 +461,6 @@ wheels = [
 ]
 
 [[package]]
-name = "importlib-metadata"
-version = "8.7.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "zipp" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/f3/49/3b30cad09e7771a4982d9975a8cbf64f00d4a1ececb53297f1d9a7be1b10/importlib_metadata-8.7.1.tar.gz", hash = "sha256:49fef1ae6440c182052f407c8d34a68f72efc36db9ca90dc0113398f2fdde8bb", size = 57107, upload-time = "2025-12-21T10:00:19.278Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/fa/5e/f8e9a1d23b9c20a551a8a02ea3637b4642e22c2626e3a13a9a29cdea99eb/importlib_metadata-8.7.1-py3-none-any.whl", hash = "sha256:5a1f80bf1daa489495071efbb095d75a634cf28a8bc299581244063b53176151", size = 27865, upload-time = "2025-12-21T10:00:18.329Z" },
-]
-
-[[package]]
 name = "jinja2"
 version = "3.1.6"
 source = { registry = "https://pypi.org/simple" }
@@ -708,19 +696,6 @@ wheels = [
 ]
 
 [[package]]
-name = "opentelemetry-api"
-version = "1.39.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "importlib-metadata" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/97/b9/3161be15bb8e3ad01be8be5a968a9237c3027c5be504362ff800fca3e442/opentelemetry_api-1.39.1.tar.gz", hash = "sha256:fbde8c80e1b937a2c61f20347e91c0c18a1940cecf012d62e65a7caf08967c9c", size = 65767, upload-time = "2025-12-11T13:32:39.182Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/cf/df/d3f1ddf4bb4cb50ed9b1139cc7b1c54c34a1e7ce8fd1b9a37c0d1551a6bd/opentelemetry_api-1.39.1-py3-none-any.whl", hash = "sha256:2edd8463432a7f8443edce90972169b195e7d6a05500cd29e6d13898187c9950", size = 66356, upload-time = "2025-12-11T13:32:17.304Z" },
-]
-
-[[package]]
 name = "py-ai-fastapi-chat"
 version = "0.1.0"
 source = { virtual = "." }
@@ -732,7 +707,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = ">=0.128.1" },
-    { name = "vercel-ai-sdk", directory = "../../../" },
+    { name = "vercel-ai-sdk", specifier = ">=0.0.1.dev5" },
 ]
 
 [[package]]
@@ -1344,37 +1319,18 @@ wheels = [
 [[package]]
 name = "vercel-ai-sdk"
 version = "0.0.1.dev5"
-source = { directory = "../../../" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
     { name = "httpx" },
     { name = "mcp" },
     { name = "openai" },
-    { name = "opentelemetry-api" },
     { name = "pydantic" },
     { name = "vercel" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "anthropic", specifier = ">=0.83.0" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "mcp", specifier = ">=1.18.0" },
-    { name = "openai", specifier = ">=2.14.0" },
-    { name = "opentelemetry-api", specifier = ">=1.0" },
-    { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "vercel", specifier = ">=0.3.8" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "mypy", specifier = ">=1.11" },
-    { name = "opentelemetry-sdk", specifier = ">=1.0" },
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "pytest-asyncio", specifier = ">=0.24" },
-    { name = "python-dotenv", specifier = ">=1.2.1" },
-    { name = "rich", specifier = ">=14.2.0" },
-    { name = "ruff", specifier = ">=0.8" },
+sdist = { url = "https://files.pythonhosted.org/packages/b0/dd/3b399134076883247582af3919d5fbd38c9e270a42005fa27d1472705dd1/vercel_ai_sdk-0.0.1.dev5.tar.gz", hash = "sha256:998814780fc6163000be1b29e48dacbe710adb8a765636867bd6dd5a6b9b41b0", size = 37870, upload-time = "2026-02-25T16:31:01.844Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c5/7a/f50dd25ed596c07c2222f2abd81c413169534904bfc4e735b1a5e7084870/vercel_ai_sdk-0.0.1.dev5-py3-none-any.whl", hash = "sha256:22de26c8b667738a825f812aa5b7042d741dd905033c16b3515f6123cd220245", size = 50938, upload-time = "2026-02-25T16:31:00.175Z" },
 ]
 
 [[package]]
@@ -1507,13 +1463,4 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c2/b6/b9afed2afadddaf5ebb2afa801abf4b0868f42f8539bfe4b071b5266c9fe/websockets-16.0-cp314-cp314t-win32.whl", hash = "sha256:5a4b4cc550cb665dd8a47f868c8d04c8230f857363ad3c9caf7a0c3bf8c61ca6", size = 178085, upload-time = "2026-01-10T09:23:33.816Z" },
     { url = "https://files.pythonhosted.org/packages/9f/3e/28135a24e384493fa804216b79a6a6759a38cc4ff59118787b9fb693df93/websockets-16.0-cp314-cp314t-win_amd64.whl", hash = "sha256:b14dc141ed6d2dde437cddb216004bcac6a1df0935d79656387bd41632ba0bbd", size = 178531, upload-time = "2026-01-10T09:23:35.016Z" },
     { url = "https://files.pythonhosted.org/packages/6f/28/258ebab549c2bf3e64d2b0217b973467394a9cea8c42f70418ca2c5d0d2e/websockets-16.0-py3-none-any.whl", hash = "sha256:1637db62fad1dc833276dded54215f2c7fa46912301a24bd94d45d46a011ceec", size = 171598, upload-time = "2026-01-10T09:23:45.395Z" },
-]
-
-[[package]]
-name = "zipp"
-version = "3.23.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/e3/02/0f2892c661036d50ede074e376733dca2ae7c6eb617489437771209d4180/zipp-3.23.0.tar.gz", hash = "sha256:a07157588a12518c9d4034df3fbbee09c814741a33ff63c05fa29d26a2404166", size = 25547, upload-time = "2025-06-08T17:06:39.4Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/2e/54/647ade08bf0db230bfea292f893923872fd20be6ac6f53b2b936ba839d75/zipp-3.23.0-py3-none-any.whl", hash = "sha256:071652d6115ed432f5ce1d34c336c0adfd6a884660d1e9712a256d3d3bd4b14e", size = 10276, upload-time = "2025-06-08T17:06:38.034Z" },
 ]
