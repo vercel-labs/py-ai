@@ -1,11 +1,28 @@
 # fastapi-chat
 
 Chat demo using the Python Vercel AI SDK with a FastAPI backend and React frontend.
+Includes **human-in-the-loop tool approval** — every tool call is gated
+behind user confirmation before execution.
 
 ## Stack
 
 - **Backend:** FastAPI + vercel-ai-sdk (Python 3.12)
 - **Frontend:** Vite + React + AI SDK UI + AI Elements
+
+## Human-in-the-Loop
+
+The agent graph in `backend/agent.py` uses the `ToolApproval` hook to
+suspend execution whenever the LLM wants to call a tool.  The flow is:
+
+1. LLM emits a tool call
+2. Backend creates a `ToolApproval` hook — this emits an
+   `approval-requested` event on the SSE stream and suspends execution
+3. The frontend renders Approve / Reject buttons via the
+   `<Confirmation>` component (from AI Elements)
+4. When the user clicks a button, `addToolApprovalResponse()` patches
+   the message and sends a new request with the decision
+5. The backend resumes from the checkpoint and either executes the tool
+   or marks it as denied
 
 ## Setup
 

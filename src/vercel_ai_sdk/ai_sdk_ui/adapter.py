@@ -149,6 +149,17 @@ def _tool_call_id_from_approval_hook(
     return None
 
 
+def _is_tool_approval_hook_message(msg: core.messages.Message) -> bool:
+    """True if this message contains only ToolApproval HookParts."""
+    if not msg.parts:
+        return False
+    return all(
+        isinstance(p, core.messages.HookPart)
+        and _tool_call_id_from_approval_hook(p) is not None
+        for p in msg.parts
+    )
+
+
 async def to_ui_message_stream(
     messages: AsyncIterable[core.messages.Message],
 ) -> AsyncGenerator[protocol.UIMessageStreamPart]:
@@ -161,6 +172,13 @@ async def to_ui_message_stream(
     state = _StreamState()
 
     async for msg in messages:
+        # Tool-approval hook messages are emitted by the Runtime as
+        # separate Message objects (with their own id).  To the frontend
+        # they belong to the *same* step as the tool call, so we pin
+        # the message id to avoid creating a spurious step boundary.
+        if _is_tool_approval_hook_message(msg) and state.message_id:
+            msg = msg.model_copy(update={"id": state.message_id})
+
         for part in state.begin_message(msg):
             yield part
 

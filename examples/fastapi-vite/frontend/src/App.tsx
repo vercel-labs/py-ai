@@ -1,8 +1,21 @@
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
+import {
+  DefaultChatTransport,
+  lastAssistantMessageIsCompleteWithApprovalResponses,
+} from "ai";
 import type { ToolUIPart } from "ai";
+import { CheckIcon, XIcon } from "lucide-react";
 import { Fragment } from "react";
 
+import {
+  Confirmation,
+  ConfirmationAccepted,
+  ConfirmationAction,
+  ConfirmationActions,
+  ConfirmationRejected,
+  ConfirmationRequest,
+  ConfirmationTitle,
+} from "@/components/ai-elements/confirmation";
 import {
   Conversation,
   ConversationContent,
@@ -29,11 +42,16 @@ import {
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 export default function App() {
-  const { messages, sendMessage, status, stop } = useChat({
-    transport: new DefaultChatTransport({
-      api: "/api/chat",
-    }),
-  });
+  const { messages, sendMessage, addToolApprovalResponse, status, stop } =
+    useChat({
+      transport: new DefaultChatTransport({
+        api: "/api/chat",
+      }),
+      // After the user approves/rejects a tool, automatically send the
+      // updated messages back to the backend so it can resume execution.
+      sendAutomaticallyWhen:
+        lastAssistantMessageIsCompleteWithApprovalResponses,
+    });
 
   const isLoading = status === "submitted" || status === "streaming";
 
@@ -63,7 +81,8 @@ export default function App() {
                       // Handle tool parts (type starts with "tool-")
                       if (part.type.startsWith("tool-")) {
                         const toolPart = part as ToolUIPart;
-                        const isComplete = toolPart.state === "output-available";
+                        const isComplete =
+                          toolPart.state === "output-available";
 
                         return (
                           <Tool
@@ -76,6 +95,51 @@ export default function App() {
                             />
                             <ToolContent>
                               <ToolInput input={toolPart.input} />
+
+                              {/* Human-in-the-loop approval UI */}
+                              <Confirmation
+                                approval={toolPart.approval}
+                                state={toolPart.state}
+                              >
+                                <ConfirmationTitle>
+                                  <ConfirmationRequest>
+                                    Allow this tool to run?
+                                  </ConfirmationRequest>
+                                  <ConfirmationAccepted>
+                                    <CheckIcon className="size-4 text-green-500" />
+                                    <span>Approved</span>
+                                  </ConfirmationAccepted>
+                                  <ConfirmationRejected>
+                                    <XIcon className="size-4 text-destructive" />
+                                    <span>Rejected</span>
+                                  </ConfirmationRejected>
+                                </ConfirmationTitle>
+                                <ConfirmationActions>
+                                  <ConfirmationAction
+                                    variant="outline"
+                                    onClick={() =>
+                                      addToolApprovalResponse({
+                                        id: toolPart.approval!.id,
+                                        approved: false,
+                                      })
+                                    }
+                                  >
+                                    Reject
+                                  </ConfirmationAction>
+                                  <ConfirmationAction
+                                    variant="default"
+                                    onClick={() =>
+                                      addToolApprovalResponse({
+                                        id: toolPart.approval!.id,
+                                        approved: true,
+                                      })
+                                    }
+                                  >
+                                    Approve
+                                  </ConfirmationAction>
+                                </ConfirmationActions>
+                              </Confirmation>
+
                               <ToolOutput
                                 output={toolPart.output}
                                 errorText={toolPart.errorText}
@@ -86,7 +150,7 @@ export default function App() {
                       }
 
                       // Handle text parts
-                        if (part.type === "text") {
+                      if (part.type === "text") {
                         return (
                           <Message
                             key={`${message.id}-${partIndex}`}
