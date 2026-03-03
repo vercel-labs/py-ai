@@ -4,6 +4,7 @@ import asyncio
 import contextvars
 import dataclasses
 import json
+import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Sequence
 from typing import Any, get_type_hints
 
@@ -17,6 +18,8 @@ from . import messages as messages_
 from . import streams as streams_
 from . import telemetry as telemetry_
 from . import tools as tools_
+
+logger = logging.getLogger(__name__)
 
 # ── Queue item types ──────────────────────────────────────────────
 
@@ -117,6 +120,7 @@ class Runtime:
         if self._step_index < len(self._checkpoint.steps):
             event = self._checkpoint.steps[self._step_index]
             self._step_index += 1
+            logger.info("Replaying step %d from checkpoint", event.index)
             return event.to_stream_result()
         return None
 
@@ -132,7 +136,14 @@ class Runtime:
 
     def try_replay_tool(self, tool_call_id: str) -> checkpoint_.ToolEvent | None:
         """Return the cached ToolEvent if available, else None."""
-        return self._tool_replay.get(tool_call_id)
+        event = self._tool_replay.get(tool_call_id)
+        if event is not None:
+            logger.info(
+                "Replaying tool %s (call_id=%s) from checkpoint",
+                event.tool_call_id,
+                tool_call_id,
+            )
+        return event
 
     def record_tool(
         self, tool_call_id: str, result: Any, *, status: str = "result"
@@ -146,7 +157,10 @@ class Runtime:
     # ── Replay / record: hooks ────────────────────────────────────
 
     def get_hook_resolution(self, label: str) -> dict[str, Any] | None:
-        return self._hook_replay.get(label)
+        resolution = self._hook_replay.get(label)
+        if resolution is not None:
+            logger.info("Resolving hook '%s' from checkpoint", label)
+        return resolution
 
     def record_hook(self, label: str, resolution: dict[str, Any]) -> None:
         self._hook_log.append(checkpoint_.HookEvent(label=label, resolution=resolution))
@@ -162,6 +176,14 @@ class Runtime:
             steps=list(self._checkpoint.steps) + self._step_log,
             tools=list(self._checkpoint.tools) + self._tool_log,
             hooks=list(self._checkpoint.hooks) + self._hook_log,
+            pending_hooks=[
+                checkpoint_.PendingHookInfo(
+                    label=sus.label,
+                    hook_type=sus.hook_type,
+                    metadata=sus.metadata,
+                )
+                for sus in self._pending_hooks.values()
+            ],
         )
 
 
@@ -388,8 +410,31 @@ def run(
     """
     result = RunResult()
 
+    # Discard stale checkpoints: if the checkpoint has pending hooks but
+    # none of them have been resolved (via Hook.resolve() / to_messages()),
+    # this isn't a resume — it's a fresh turn with an outdated checkpoint.
+    effective_checkpoint = checkpoint
+    if checkpoint and checkpoint.pending_hooks:
+        pending_labels = [ph.label for ph in checkpoint.pending_hooks]
+        has_resolution = any(
+            label in hooks_._pending_resolutions for label in pending_labels
+        )
+        if not has_resolution:
+            logger.info(
+                "Discarding stale checkpoint: pending hooks %s have no "
+                "matching resolutions",
+                pending_labels,
+            )
+            effective_checkpoint = None
+        else:
+            logger.info(
+                "Resuming from checkpoint with %d pending hook(s): %s",
+                len(pending_labels),
+                pending_labels,
+            )
+
     async def _generate() -> AsyncGenerator[messages_.Message]:
-        runtime = Runtime(checkpoint=checkpoint)
+        runtime = Runtime(checkpoint=effective_checkpoint)
         result._runtime = runtime
         token_runtime = _runtime.set(runtime)
         token_run_id = telemetry_.start_run()

@@ -6,12 +6,16 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterable
 from typing import Any, Literal
 
 from .. import core
+from ..core import hooks
 from . import protocol, ui_message
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # Serialization utilities
@@ -69,6 +73,7 @@ class _StreamState:
         self.started_tool_calls: set[str] = set()
         self.emitted_tool_results: set[str] = set()
         self.pending_tool_calls: set[str] = set()
+        self.emitted_approval_requests: set[str] = set()
 
     def close_open_blocks(self) -> list[protocol.UIMessageStreamPart]:
         """Close any open reasoning/text blocks, returning parts to emit."""
@@ -94,6 +99,7 @@ class _StreamState:
         self.started_tool_calls = set()
         self.emitted_tool_results = set()
         self.pending_tool_calls = set()
+        self.emitted_approval_requests = set()
 
     def begin_message(
         self, msg: core.messages.Message
@@ -130,6 +136,33 @@ class _StreamState:
         return parts
 
 
+def _tool_call_id_from_approval_hook(
+    hook_part: core.messages.HookPart,
+) -> str | None:
+    """Extract tool_call_id from a ToolApproval HookPart.
+
+    Returns the tool_call_id if this is a ToolApproval hook whose hook_id
+    follows the ``approve_{tool_call_id}`` convention, otherwise None.
+    """
+    if hook_part.hook_type != hooks.ToolApproval.hook_type:  # type: ignore[attr-defined]
+        return None
+    prefix = "approve_"
+    if hook_part.hook_id.startswith(prefix):
+        return hook_part.hook_id[len(prefix) :]
+    return None
+
+
+def _is_tool_approval_hook_message(msg: core.messages.Message) -> bool:
+    """True if this message contains only ToolApproval HookParts."""
+    if not msg.parts:
+        return False
+    return all(
+        isinstance(p, core.messages.HookPart)
+        and _tool_call_id_from_approval_hook(p) is not None
+        for p in msg.parts
+    )
+
+
 async def to_ui_message_stream(
     messages: AsyncIterable[core.messages.Message],
 ) -> AsyncGenerator[protocol.UIMessageStreamPart]:
@@ -142,6 +175,13 @@ async def to_ui_message_stream(
     state = _StreamState()
 
     async for msg in messages:
+        # Tool-approval hook messages are emitted by the Runtime as
+        # separate Message objects (with their own id).  To the frontend
+        # they belong to the *same* step as the tool call, so we pin
+        # the message id to avoid creating a spurious step boundary.
+        if _is_tool_approval_hook_message(msg) and state.message_id:
+            msg = msg.model_copy(update={"id": state.message_id})
+
         for part in state.begin_message(msg):
             yield part
 
@@ -256,6 +296,33 @@ async def to_ui_message_stream(
                                 output=result,
                             )
 
+            # Pass 3: Hook-based tool approvals
+            for msg_part in msg.parts:
+                if not isinstance(msg_part, core.messages.HookPart):
+                    continue
+                approval_tc_id = _tool_call_id_from_approval_hook(msg_part)
+                if approval_tc_id is None:
+                    continue
+
+                if msg_part.status == "pending":
+                    if approval_tc_id not in state.emitted_approval_requests:
+                        state.emitted_approval_requests.add(approval_tc_id)
+                        yield protocol.ToolApprovalRequestPart(
+                            approval_id=msg_part.hook_id,
+                            tool_call_id=approval_tc_id,
+                        )
+                elif msg_part.status == "resolved":
+                    resolution = msg_part.resolution or {}
+                    if not resolution.get("granted", False):
+                        yield protocol.ToolOutputDeniedPart(
+                            tool_call_id=approval_tc_id,
+                        )
+                elif msg_part.status == "cancelled":
+                    yield protocol.ToolOutputErrorPart(
+                        tool_call_id=approval_tc_id,
+                        error_text="Hook cancelled",
+                    )
+
     # Final cleanup
     for part in state.finish_step():
         yield part
@@ -333,6 +400,14 @@ def to_messages(
 ) -> list[core.messages.Message]:
     """Convert AI SDK v6 UI messages to internal Message format.
 
+    As a side-effect, tool parts in ``approval-responded`` state trigger
+    ``ToolApproval.resolve()`` so the agent loop can resume execution
+    without the caller needing to handle approval routing explicitly.
+
+    When approvals are resolved, the trailing assistant message is
+    automatically stripped.  The checkpoint will replay that step, so
+    including it would send duplicate tool-use content to the LLM.
+
     Args:
         ui_messages: List of UIMessage objects from the AI SDK v6 frontend.
 
@@ -340,6 +415,7 @@ def to_messages(
         List of internal Message objects ready for use with the runtime.
     """
     result: list[core.messages.Message] = []
+    resolved_any_approval = False
 
     for ui_msg in ui_messages:
         internal_parts: list[core.messages.Part] = []
@@ -375,6 +451,21 @@ def to_messages(
                             result=_normalize_tool_result(tp.output),
                         )
                     )
+                    # Side-effect: resolve ToolApproval hooks from approval
+                    # responses so the agent loop can resume execution.
+                    if (
+                        tp.state == "approval-responded"
+                        and tp.approval is not None
+                        and tp.approval.approved is not None
+                    ):
+                        hooks.ToolApproval.resolve(  # type: ignore[attr-defined]
+                            tp.approval.id,
+                            {
+                                "granted": tp.approval.approved,
+                                "reason": tp.approval.reason,
+                            },
+                        )
+                        resolved_any_approval = True
 
                 case (
                     ui_message.UIStepStartPart()
@@ -392,12 +483,66 @@ def to_messages(
                 "User and system messages require non-empty content."
             )
 
-        result.append(
-            core.messages.Message(
-                id=ui_msg.id,
-                role=ui_msg.role,
-                parts=internal_parts,
+        # The UI sends one assistant message per conversation turn, but a
+        # single turn may span multiple stream_loop iterations (e.g.
+        # [text, tool(done), text, tool(done), text]).  LLM APIs expect
+        # one message per iteration, so split at completed-tool boundaries.
+        if ui_msg.role == "assistant":
+            result.extend(_split_assistant_parts(internal_parts, msg_id=ui_msg.id))
+        else:
+            result.append(
+                core.messages.Message(
+                    id=ui_msg.id,
+                    role=ui_msg.role,
+                    parts=internal_parts,
+                )
             )
+
+    # When resuming from a checkpoint (approvals were resolved above),
+    # the frontend sends the full history including the assistant message
+    # from the interrupted run.  The checkpoint replays that step, so
+    # strip the trailing assistant message to avoid duplicate tool-use.
+    if resolved_any_approval and result and result[-1].role == "assistant":
+        logger.info(
+            "Stripping trailing assistant message (checkpoint will replay this step)"
         )
+        result = result[:-1]
 
     return result
+
+
+def _split_assistant_parts(
+    parts: list[core.messages.Part],
+    msg_id: str,
+) -> list[core.messages.Message]:
+    """Split assistant parts at completed-tool → non-tool boundaries.
+
+    Returns one ``Message`` per ``stream_loop`` iteration so that LLM
+    adapters receive correctly-shaped single-iteration messages.
+    """
+    messages: list[core.messages.Message] = []
+    current: list[core.messages.Part] = []
+    has_completed_tool = False
+
+    for part in parts:
+        if has_completed_tool and not isinstance(part, core.messages.ToolPart):
+            messages.append(
+                core.messages.Message(role="assistant", parts=current, id=msg_id)
+            )
+            current = []
+            has_completed_tool = False
+
+        current.append(part)
+
+        if isinstance(part, core.messages.ToolPart) and part.status in (
+            "result",
+            "error",
+        ):
+            has_completed_tool = True
+
+    if current:
+        messages.append(
+            core.messages.Message(role="assistant", parts=current, id=msg_id)
+        )
+
+    return messages

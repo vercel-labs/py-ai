@@ -37,11 +37,11 @@ class UIReasoningPart(pydantic.BaseModel):
 # Tool invocation states in AI SDK v6:
 # - "input-streaming": Tool arguments are being streamed
 # - "input-available": Tool arguments are complete, ready for execution
-# - "approval-requested": Tool requires user approval (TODO: approval workflow)
-# - "approval-responded": User has responded to approval (TODO: approval workflow)
+# - "approval-requested": Tool requires user approval before execution
+# - "approval-responded": User has responded to approval request
 # - "output-available": Tool has been executed, result is available
 # - "output-error": Tool execution failed
-# - "output-denied": Tool execution was denied by user (TODO: approval workflow)
+# - "output-denied": Tool execution was denied by user
 UIToolInvocationState = Literal[
     "input-streaming",
     "input-available",
@@ -78,6 +78,21 @@ class UIStepStartPart(pydantic.BaseModel):
     type: Literal["step-start"]
 
 
+class UIToolApproval(pydantic.BaseModel):
+    """Approval state on a tool part (AI SDK v6 protocol).
+
+    Present when a tool requires user approval before execution.
+    ``id`` matches the hook label used by the ToolApproval hook.
+    ``approved`` is None while awaiting a response, True/False after.
+    """
+
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
+    id: str
+    approved: bool | None = None
+    reason: str | None = None
+
+
 class UIToolPart(pydantic.BaseModel):
     """Tool part with dynamic type pattern: tool-{toolName}.
 
@@ -95,8 +110,7 @@ class UIToolPart(pydantic.BaseModel):
     input: str | dict[str, Any] | None = None  # JSON string or parsed dict
     output: Any | None = None
     error_text: str | None = pydantic.Field(default=None, alias="errorText")
-    # TODO: title, providerExecuted, preliminary fields
-    # TODO: approval workflow (approval object)
+    approval: UIToolApproval | None = None
 
     @property
     def tool_name(self) -> str:

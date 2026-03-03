@@ -28,12 +28,16 @@ def _messages_to_anthropic(
 ) -> tuple[str | None, list[dict[str, Any]]]:
     """Convert internal messages to Anthropic API format.
 
-    Returns (system_prompt, messages) tuple since Anthropic handles system differently.
+    Returns (system_prompt, messages) tuple since Anthropic handles
+    system prompts separately.
 
-    Handles the unified ToolPart model where tool calls and results are in the same
-    assistant message. Converts back to Anthropic's expected format:
-    - tool_use blocks in assistant messages
-    - tool_result blocks in user messages (after the assistant message)
+    Converts to the Anthropic wire format:
+
+    - ``tool_use`` blocks in assistant messages
+    - ``tool_result`` blocks in user messages (immediately after)
+
+    A final merge pass ensures strictly alternating roles (Anthropic
+    rejects consecutive same-role messages).
     """
     system_prompt: str | None = None
     result: list[dict[str, Any]] = []
@@ -49,8 +53,6 @@ def _messages_to_anthropic(
 
             for part in msg.parts:
                 if isinstance(part, core.messages.ReasoningPart):
-                    # Only include thinking blocks if we have the signature
-                    # (required by Anthropic API for multi-turn conversations)
                     if part.signature:
                         content.append(
                             {
@@ -62,7 +64,6 @@ def _messages_to_anthropic(
                 elif isinstance(part, core.messages.TextPart):
                     content.append({"type": "text", "text": part.text})
                 elif isinstance(part, core.messages.ToolPart):
-                    # tool_args is a JSON string, but Anthropic expects input as a dict
                     tool_input = json.loads(part.tool_args) if part.tool_args else {}
                     content.append(
                         {
@@ -72,12 +73,13 @@ def _messages_to_anthropic(
                             "input": tool_input,
                         }
                     )
-                    # If tool has completed (success or error), collect for user message
-                    if part.status in ("result", "error") and part.result is not None:
+                    if part.status in ("result", "error"):
                         entry: dict[str, Any] = {
                             "type": "tool_result",
                             "tool_use_id": part.tool_call_id,
-                            "content": str(part.result),
+                            "content": str(part.result)
+                            if part.result is not None
+                            else "",
                         }
                         if part.status == "error":
                             entry["is_error"] = True
@@ -85,8 +87,6 @@ def _messages_to_anthropic(
 
             if content:
                 result.append({"role": "assistant", "content": content})
-
-            # Emit tool results as a separate user message (Anthropic API format)
             if tool_results:
                 result.append({"role": "user", "content": tool_results})
         else:
@@ -96,7 +96,46 @@ def _messages_to_anthropic(
             )
             result.append({"role": "user", "content": content_text})
 
+    # Merge consecutive same-role messages (e.g. synthetic user(tool_result)
+    # followed by a real user message).
+    result = _merge_consecutive_roles(result)
+
     return system_prompt, result
+
+
+def _merge_consecutive_roles(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge consecutive messages that share the same role.
+
+    Anthropic requires strictly alternating user/assistant roles.  When
+    our conversion emits a synthetic ``user`` message for ``tool_result``
+    blocks followed by a real ``user`` message, they must be merged.
+
+    Content is normalized to list-of-blocks so heterogeneous content
+    (tool_result dicts + text strings) can coexist.
+    """
+    if not messages:
+        return messages
+
+    merged: list[dict[str, Any]] = [messages[0]]
+
+    for msg in messages[1:]:
+        if msg["role"] == merged[-1]["role"]:
+            prev = _to_content_list(merged[-1]["content"])
+            cur = _to_content_list(msg["content"])
+            merged[-1]["content"] = prev + cur
+        else:
+            merged.append(msg)
+
+    return merged
+
+
+def _to_content_list(content: Any) -> list[dict[str, Any]]:
+    """Normalize Anthropic message content to list-of-blocks format."""
+    if isinstance(content, list):
+        return list(content)
+    return [{"type": "text", "text": content}]
 
 
 class AnthropicModel(core.llm.LanguageModel):

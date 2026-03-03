@@ -33,7 +33,16 @@ class HookEvent(pydantic.BaseModel):
     resolution: dict[str, Any]
 
 
+class PendingHookInfo(pydantic.BaseModel):
+    """A hook that was suspended but not resolved when the run ended."""
+
+    label: str
+    hook_type: str
+    metadata: dict[str, Any] = {}
+
+
 class Checkpoint(pydantic.BaseModel):
     steps: list[StepEvent] = []
     tools: list[ToolEvent] = []
     hooks: list[HookEvent] = []
+    pending_hooks: list[PendingHookInfo] = []

@@ -29,14 +29,13 @@ def _tools_to_openai(tools: Sequence[core.tools.ToolLike]) -> list[dict[str, Any
 def _messages_to_openai(messages: list[core.messages.Message]) -> list[dict[str, Any]]:
     """Convert internal messages to OpenAI API format.
 
-    The Vercel AI Gateway preserves reasoning details across interactions,
-    normalizing formats from different providers. This is useful for tool
-    calling workflows where the model needs to resume its thought process.
+    Converts to the OpenAI wire format:
 
-    Handles the unified ToolPart model where tool calls and results are in the same
-    assistant message. Converts back to OpenAI's expected format:
-    - tool_calls in assistant messages
-    - tool results as separate tool role messages
+    - ``tool_calls`` on assistant messages
+    - tool results as separate ``role: "tool"`` messages
+
+    The Vercel AI Gateway preserves reasoning details across interactions,
+    normalizing formats from different providers.
 
     See: https://vercel.com/docs/ai-gateway/openai-compat/advanced
     """
@@ -64,21 +63,20 @@ def _messages_to_openai(messages: list[core.messages.Message]) -> list[dict[str,
                             },
                         }
                     )
-                    # If tool has completed (success or error),
-                    # collect for tool messages
-                    if part.status in ("result", "error") and part.result is not None:
+                    if part.status in ("result", "error"):
                         tool_results.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": part.tool_call_id,
-                                "content": str(part.result),
+                                "content": str(part.result)
+                                if part.result is not None
+                                else "",
                             }
                         )
 
             entry: dict[str, Any] = {"role": "assistant"}
             if content:
                 entry["content"] = content
-            # Include reasoning for multi-turn context (gateway preserves this)
             if reasoning:
                 entry["reasoning"] = reasoning
             if tool_calls:

@@ -4,18 +4,10 @@ import asyncio
 import dataclasses
 from typing import Any
 
-import pydantic
-
 import vercel_ai_sdk as ai
 
 from . import proto
 from .tools import BUILTIN_TOOLS, _filesystem
-
-
-@ai.hook
-class ToolApproval(pydantic.BaseModel):
-    granted: bool
-    reason: str | None = None
 
 
 @dataclasses.dataclass
@@ -48,7 +40,7 @@ class Agent:
         """
         # TODO: mypy doesn't support class decorators that change the class type —
         # @ai.hook returns type[Hook[T]] but mypy still sees the original BaseModel.
-        approval = await ToolApproval.create(  # type: ignore[attr-defined]
+        approval = await ai.ToolApproval.create(  # type: ignore[attr-defined]
             f"approve_{tc.tool_call_id}",
             metadata={"tool_name": tc.tool_name, "tool_args": tc.tool_args},
         )

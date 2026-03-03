@@ -7,3 +7,4 @@ dependencies = [
     "fastapi[standard]>=0.128.1",
     "vercel-ai-sdk>=0.0.1.dev5",
 ]
+
