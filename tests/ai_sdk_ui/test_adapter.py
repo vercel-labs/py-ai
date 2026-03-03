@@ -2,6 +2,7 @@
 Based on: .reference/ai/packages/ai/src/ui/process-ui-message-stream.test.ts
 """
 
+import asyncio
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -10,7 +11,7 @@ import vercel_ai_sdk as ai
 from vercel_ai_sdk.ai_sdk_ui import adapter, ui_message
 from vercel_ai_sdk.core import hooks, messages
 
-from ..conftest import MockLLM
+from ..conftest import MockLLM, tool_msg
 
 
 async def get_event_types(msgs: list[messages.Message]) -> list[str]:
@@ -501,7 +502,14 @@ def test_ui_skips_unsupported_parts() -> None:
 
 @pytest.mark.asyncio
 async def test_tool_approval_hook_emits_approval_request() -> None:
-    """Pending ToolApproval HookPart emits tool-approval-request on the wire."""
+    """Pending ToolApproval HookPart emits tool-approval-request on the wire.
+
+    The HookPart message uses a *different* id from the tool message,
+    matching what the Runtime actually does (it creates an ad-hoc Message
+    with its own auto-generated id at runtime.py:452).  The adapter must
+    keep both in the same step so the frontend's sendAutomaticallyWhen
+    helper can find the tool part when the user responds to the approval.
+    """
     msgs = [
         # Tool pending (args complete, awaiting approval)
         messages.Message(
@@ -517,9 +525,10 @@ async def test_tool_approval_hook_emits_approval_request() -> None:
                 ),
             ],
         ),
-        # Hook pending (approval requested)
+        # Hook pending (approval requested) — different message id,
+        # just like the Runtime produces at runtime.py:452.
         messages.Message(
-            id="msg-1",
+            id="hook-msg-1",
             role="assistant",
             parts=[
                 messages.HookPart(
@@ -533,6 +542,8 @@ async def test_tool_approval_hook_emits_approval_request() -> None:
     ]
 
     event_types = await get_event_types(msgs)
+    # tool-approval-request must be in the SAME step as the tool input —
+    # no extra start-step/finish-step between them.
     assert event_types == [
         "start",
         "start-step",
@@ -577,3 +588,88 @@ def test_approval_responded_resolves_hook() -> None:
     assert label in hooks._pending_resolutions
     resolution = hooks._pending_resolutions.pop(label)
     assert resolution == {"granted": True, "reason": "looks safe"}
+
+
+@pytest.mark.asyncio
+async def test_runtime_tool_approval_same_step() -> None:
+    """E2E: tool-approval-request must land in the same SSE step as the tool call.
+
+    Runs a graph with ToolApproval through ai.run(cancel_on_hooks=True),
+    collects runtime messages, streams through the adapter, and asserts
+    that no spurious step boundary appears between tool-input-available
+    and tool-approval-request.
+
+    This is the test that would have caught the bug where the Runtime's
+    HookPart message (which has a different id from the LLM message)
+    caused the adapter to open a new step.
+    """
+
+    @ai.tool
+    async def dangerous_action(path: str) -> str:
+        """Do something dangerous."""
+        return f"deleted {path}"
+
+    async def graph(llm: ai.LanguageModel) -> None:
+        result = await ai.stream_step(
+            llm,
+            ai.make_messages(system="You are helpful.", user="delete /tmp"),
+            [dangerous_action],
+        )
+        if not result.tool_calls:
+            return
+
+        last_msg = result.last_message
+        assert last_msg is not None
+
+        async def approve_and_execute(tc: ai.ToolPart) -> None:
+            approval = await ai.ToolApproval.create(  # type: ignore[attr-defined]
+                f"approve_{tc.tool_call_id}",
+                metadata={"tool_name": tc.tool_name},
+            )
+            if approval.granted:
+                await ai.execute_tool(tc, message=last_msg)
+            else:
+                tc.set_error("denied")
+
+        await asyncio.gather(*(approve_and_execute(tc) for tc in result.tool_calls))
+
+    mock_llm = MockLLM(
+        [
+            [
+                tool_msg(
+                    tc_id="tc-1",
+                    name="dangerous_action",
+                    args='{"path": "/tmp"}',
+                )
+            ],
+        ]
+    )
+
+    runtime_messages: list[messages.Message] = []
+    result = ai.run(graph, mock_llm, cancel_on_hooks=True)
+    async for msg in result:
+        runtime_messages.append(msg)
+
+    # The run should have a pending hook (approval not yet granted)
+    assert "approve_tc-1" in result.pending_hooks
+
+    # Stream through UI adapter
+    event_types = [
+        p.type
+        async for p in adapter.to_ui_message_stream(_async_iter(runtime_messages))
+    ]
+
+    # tool-approval-request must be in the SAME step as tool-input.
+    # If a spurious step boundary sneaks in, we'd see:
+    #   [..., "tool-input-available", "finish-step", "start-step",
+    #    "tool-approval-request", ...]
+    # which breaks the frontend's sendAutomaticallyWhen helper.
+    assert event_types == [
+        "start",
+        "start-step",
+        "tool-input-start",
+        "tool-input-available",
+        "tool-approval-request",
+        "finish-step",
+        "finish",
+    ]
