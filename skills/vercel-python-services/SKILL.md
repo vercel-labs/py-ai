@@ -10,7 +10,7 @@ Build multi-service projects using Vercel's `experimentalServices` API with a Py
 ## Setup
 
 1. Create the project files (see references for the minimal working example). Choose frameworks for each service according to user's requests.
-2. Ensure backend routes match the prefix specified in `vercel.json` (e.g. for `"routePrefix": "/api"` it is `@app.get("/api/health")`, not `@app.get("/health")`)
+2. Define backend routes without the `/api` prefix (e.g. `@app.get("/health")`). Vercel strips the prefix before forwarding to the backend.
 3. Validate services in `vercel.json` have `entrypoint` and `routePrefix`, but no extra unknown fields, otherwise that will cause preview to crash
 
 Only `vercel.json` lives at the root. Each service manages its own dependencies independently.
@@ -18,5 +18,4 @@ Only `vercel.json` lives at the root. Each service manages its own dependencies 
 ## Usage
 
 - Use `vercel dev -L` from the project root to run all services as one application. The CLI will handle each individual service's routing and dev server and put the application on port 3000.
-- Backend routes MUST include the full path with `/api` prefix (e.g. `@app.get("/api/health")`).
-- Frontend calls `/api/...` — no localhost URLs, no proxy needed.
+- Frontend calls `/api/...` — Vercel routes these to the backend, which sees only the path after the prefix. No localhost URLs, no proxy needed.
