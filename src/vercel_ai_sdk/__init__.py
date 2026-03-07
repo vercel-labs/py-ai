@@ -6,6 +6,7 @@ from .core.llm import LanguageModel
 
 # Re-export core types
 from .core.messages import (
+    FilePart,
     HookPart,
     Message,
     Part,
@@ -40,6 +41,7 @@ __all__ = [
     "ToolPart",
     "ToolDelta",
     "ReasoningPart",
+    "FilePart",
     "ToolLike",
     "ToolSchema",
     "Tool",

@@ -26,7 +26,66 @@ def _tools_to_openai(tools: Sequence[core.tools.ToolLike]) -> list[dict[str, Any
     ]
 
 
-def _messages_to_openai(messages: list[core.messages.Message]) -> list[dict[str, Any]]:
+async def _file_part_to_openai(part: core.messages.FilePart) -> dict[str, Any]:
+    """Convert a :class:`FilePart` to an OpenAI content-array element.
+
+    Follows the OpenAI chat-completions content part formats:
+
+    * ``image/*`` → ``image_url`` (URL or ``data:`` URL)
+    * ``audio/*`` → ``input_audio`` (base-64 only; URLs auto-downloaded)
+    * ``application/pdf`` → ``file`` (base-64 only; URLs auto-downloaded)
+    * ``text/*`` → ``text`` (decoded to string)
+    * anything else → ``ValueError``
+
+    OpenAI does not accept URLs for audio ``input_audio`` or PDF ``file``
+    parts.  When URL data is provided for these types, it is downloaded
+    automatically (matching the TS SDK's ``downloadAssets`` behaviour).
+    """
+    mt = part.media_type
+    data = part.data
+
+    if mt.startswith("image/"):
+        media_type = "image/jpeg" if mt == "image/*" else mt
+        url = core.media.data.data_to_data_url(data, media_type)
+        return {"type": "image_url", "image_url": {"url": url}}
+
+    if mt.startswith("audio/"):
+        # OpenAI input_audio requires raw base-64 — download http(s) URLs.
+        if isinstance(data, str) and core.media.data.is_downloadable_url(data):
+            downloaded, _ = await core.media.download.download(data)
+            data = downloaded
+        fmt = mt.split("/", 1)[1] if "/" in mt else mt
+        b64 = core.media.data.data_to_base64(data)
+        return {"type": "input_audio", "input_audio": {"data": b64, "format": fmt}}
+
+    if mt == "application/pdf":
+        # OpenAI file parts require base-64 — download http(s) URLs.
+        if isinstance(data, str) and core.media.data.is_downloadable_url(data):
+            downloaded, _ = await core.media.download.download(data)
+            data = downloaded
+        data_url = core.media.data.data_to_data_url(data, mt)
+        filename = part.filename or "document.pdf"
+        return {"type": "file", "file": {"filename": filename, "file_data": data_url}}
+
+    if mt.startswith("text/"):
+        # Decode text content — URLs are passed through as text,
+        # bytes/base-64 are decoded to UTF-8 string.
+        if isinstance(data, bytes):
+            text_content = data.decode("utf-8")
+        elif core.media.data.is_url(data):
+            text_content = data
+        else:
+            import base64 as _b64
+
+            text_content = _b64.b64decode(data).decode("utf-8")
+        return {"type": "text", "text": text_content}
+
+    raise ValueError(f"Unsupported media type for OpenAI: {mt}")
+
+
+async def _messages_to_openai(
+    messages: list[core.messages.Message],
+) -> list[dict[str, Any]]:
     """Convert internal messages to OpenAI API format.
 
     Converts to the OpenAI wire format:
@@ -85,12 +144,28 @@ def _messages_to_openai(messages: list[core.messages.Message]) -> list[dict[str,
 
             # Emit tool results as separate messages (OpenAI API format)
             result.extend(tool_results)
-        else:
-            # User/system messages
+        elif msg.role == "system":
             content = "".join(
                 p.text for p in msg.parts if isinstance(p, core.messages.TextPart)
             )
-            result.append({"role": msg.role, "content": content})
+            result.append({"role": "system", "content": content})
+        else:
+            # User messages — may contain multimodal FileParts
+            has_files = any(isinstance(p, core.messages.FilePart) for p in msg.parts)
+            if not has_files:
+                # Text-only: keep simple string format (cheaper, no content array)
+                text = "".join(
+                    p.text for p in msg.parts if isinstance(p, core.messages.TextPart)
+                )
+                result.append({"role": "user", "content": text})
+            else:
+                parts: list[dict[str, Any]] = []
+                for p in msg.parts:
+                    if isinstance(p, core.messages.TextPart):
+                        parts.append({"type": "text", "text": p.text})
+                    elif isinstance(p, core.messages.FilePart):
+                        parts.append(await _file_part_to_openai(p))
+                result.append({"role": "user", "content": parts})
     return result
 
 
@@ -141,7 +216,7 @@ class OpenAIModel(core.llm.LanguageModel):
         output_type: type[pydantic.BaseModel] | None = None,
     ) -> AsyncGenerator[core.llm.StreamEvent]:
         """Yield raw stream events from OpenAI API."""
-        openai_messages = _messages_to_openai(messages)
+        openai_messages = await _messages_to_openai(messages)
         openai_tools = _tools_to_openai(tools) if tools else None
 
         kwargs: dict[str, Any] = {

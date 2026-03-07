@@ -1,3 +1,19 @@
-from . import hooks, llm, messages, runtime, telemetry, tools
+from . import (
+    hooks,
+    llm,
+    media,
+    messages,
+    runtime,
+    telemetry,
+    tools,
+)
 
-__all__ = ["messages", "tools", "runtime", "hooks", "llm", "telemetry"]
+__all__ = [
+    "hooks",
+    "llm",
+    "media",
+    "messages",
+    "runtime",
+    "telemetry",
+    "tools",
+]
