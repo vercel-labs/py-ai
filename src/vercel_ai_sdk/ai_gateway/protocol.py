@@ -24,7 +24,30 @@ from .. import core
 # ---------------------------------------------------------------------------
 
 
-def messages_to_v3_prompt(
+async def _file_part_to_v3(part: core.messages.FilePart) -> dict[str, Any]:
+    """Convert an internal :class:`FilePart` to a v3 ``file`` content part.
+
+    Binary data is converted to a ``data:`` URL for JSON transport (matching
+    the JS SDK gateway's ``maybeEncodeFileParts``).  HTTP(S) URLs are
+    downloaded and converted to ``data:`` URLs because the gateway wire
+    format does not accept raw HTTP URLs for file content.
+    """
+    data = part.data
+    if isinstance(data, str) and core.media.data.is_downloadable_url(data):
+        downloaded, _ = await core.media.download.download(data)
+        data = downloaded
+
+    entry: dict[str, Any] = {
+        "type": "file",
+        "mediaType": part.media_type,
+        "data": core.media.data.data_to_data_url(data, part.media_type),
+    }
+    if part.filename is not None:
+        entry["filename"] = part.filename
+    return entry
+
+
+async def messages_to_v3_prompt(
     messages: list[core.messages.Message],
 ) -> list[dict[str, Any]]:
     """Convert internal ``Message`` list to ``LanguageModelV3Prompt``.
@@ -55,11 +78,12 @@ def messages_to_v3_prompt(
                 result.append({"role": "system", "content": text})
 
             case "user":
-                content: list[dict[str, Any]] = [
-                    {"type": "text", "text": p.text}
-                    for p in msg.parts
-                    if isinstance(p, core.messages.TextPart)
-                ]
+                content: list[dict[str, Any]] = []
+                for p in msg.parts:
+                    if isinstance(p, core.messages.TextPart):
+                        content.append({"type": "text", "text": p.text})
+                    elif isinstance(p, core.messages.FilePart):
+                        content.append(await _file_part_to_v3(p))
                 result.append({"role": "user", "content": content})
 
             case "assistant":
@@ -135,7 +159,7 @@ def messages_to_v3_prompt(
 # ---------------------------------------------------------------------------
 
 
-def build_request_body(
+async def build_request_body(
     messages: list[core.messages.Message],
     tools: Sequence[core.tools.ToolLike] | None = None,
     output_type: type[Any] | None = None,
@@ -143,7 +167,7 @@ def build_request_body(
 ) -> dict[str, Any]:
     """Build the full ``LanguageModelV3CallOptions`` request body."""
     body: dict[str, Any] = {
-        "prompt": messages_to_v3_prompt(messages),
+        "prompt": await messages_to_v3_prompt(messages),
     }
     if tools:
         body["tools"] = [

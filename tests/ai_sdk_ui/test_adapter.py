@@ -471,6 +471,36 @@ def test_ui_tool_part_with_dict_input() -> None:
     assert tool_part.status == "pending"  # input-available maps to pending
 
 
+def test_ui_file_part_converted_to_core_file_part() -> None:
+    """UIFilePart from the frontend is converted to a core FilePart."""
+    raw_message = {
+        "id": "msg-1",
+        "role": "user",
+        "parts": [
+            {"type": "text", "text": "What's in this image?"},
+            {
+                "type": "file",
+                "mediaType": "image/png",
+                "url": "https://example.com/photo.png",
+                "filename": "photo.png",
+            },
+        ],
+    }
+    ui_msg = ui_message.UIMessage.model_validate(raw_message)
+    internal = adapter.to_messages([ui_msg])
+
+    assert len(internal) == 1
+    msg = internal[0]
+    assert msg.role == "user"
+    assert len(msg.parts) == 2
+    assert isinstance(msg.parts[0], messages.TextPart)
+    assert isinstance(msg.parts[1], messages.FilePart)
+    fp = msg.parts[1]
+    assert fp.data == "https://example.com/photo.png"
+    assert fp.media_type == "image/png"
+    assert fp.filename == "photo.png"
+
+
 def test_ui_skips_unsupported_parts() -> None:
     """Test that unsupported part types are skipped gracefully."""
     raw_message = {

@@ -11,6 +11,7 @@ Focus areas:
 from __future__ import annotations
 
 import json
+from unittest.mock import AsyncMock, patch
 
 import pydantic
 import pytest
@@ -24,25 +25,26 @@ from vercel_ai_sdk.core import llm, messages
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestMessagesToV3Prompt:
-    def test_system_message(self) -> None:
+    async def test_system_message(self) -> None:
         msgs = [
             messages.Message(
                 role="system",
                 parts=[messages.TextPart(text="You are helpful.")],
             )
         ]
-        result = protocol.messages_to_v3_prompt(msgs)
+        result = await protocol.messages_to_v3_prompt(msgs)
         assert result == [{"role": "system", "content": "You are helpful."}]
 
-    def test_user_message(self) -> None:
+    async def test_user_message(self) -> None:
         msgs = [
             messages.Message(
                 role="user",
                 parts=[messages.TextPart(text="Hello")],
             )
         ]
-        result = protocol.messages_to_v3_prompt(msgs)
+        result = await protocol.messages_to_v3_prompt(msgs)
         assert result == [
             {
                 "role": "user",
@@ -50,7 +52,7 @@ class TestMessagesToV3Prompt:
             }
         ]
 
-    def test_assistant_with_reasoning_and_text(self) -> None:
+    async def test_assistant_with_reasoning_and_text(self) -> None:
         msgs = [
             messages.Message(
                 role="assistant",
@@ -60,12 +62,12 @@ class TestMessagesToV3Prompt:
                 ],
             )
         ]
-        result = protocol.messages_to_v3_prompt(msgs)
+        result = await protocol.messages_to_v3_prompt(msgs)
         content = result[0]["content"]
         assert content[0] == {"type": "reasoning", "text": "Let me think..."}
         assert content[1] == {"type": "text", "text": "42"}
 
-    def test_tool_call_with_result_produces_two_messages(self) -> None:
+    async def test_tool_call_with_result_produces_two_messages(self) -> None:
         """A completed tool call must produce an assistant message
         (with the tool-call) AND a tool message (with the result)."""
         msgs = [
@@ -82,7 +84,7 @@ class TestMessagesToV3Prompt:
                 ],
             )
         ]
-        result = protocol.messages_to_v3_prompt(msgs)
+        result = await protocol.messages_to_v3_prompt(msgs)
         assert len(result) == 2
 
         # Assistant message has the tool-call
@@ -96,7 +98,7 @@ class TestMessagesToV3Prompt:
         assert tr["type"] == "tool-result"
         assert tr["output"] == {"type": "json", "value": {"temp": 72}}
 
-    def test_tool_error_result(self) -> None:
+    async def test_tool_error_result(self) -> None:
         msgs = [
             messages.Message(
                 role="assistant",
@@ -111,12 +113,70 @@ class TestMessagesToV3Prompt:
                 ],
             )
         ]
-        result = protocol.messages_to_v3_prompt(msgs)
+        result = await protocol.messages_to_v3_prompt(msgs)
         tr = result[1]["content"][0]
         assert tr["output"]["type"] == "error-text"
         assert tr["output"]["value"] == "Connection timeout"
 
-    def test_pending_tool_call_no_tool_message(self) -> None:
+    async def test_user_message_with_image_url(self) -> None:
+        """FilePart with image URL → downloaded and converted to data: URL."""
+        fake_jpeg = b"\xff\xd8\xff\xe0"
+        msgs = [
+            messages.Message(
+                role="user",
+                parts=[
+                    messages.TextPart(text="Look at this"),
+                    messages.FilePart(
+                        data="https://example.com/cat.jpg", media_type="image/jpeg"
+                    ),
+                ],
+            )
+        ]
+        with patch(
+            "vercel_ai_sdk.core.media.download.download",
+            new_callable=AsyncMock,
+            return_value=(fake_jpeg, "image/jpeg"),
+        ):
+            result = await protocol.messages_to_v3_prompt(msgs)
+        content = result[0]["content"]
+        assert content[0] == {"type": "text", "text": "Look at this"}
+        assert content[1]["type"] == "file"
+        assert content[1]["mediaType"] == "image/jpeg"
+        assert content[1]["data"].startswith("data:image/jpeg;base64,")
+
+    async def test_user_message_with_file_bytes(self) -> None:
+        """FilePart with bytes → v3 file content part with data URL."""
+        msgs = [
+            messages.Message(
+                role="user",
+                parts=[
+                    messages.FilePart(
+                        data=b"\x89PNG", media_type="image/png", filename="pic.png"
+                    ),
+                ],
+            )
+        ]
+        result = await protocol.messages_to_v3_prompt(msgs)
+        part = result[0]["content"][0]
+        assert part["type"] == "file"
+        assert part["mediaType"] == "image/png"
+        assert part["data"].startswith("data:image/png;base64,")
+        assert part["filename"] == "pic.png"
+
+    async def test_user_message_text_only_unchanged(self) -> None:
+        """Regression: text-only user messages still work."""
+        msgs = [
+            messages.Message(
+                role="user",
+                parts=[messages.TextPart(text="Hello")],
+            )
+        ]
+        result = await protocol.messages_to_v3_prompt(msgs)
+        assert result == [
+            {"role": "user", "content": [{"type": "text", "text": "Hello"}]}
+        ]
+
+    async def test_pending_tool_call_no_tool_message(self) -> None:
         """A pending tool call should NOT produce a tool-result message."""
         msgs = [
             messages.Message(
@@ -131,7 +191,7 @@ class TestMessagesToV3Prompt:
                 ],
             )
         ]
-        result = protocol.messages_to_v3_prompt(msgs)
+        result = await protocol.messages_to_v3_prompt(msgs)
         assert len(result) == 1
         assert result[0]["role"] == "assistant"
 
@@ -147,8 +207,9 @@ async def get_weather(city: str, units: str = "celsius") -> str:
     return f"Sunny in {city}"
 
 
+@pytest.mark.asyncio
 class TestBuildRequestBody:
-    def test_with_real_tool(self) -> None:
+    async def test_with_real_tool(self) -> None:
         """Verify @tool-produced schema round-trips through
         build_request_body → JSON → gateway wire format."""
         msgs = [
@@ -157,7 +218,7 @@ class TestBuildRequestBody:
                 parts=[messages.TextPart(text="What's the weather?")],
             )
         ]
-        body = protocol.build_request_body(msgs, tools=[get_weather])
+        body = await protocol.build_request_body(msgs, tools=[get_weather])
 
         assert "tools" in body
         tool_def = body["tools"][0]
@@ -172,7 +233,7 @@ class TestBuildRequestBody:
         # 'city' is required (no default), 'units' is not (has default)
         assert "city" in schema.get("required", [])
 
-    def test_with_output_type(self) -> None:
+    async def test_with_output_type(self) -> None:
         class WeatherResult(pydantic.BaseModel):
             temp: float
             condition: str
@@ -183,7 +244,7 @@ class TestBuildRequestBody:
                 parts=[messages.TextPart(text="Weather?")],
             )
         ]
-        body = protocol.build_request_body(msgs, output_type=WeatherResult)
+        body = await protocol.build_request_body(msgs, output_type=WeatherResult)
 
         assert "responseFormat" in body
         rf = body["responseFormat"]
@@ -192,7 +253,7 @@ class TestBuildRequestBody:
         assert "properties" in rf["schema"]
         assert "temp" in rf["schema"]["properties"]
 
-    def test_provider_options_passthrough(self) -> None:
+    async def test_provider_options_passthrough(self) -> None:
         msgs = [
             messages.Message(
                 role="user",
@@ -200,7 +261,7 @@ class TestBuildRequestBody:
             )
         ]
         opts = {"gateway": {"order": ["bedrock", "openai"]}}
-        body = protocol.build_request_body(msgs, provider_options=opts)
+        body = await protocol.build_request_body(msgs, provider_options=opts)
         assert body["providerOptions"] == opts
 
 
@@ -257,8 +318,9 @@ def test_parse_stream_part_simple(
     assert events[0] == expected
 
 
+@pytest.mark.asyncio
 class TestParseStreamPartComplex:
-    def test_text_delta_uses_textDelta_key(self) -> None:
+    async def test_text_delta_uses_textDelta_key(self) -> None:
         """The gateway sends ``textDelta`` (camelCase), not ``delta``."""
         events = protocol.parse_stream_part(
             {"type": "text-delta", "id": "t1", "textDelta": "Hello"}
@@ -266,7 +328,7 @@ class TestParseStreamPartComplex:
         assert isinstance(events[0], llm.TextDelta)
         assert events[0].delta == "Hello"
 
-    def test_tool_call_expands_to_three_events(self) -> None:
+    async def test_tool_call_expands_to_three_events(self) -> None:
         """A complete ``tool-call`` part must expand into
         ToolStart → ToolArgsDelta → ToolEnd."""
         events = protocol.parse_stream_part(
@@ -284,7 +346,7 @@ class TestParseStreamPartComplex:
         assert json.loads(events[1].delta) == {"city": "SF"}
         assert isinstance(events[2], llm.ToolEnd)
 
-    def test_finish_flat_usage(self) -> None:
+    async def test_finish_flat_usage(self) -> None:
         events = protocol.parse_stream_part(
             {
                 "type": "finish",
@@ -302,7 +364,7 @@ class TestParseStreamPartComplex:
         assert done.usage.input_tokens == 10
         assert done.usage.output_tokens == 20
 
-    def test_finish_v3_nested_usage(self) -> None:
+    async def test_finish_v3_nested_usage(self) -> None:
         events = protocol.parse_stream_part(
             {
                 "type": "finish",
@@ -330,7 +392,7 @@ class TestParseStreamPartComplex:
         assert done.usage.cache_read_tokens == 50
         assert done.usage.reasoning_tokens == 30
 
-    def test_unknown_types_produce_no_events(self) -> None:
+    async def test_unknown_types_produce_no_events(self) -> None:
         for t in ("stream-start", "raw", "response-metadata", "banana"):
             assert protocol.parse_stream_part({"type": t}) == []
 
@@ -340,8 +402,9 @@ class TestParseStreamPartComplex:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestParseGenerateResult:
-    def test_text_content(self) -> None:
+    async def test_text_content(self) -> None:
         events = protocol.parse_generate_result(
             {
                 "content": [{"type": "text", "text": "Hello!"}],
@@ -355,7 +418,7 @@ class TestParseGenerateResult:
         assert events[1].delta == "Hello!"
         assert isinstance(events[3], llm.MessageDone)
 
-    def test_tool_call_content(self) -> None:
+    async def test_tool_call_content(self) -> None:
         events = protocol.parse_generate_result(
             {
                 "content": [
@@ -379,13 +442,14 @@ class TestParseGenerateResult:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestParseUsage:
-    def test_flat_format(self) -> None:
+    async def test_flat_format(self) -> None:
         usage = protocol._parse_usage({"prompt_tokens": 10, "completion_tokens": 20})
         assert usage.input_tokens == 10
         assert usage.output_tokens == 20
 
-    def test_v3_nested_format(self) -> None:
+    async def test_v3_nested_format(self) -> None:
         usage = protocol._parse_usage(
             {
                 "inputTokens": {
@@ -402,7 +466,7 @@ class TestParseUsage:
         assert usage.cache_write_tokens == 5
         assert usage.reasoning_tokens == 10
 
-    def test_non_dict_returns_empty(self) -> None:
+    async def test_non_dict_returns_empty(self) -> None:
         usage = protocol._parse_usage("not a dict")
         assert usage.input_tokens == 0
         assert usage.output_tokens == 0

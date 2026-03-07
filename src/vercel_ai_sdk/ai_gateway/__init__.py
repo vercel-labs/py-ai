@@ -106,7 +106,7 @@ class GatewayModel(core.llm.LanguageModel):
         output_type: type[pydantic.BaseModel] | None = None,
     ) -> AsyncGenerator[core.llm.StreamEvent]:
         """Yield ``StreamEvent`` objects from the gateway SSE stream."""
-        body = protocol_.build_request_body(
+        body = await protocol_.build_request_body(
             messages,
             tools=tools,
             output_type=output_type,

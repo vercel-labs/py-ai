@@ -1,10 +1,16 @@
 """Anthropic provider: _messages_to_anthropic conversion tests."""
 
+import base64
+
+import pytest
+
 from vercel_ai_sdk.anthropic import _messages_to_anthropic
-from vercel_ai_sdk.core.messages import Message, TextPart, ToolPart
+from vercel_ai_sdk.core.messages import FilePart, Message, TextPart, ToolPart
+
+pytestmark = pytest.mark.asyncio
 
 
-def test_tool_result_none_still_emits_tool_result() -> None:
+async def test_tool_result_none_still_emits_tool_result() -> None:
     """A tool that returns None must still produce a tool_result block.
 
     Regression: when part.result is None the converter skipped the tool_result,
@@ -22,7 +28,7 @@ def test_tool_result_none_still_emits_tool_result() -> None:
         Message(role="assistant", parts=[tool_part]),
     ]
 
-    _system, anthropic_msgs = _messages_to_anthropic(messages)
+    _system, anthropic_msgs = await _messages_to_anthropic(messages)
 
     # Should have: assistant message with tool_use, then user message with tool_result
     assert len(anthropic_msgs) == 2, (
@@ -41,7 +47,7 @@ def test_tool_result_none_still_emits_tool_result() -> None:
     assert tool_results[0]["tool_use_id"] == "toolu_01abc"
 
 
-def test_tool_with_normal_result() -> None:
+async def test_tool_with_normal_result() -> None:
     """Baseline: a tool with a normal result produces the correct pair."""
     tool_part = ToolPart(
         tool_call_id="toolu_02xyz",
@@ -54,13 +60,13 @@ def test_tool_with_normal_result() -> None:
         Message(role="assistant", parts=[tool_part]),
     ]
 
-    _system, anthropic_msgs = _messages_to_anthropic(messages)
+    _system, anthropic_msgs = await _messages_to_anthropic(messages)
 
     assert len(anthropic_msgs) == 2
     assert anthropic_msgs[1]["content"][0]["content"] == "{'temp': 62}"
 
 
-def test_tool_error_produces_tool_result() -> None:
+async def test_tool_error_produces_tool_result() -> None:
     """Tool errors must also produce a tool_result block (with is_error=True)."""
     tool_part = ToolPart(
         tool_call_id="toolu_03err",
@@ -73,7 +79,7 @@ def test_tool_error_produces_tool_result() -> None:
         Message(role="assistant", parts=[tool_part]),
     ]
 
-    _system, anthropic_msgs = _messages_to_anthropic(messages)
+    _system, anthropic_msgs = await _messages_to_anthropic(messages)
 
     assert len(anthropic_msgs) == 2
     tool_result = anthropic_msgs[1]["content"][0]
@@ -82,7 +88,7 @@ def test_tool_error_produces_tool_result() -> None:
     assert tool_result["content"] == "Connection timeout"
 
 
-def test_multiple_tools_one_returns_none() -> None:
+async def test_multiple_tools_one_returns_none() -> None:
     """When one of several tools returns None, all must have tool_results."""
     tool_a = ToolPart(
         tool_call_id="toolu_a",
@@ -102,7 +108,7 @@ def test_multiple_tools_one_returns_none() -> None:
         Message(role="assistant", parts=[tool_a, tool_b]),
     ]
 
-    _system, anthropic_msgs = _messages_to_anthropic(messages)
+    _system, anthropic_msgs = await _messages_to_anthropic(messages)
 
     assert len(anthropic_msgs) == 2
 
@@ -123,7 +129,7 @@ def test_multiple_tools_one_returns_none() -> None:
 # -- Multi-turn: consecutive user messages (tool_result + next user) -------
 
 
-def test_multi_turn_no_consecutive_same_role_messages() -> None:
+async def test_multi_turn_no_consecutive_same_role_messages() -> None:
     """Multi-turn with tools must not produce consecutive same-role messages.
 
     Regression: when a previous assistant turn includes a tool call (with
@@ -159,7 +165,7 @@ def test_multi_turn_no_consecutive_same_role_messages() -> None:
         ),
     ]
 
-    _system, anthropic_msgs = _messages_to_anthropic(messages)
+    _system, anthropic_msgs = await _messages_to_anthropic(messages)
 
     # Verify no consecutive same-role messages
     for i in range(1, len(anthropic_msgs)):
@@ -170,7 +176,7 @@ def test_multi_turn_no_consecutive_same_role_messages() -> None:
         )
 
 
-def test_multi_turn_tool_result_before_user_merged() -> None:
+async def test_multi_turn_tool_result_before_user_merged() -> None:
     """When tool_result (user) is followed by a user message, they merge.
 
     The merged user message should contain both the tool_result blocks
@@ -189,7 +195,7 @@ def test_multi_turn_tool_result_before_user_merged() -> None:
         Message(role="user", parts=[TextPart(text="thanks, what about tomorrow?")]),
     ]
 
-    _system, anthropic_msgs = _messages_to_anthropic(messages)
+    _system, anthropic_msgs = await _messages_to_anthropic(messages)
 
     # Should be: user, assistant, user (tool_result + text)
     assert len(anthropic_msgs) == 3
@@ -205,7 +211,7 @@ def test_multi_turn_tool_result_before_user_merged() -> None:
     assert tool_results[0]["tool_use_id"] == "toolu_01abc"
 
 
-def test_stream_loop_second_iteration_messages() -> None:
+async def test_stream_loop_second_iteration_messages() -> None:
     """Simulates what stream_loop sends on the 2nd LLM call in a multi-turn.
 
     After the first stream_step returns a tool call, stream_loop appends
@@ -228,7 +234,7 @@ def test_stream_loop_second_iteration_messages() -> None:
         # No user message follows — this is the loop, not a new user turn
     ]
 
-    _system, anthropic_msgs = _messages_to_anthropic(messages)
+    _system, anthropic_msgs = await _messages_to_anthropic(messages)
 
     # Should be: user, assistant(tool_use), user(tool_result)
     assert len(anthropic_msgs) == 3
@@ -243,7 +249,7 @@ def test_stream_loop_second_iteration_messages() -> None:
     assert len(tool_results) == 1
 
 
-def test_pending_tool_does_not_emit_tool_result() -> None:
+async def test_pending_tool_does_not_emit_tool_result() -> None:
     """A tool with status='pending' must not produce a tool_result block.
 
     When stream_step returns a message mid-stream (before tool execution),
@@ -262,7 +268,7 @@ def test_pending_tool_does_not_emit_tool_result() -> None:
         Message(role="assistant", parts=[tool]),
     ]
 
-    _system, anthropic_msgs = _messages_to_anthropic(messages)
+    _system, anthropic_msgs = await _messages_to_anthropic(messages)
 
     # assistant message with tool_use, but NO user message with tool_result
     assert len(anthropic_msgs) == 2
@@ -274,3 +280,111 @@ def test_pending_tool_does_not_emit_tool_result() -> None:
     for msg in anthropic_msgs:
         if isinstance(msg["content"], list):
             assert not any(b.get("type") == "tool_result" for b in msg["content"])
+
+
+# -- Multimodal user messages ------------------------------------------------
+
+
+async def test_user_text_only_is_plain_string() -> None:
+    """Text-only user messages should produce a plain content string."""
+    msgs = [Message(role="user", parts=[TextPart(text="Hello")])]
+    _sys, result = await _messages_to_anthropic(msgs)
+    assert result[0]["content"] == "Hello"
+
+
+async def test_user_image_url() -> None:
+    """Image URL → Anthropic image block with url source."""
+    msgs = [
+        Message(
+            role="user",
+            parts=[
+                TextPart(text="Describe this"),
+                FilePart(data="https://example.com/cat.jpg", media_type="image/jpeg"),
+            ],
+        )
+    ]
+    _sys, result = await _messages_to_anthropic(msgs)
+    content = result[0]["content"]
+    assert content[0] == {"type": "text", "text": "Describe this"}
+    assert content[1] == {
+        "type": "image",
+        "source": {"type": "url", "url": "https://example.com/cat.jpg"},
+    }
+
+
+async def test_user_image_base64() -> None:
+    """Base64 image → Anthropic image block with base64 source."""
+    b64 = base64.b64encode(b"\x89PNG").decode()
+    msgs = [
+        Message(
+            role="user",
+            parts=[FilePart(data=b64, media_type="image/png")],
+        )
+    ]
+    _sys, result = await _messages_to_anthropic(msgs)
+    img = result[0]["content"][0]
+    assert img["type"] == "image"
+    assert img["source"]["type"] == "base64"
+    assert img["source"]["media_type"] == "image/png"
+    assert img["source"]["data"] == b64
+
+
+async def test_user_pdf_url() -> None:
+    """PDF URL → Anthropic document block with url source."""
+    msgs = [
+        Message(
+            role="user",
+            parts=[
+                FilePart(
+                    data="https://example.com/doc.pdf", media_type="application/pdf"
+                )
+            ],
+        )
+    ]
+    _sys, result = await _messages_to_anthropic(msgs)
+    doc = result[0]["content"][0]
+    assert doc["type"] == "document"
+    assert doc["source"] == {"type": "url", "url": "https://example.com/doc.pdf"}
+
+
+async def test_user_pdf_base64() -> None:
+    """PDF base64 → Anthropic document block with base64 source."""
+    b64 = base64.b64encode(b"%PDF-1.4").decode()
+    msgs = [
+        Message(
+            role="user",
+            parts=[FilePart(data=b64, media_type="application/pdf")],
+        )
+    ]
+    _sys, result = await _messages_to_anthropic(msgs)
+    doc = result[0]["content"][0]
+    assert doc["type"] == "document"
+    assert doc["source"]["type"] == "base64"
+    assert doc["source"]["media_type"] == "application/pdf"
+
+
+async def test_user_text_plain_bytes() -> None:
+    """text/plain with bytes → Anthropic document with text source."""
+    msgs = [
+        Message(
+            role="user",
+            parts=[FilePart(data=b"Hello, world!", media_type="text/plain")],
+        )
+    ]
+    _sys, result = await _messages_to_anthropic(msgs)
+    doc = result[0]["content"][0]
+    assert doc["type"] == "document"
+    assert doc["source"]["type"] == "text"
+    assert doc["source"]["data"] == "Hello, world!"
+
+
+async def test_unsupported_media_type_raises() -> None:
+    """Unsupported media type → ValueError."""
+    msgs = [
+        Message(
+            role="user",
+            parts=[FilePart(data=b"\x00", media_type="video/mp4")],
+        )
+    ]
+    with pytest.raises(ValueError, match="Unsupported media type"):
+        await _messages_to_anthropic(msgs)
