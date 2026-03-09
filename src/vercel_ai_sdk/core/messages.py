@@ -292,6 +292,29 @@ class Message(pydantic.BaseModel):
         return deltas
 
     @property
+    def files(self) -> list[FilePart]:
+        """All file parts in the message."""
+        return [p for p in self.parts if isinstance(p, FilePart)]
+
+    @property
+    def images(self) -> list[FilePart]:
+        """File parts with ``image/*`` media types."""
+        return [
+            p
+            for p in self.parts
+            if isinstance(p, FilePart) and p.media_type.startswith("image/")
+        ]
+
+    @property
+    def videos(self) -> list[FilePart]:
+        """File parts with ``video/*`` media types."""
+        return [
+            p
+            for p in self.parts
+            if isinstance(p, FilePart) and p.media_type.startswith("video/")
+        ]
+
+    @property
     def text(self) -> str:
         for part in self.parts:
             if isinstance(part, TextPart):

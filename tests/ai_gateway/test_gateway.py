@@ -157,6 +157,39 @@ class TestStreaming:
         assert tc[0].tool_args == '{"q":"hi"}'
 
     @pytest.mark.asyncio
+    async def test_inline_file_stream(self) -> None:
+        """Models like Gemini-3-pro-image return inline file parts
+        alongside text in the language model stream."""
+        body = _sse(
+            {"type": "text-start", "id": "t1"},
+            {"type": "text-delta", "id": "t1", "textDelta": "Here is an image:"},
+            {"type": "text-end", "id": "t1"},
+            {
+                "type": "file",
+                "id": "f1",
+                "mediaType": "image/png",
+                "data": "iVBORw0KGgo=",
+            },
+            {
+                "type": "finish",
+                "finishReason": "stop",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+            },
+        )
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text=body)
+
+        final = (
+            await _collect(_gateway(httpx.MockTransport(handler)), [_user("draw me")])
+        )[-1]
+        assert final.text == "Here is an image:"
+        assert len(final.images) == 1
+        assert final.images[0].media_type == "image/png"
+        assert final.images[0].data == "iVBORw0KGgo="
+        assert final.is_done
+
+    @pytest.mark.asyncio
     async def test_complete_tool_call_part(self) -> None:
         """Non-streaming ``tool-call`` part (one shot) must also work."""
         body = _sse(

@@ -392,6 +392,30 @@ class TestParseStreamPartComplex:
         assert done.usage.cache_read_tokens == 50
         assert done.usage.reasoning_tokens == 30
 
+    async def test_file_part(self) -> None:
+        """A ``file`` stream part (inline image from Gemini/GPT-5)
+        must produce a FileEvent."""
+        events = protocol.parse_stream_part(
+            {
+                "type": "file",
+                "id": "f1",
+                "mediaType": "image/png",
+                "data": "iVBORw0KGgo=",
+            }
+        )
+        assert len(events) == 1
+        assert isinstance(events[0], llm.FileEvent)
+        assert events[0].block_id == "f1"
+        assert events[0].media_type == "image/png"
+        assert events[0].data == "iVBORw0KGgo="
+
+    async def test_file_part_defaults(self) -> None:
+        """A minimal ``file`` part uses sensible defaults."""
+        events = protocol.parse_stream_part({"type": "file", "data": "somedata"})
+        assert len(events) == 1
+        assert isinstance(events[0], llm.FileEvent)
+        assert events[0].media_type == "application/octet-stream"
+
     async def test_unknown_types_produce_no_events(self) -> None:
         for t in ("stream-start", "raw", "response-metadata", "banana"):
             assert protocol.parse_stream_part({"type": t}) == []
@@ -435,6 +459,27 @@ class TestParseGenerateResult:
         assert isinstance(events[0], llm.ToolStart)
         assert isinstance(events[3], llm.MessageDone)
         assert events[3].finish_reason == "tool-calls"
+
+    async def test_file_content(self) -> None:
+        """A ``file`` part in non-streaming result produces a FileEvent."""
+        events = protocol.parse_generate_result(
+            {
+                "content": [
+                    {
+                        "type": "file",
+                        "id": "f1",
+                        "mediaType": "image/png",
+                        "data": "iVBORw0KGgo=",
+                    }
+                ],
+                "finishReason": "stop",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            }
+        )
+        file_events = [e for e in events if isinstance(e, llm.FileEvent)]
+        assert len(file_events) == 1
+        assert file_events[0].media_type == "image/png"
+        assert isinstance(events[-1], llm.MessageDone)
 
 
 # ---------------------------------------------------------------------------

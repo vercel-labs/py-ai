@@ -279,6 +279,15 @@ def parse_stream_part(
         case "tool-call":
             return _expand_tool_call(data)
 
+        case "file":
+            return [
+                core.llm.FileEvent(
+                    block_id=data.get("id", f"file-{len(data)}"),
+                    media_type=data.get("mediaType", "application/octet-stream"),
+                    data=data.get("data", ""),
+                )
+            ]
+
         case "finish":
             return [_parse_finish(data)]
 
@@ -319,6 +328,15 @@ def parse_generate_result(
 
             case "tool-call":
                 events.extend(_expand_tool_call(item))
+
+            case "file":
+                events.append(
+                    core.llm.FileEvent(
+                        block_id=item.get("id", f"file-{len(events)}"),
+                        media_type=item.get("mediaType", "application/octet-stream"),
+                        data=item.get("data", ""),
+                    )
+                )
 
     match data.get("content"):
         case list() as items:
