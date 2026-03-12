@@ -29,11 +29,9 @@ import httpx
 import pydantic
 
 from .. import core
-from ..core import image_model as image_model_
-from ..core import media_model as media_model_
-from ..core import video_model as video_model_
 from ..core.media import data as media_data
 from ..core.media import detect_media_type
+from ..core.media import models as media_models
 from . import errors as errors_
 from . import protocol as protocol_
 
@@ -243,7 +241,7 @@ def _file_part_to_wire(part: core.messages.FilePart) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-class GatewayImageModel(image_model_.ImageModel):
+class GatewayImageModel(media_models.ImageModel):
     """Vercel AI Gateway image model.
 
     Sends requests to ``/v3/ai/image-model`` and returns a :class:`Message`
@@ -292,7 +290,7 @@ class GatewayImageModel(image_model_.ImageModel):
         aspect_ratio: str | None = None,
         seed: int | None = None,
         provider_options: dict[str, Any] | None = None,
-    ) -> media_model_.MediaResult:
+    ) -> media_models.MediaResult:
         body: dict[str, Any] = {
             "prompt": prompt,
             "n": n,
@@ -351,7 +349,7 @@ class GatewayImageModel(image_model_.ImageModel):
                 )
             )
 
-        return media_model_.MediaResult(files=files, usage=usage)
+        return media_models.MediaResult(files=files, usage=usage)
 
 
 # ---------------------------------------------------------------------------
@@ -359,7 +357,7 @@ class GatewayImageModel(image_model_.ImageModel):
 # ---------------------------------------------------------------------------
 
 
-class GatewayVideoModel(video_model_.VideoModel):
+class GatewayVideoModel(media_models.VideoModel):
     """Vercel AI Gateway video model.
 
     Sends requests to ``/v3/ai/video-model`` (with SSE response) and returns
@@ -411,7 +409,7 @@ class GatewayVideoModel(video_model_.VideoModel):
         fps: int | None = None,
         seed: int | None = None,
         provider_options: dict[str, Any] | None = None,
-    ) -> media_model_.MediaResult:
+    ) -> media_models.MediaResult:
         image_wire: dict[str, Any] | None = None
         if input_files:
             image_wire = _file_part_to_wire(input_files[0])
@@ -480,7 +478,7 @@ class GatewayVideoModel(video_model_.VideoModel):
             file_part = await self._video_data_to_file_part(video_data)
             files.append(file_part)
 
-        return media_model_.MediaResult(files=files)
+        return media_models.MediaResult(files=files)
 
     @staticmethod
     async def _read_first_sse_event(response: httpx.Response) -> dict[str, Any]:

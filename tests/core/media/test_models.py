@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from vercel_ai_sdk.core.media_model import MediaModel, MediaResult
+from vercel_ai_sdk.core.media import MediaModel, MediaResult
 from vercel_ai_sdk.core.messages import FilePart, Message, TextPart, Usage
 
 # ---------------------------------------------------------------------------

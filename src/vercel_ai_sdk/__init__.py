@@ -2,9 +2,8 @@ from . import ai_gateway, ai_sdk_ui, anthropic, mcp, openai
 from .core import telemetry
 from .core.checkpoint import Checkpoint, PendingHookInfo
 from .core.hooks import Hook, ToolApproval, hook
-from .core.image_model import ImageModel
 from .core.llm import LanguageModel
-from .core.media_model import MediaModel, MediaResult
+from .core.media import ImageModel, MediaModel, MediaResult, VideoModel
 
 # Re-export core types
 from .core.messages import (
@@ -33,7 +32,6 @@ from .core.runtime import (
 )
 from .core.streams import StreamResult, stream
 from .core.tools import Tool, ToolLike, ToolSchema, tool
-from .core.video_model import VideoModel
 
 __all__ = [
     # Types
