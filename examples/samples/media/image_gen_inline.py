@@ -5,7 +5,7 @@ text as part of their language model response. The images arrive as
 FileParts in the streamed Message.
 
 Usage:
-    uv run examples/samples/image_gen_inline.py
+    uv run examples/samples/media/image_gen_inline.py
 """
 
 import asyncio

@@ -5,7 +5,7 @@ Uses the VideoModel interface to generate videos via the AI Gateway's
 process (which can take minutes) and returns the result via SSE.
 
 Usage:
-    uv run examples/samples/video_gen.py
+    uv run examples/samples/media/video_gen.py
 """
 
 import asyncio

@@ -5,7 +5,7 @@ image model. The input image is passed as a FilePart in the user
 message, and the model returns the edited version.
 
 Usage:
-    uv run examples/samples/image_edit.py
+    uv run examples/samples/media/image_edit.py
 """
 
 import asyncio

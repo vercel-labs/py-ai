@@ -1,14 +1,16 @@
 """Multimodal input example: send an image URL to the model.
 
 Usage:
-    uv run examples/samples/multimodal.py
+    uv run examples/samples/media/multimodal.py
 """
 
 import asyncio
 
 import vercel_ai_sdk as ai
 
-IMAGE_URL = "https://4kwallpapers.com/images/wallpapers/hatsune-miku-3840x2160-15479.jpg"
+IMAGE_URL = (
+    "https://4kwallpapers.com/images/wallpapers/hatsune-miku-3840x2160-15479.jpg"
+)
 
 
 async def agent(llm: ai.LanguageModel, user_query: str) -> ai.StreamResult:

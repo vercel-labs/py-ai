@@ -6,7 +6,7 @@ are optimized purely for image generation with parameters like size,
 aspect ratio, and seed.
 
 Usage:
-    uv run examples/samples/image_gen_dedicated.py
+    uv run examples/samples/media/image_gen_dedicated.py
 """
 
 import asyncio
