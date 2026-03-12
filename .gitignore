@@ -210,3 +210,5 @@ __marimo__/
 .reference
 .vercel
 .env*.local
+
+.DS_Store

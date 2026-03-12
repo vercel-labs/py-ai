@@ -30,6 +30,7 @@ import pydantic
 
 from .. import core
 from ..core import image_model as image_model_
+from ..core import media_model as media_model_
 from ..core import video_model as video_model_
 from ..core.media import data as media_data
 from ..core.media import detect_media_type
@@ -281,19 +282,17 @@ class GatewayImageModel(image_model_.ImageModel):
         )
 
     @override
-    async def generate(
+    async def make_request(
         self,
-        messages: list[core.messages.Message],
+        prompt: str,
+        input_files: list[core.messages.FilePart],
         *,
         n: int = 1,
         size: str | None = None,
         aspect_ratio: str | None = None,
         seed: int | None = None,
         provider_options: dict[str, Any] | None = None,
-    ) -> core.messages.Message:
-        prompt = image_model_.extract_prompt(messages)
-        input_images = image_model_.extract_input_images(messages)
-
+    ) -> media_model_.MediaResult:
         body: dict[str, Any] = {
             "prompt": prompt,
             "n": n,
@@ -305,8 +304,8 @@ class GatewayImageModel(image_model_.ImageModel):
             body["aspectRatio"] = aspect_ratio
         if seed is not None:
             body["seed"] = seed
-        if input_images:
-            body["files"] = [_file_part_to_wire(f) for f in input_images]
+        if input_files:
+            body["files"] = [_file_part_to_wire(f) for f in input_files]
 
         url = f"{self._base_url}/image-model"
         try:
@@ -342,22 +341,17 @@ class GatewayImageModel(image_model_.ImageModel):
                 output_tokens=usage_data.get("outputTokens") or 0,
             )
 
-        parts: list[core.messages.Part] = []
+        files: list[core.messages.FilePart] = []
         for img_b64 in raw_images:
-            # Detect media type from base64 data, default to image/png
             media_type = detect_media_type.detect_image_media_type(img_b64)
-            parts.append(
+            files.append(
                 core.messages.FilePart(
                     data=img_b64,
                     media_type=media_type or "image/png",
                 )
             )
 
-        return core.messages.Message(
-            role="assistant",
-            parts=parts,
-            usage=usage,
-        )
+        return media_model_.MediaResult(files=files, usage=usage)
 
 
 # ---------------------------------------------------------------------------
@@ -405,9 +399,10 @@ class GatewayVideoModel(video_model_.VideoModel):
         )
 
     @override
-    async def generate(
+    async def make_request(
         self,
-        messages: list[core.messages.Message],
+        prompt: str,
+        input_files: list[core.messages.FilePart],
         *,
         n: int = 1,
         aspect_ratio: str | None = None,
@@ -416,14 +411,10 @@ class GatewayVideoModel(video_model_.VideoModel):
         fps: int | None = None,
         seed: int | None = None,
         provider_options: dict[str, Any] | None = None,
-    ) -> core.messages.Message:
-        prompt = image_model_.extract_prompt(messages)
-
-        # Extract optional input image for image-to-video
-        input_images = image_model_.extract_input_images(messages)
+    ) -> media_model_.MediaResult:
         image_wire: dict[str, Any] | None = None
-        if input_images:
-            image_wire = _file_part_to_wire(input_images[0])
+        if input_files:
+            image_wire = _file_part_to_wire(input_files[0])
 
         body: dict[str, Any] = {
             "prompt": prompt,
@@ -459,7 +450,6 @@ class GatewayVideoModel(video_model_.VideoModel):
                     await response.aread()
                     await _raise_for_status(response, api_key=self._api_key)
 
-                # Parse SSE: read the first data event
                 event_data = await self._read_first_sse_event(response)
 
         except errors_.GatewayError:
@@ -476,7 +466,6 @@ class GatewayVideoModel(video_model_.VideoModel):
         if event_data.get("type") == "error":
             status = event_data.get("statusCode", 500)
             message = event_data.get("message", "Video generation failed")
-            # Map to the correct error type based on the status code
             error_type = event_data.get("errorType", "")
             if status == 400 or error_type == "invalid_request_error":
                 raise errors_.GatewayInvalidRequestError(
@@ -486,15 +475,12 @@ class GatewayVideoModel(video_model_.VideoModel):
 
         # Handle result event
         raw_videos: list[dict[str, Any]] = event_data.get("videos", [])
-        parts: list[core.messages.Part] = []
+        files: list[core.messages.FilePart] = []
         for video_data in raw_videos:
-            part = await self._video_data_to_file_part(video_data)
-            parts.append(part)
+            file_part = await self._video_data_to_file_part(video_data)
+            files.append(file_part)
 
-        return core.messages.Message(
-            role="assistant",
-            parts=parts,
-        )
+        return media_model_.MediaResult(files=files)
 
     @staticmethod
     async def _read_first_sse_event(response: httpx.Response) -> dict[str, Any]:

@@ -19,49 +19,22 @@ Usage::
 from __future__ import annotations
 
 import abc
-from typing import Any
+from typing import Any, override
 
+from . import media_model as media_model_
 from . import messages as messages_
 
 
-def extract_prompt(messages: list[messages_.Message]) -> str:
-    """Extract a text prompt from user messages.
-
-    Concatenates all :class:`TextPart` content from ``user`` and ``system``
-    messages into a single prompt string.
-    """
-    parts: list[str] = []
-    for msg in messages:
-        if msg.role in ("user", "system"):
-            for p in msg.parts:
-                if isinstance(p, messages_.TextPart):
-                    parts.append(p.text)
-    return " ".join(parts)
-
-
-def extract_input_images(
-    messages: list[messages_.Message],
-) -> list[messages_.FilePart]:
-    """Extract input images from user messages (for image editing)."""
-    images: list[messages_.FilePart] = []
-    for msg in messages:
-        if msg.role == "user":
-            for p in msg.parts:
-                if isinstance(p, messages_.FilePart) and p.media_type.startswith(
-                    "image/"
-                ):
-                    images.append(p)
-    return images
-
-
-class ImageModel(abc.ABC):
+class ImageModel(media_model_.MediaModel):
     """Abstract image generation model.
 
     Accepts :class:`Message`\\s as input and returns a :class:`Message`
     containing generated images as :class:`FilePart`\\s.
+
+    Adapter authors implement :meth:`make_request`; the framework handles
+    parsing messages and assembling the response :class:`Message`.
     """
 
-    @abc.abstractmethod
     async def generate(
         self,
         messages: list[messages_.Message],
@@ -86,5 +59,45 @@ class ImageModel(abc.ABC):
         Returns:
             A :class:`Message` with ``role="assistant"`` containing
             :class:`FilePart`\\s for each generated image.
+        """
+        prompt = self._extract_prompt(messages)
+        input_files = self._extract_input_files(messages)
+        result = await self.make_request(
+            prompt,
+            input_files,
+            n=n,
+            size=size,
+            aspect_ratio=aspect_ratio,
+            seed=seed,
+            provider_options=provider_options,
+        )
+        return self._build_message(result)
+
+    @override
+    @abc.abstractmethod
+    async def make_request(
+        self,
+        prompt: str,
+        input_files: list[messages_.FilePart],
+        *,
+        n: int = 1,
+        size: str | None = None,
+        aspect_ratio: str | None = None,
+        seed: int | None = None,
+        provider_options: dict[str, Any] | None = None,
+    ) -> media_model_.MediaResult:
+        """Adapter-specific image generation.
+
+        Args:
+            prompt: Text prompt extracted from messages.
+            input_files: File parts from user messages (for editing).
+            n: Number of images to generate.
+            size: Image dimensions (e.g. ``"1024x1024"``).
+            aspect_ratio: Aspect ratio (e.g. ``"16:9"``).
+            seed: Random seed for reproducible generation.
+            provider_options: Provider-specific options.
+
+        Returns:
+            A :class:`MediaResult` with generated image files.
         """
         ...

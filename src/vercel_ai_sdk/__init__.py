@@ -4,6 +4,7 @@ from .core.checkpoint import Checkpoint, PendingHookInfo
 from .core.hooks import Hook, ToolApproval, hook
 from .core.image_model import ImageModel
 from .core.llm import LanguageModel
+from .core.media_model import MediaModel, MediaResult
 
 # Re-export core types
 from .core.messages import (
@@ -49,6 +50,8 @@ __all__ = [
     "Tool",
     "Usage",
     "LanguageModel",
+    "MediaModel",
+    "MediaResult",
     "ImageModel",
     "VideoModel",
     "Runtime",
