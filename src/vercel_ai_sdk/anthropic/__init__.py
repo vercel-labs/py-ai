@@ -23,7 +23,73 @@ def _tools_to_anthropic(tools: Sequence[core.tools.ToolLike]) -> list[dict[str, 
     ]
 
 
-def _messages_to_anthropic(
+def _file_part_to_anthropic(part: core.messages.FilePart) -> dict[str, Any]:
+    """Convert a :class:`FilePart` to an Anthropic content block.
+
+    * ``image/*`` → ``{"type": "image", "source": ...}``
+    * ``application/pdf`` → ``{"type": "document", "source": ...}``
+    * ``text/plain`` → ``{"type": "document", "source": {"type": "text", ...}}``
+    * anything else → ``ValueError``
+    """
+    mt = part.media_type
+
+    if mt.startswith("image/"):
+        media_type = "image/jpeg" if mt == "image/*" else mt
+        if isinstance(part.data, str) and core.media.data.is_url(part.data):
+            return {
+                "type": "image",
+                "source": {"type": "url", "url": part.data},
+            }
+        return {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": core.media.data.data_to_base64(part.data),
+            },
+        }
+
+    if mt == "application/pdf":
+        if isinstance(part.data, str) and core.media.data.is_url(part.data):
+            return {
+                "type": "document",
+                "source": {"type": "url", "url": part.data},
+            }
+        return {
+            "type": "document",
+            "source": {
+                "type": "base64",
+                "media_type": "application/pdf",
+                "data": core.media.data.data_to_base64(part.data),
+            },
+        }
+
+    if mt == "text/plain":
+        # Anthropic accepts text documents with source.type="text"
+        if isinstance(part.data, bytes):
+            text_data = part.data.decode("utf-8")
+        elif core.media.data.is_url(part.data):
+            return {
+                "type": "document",
+                "source": {"type": "url", "url": part.data},
+            }
+        else:
+            import base64 as _b64
+
+            text_data = _b64.b64decode(part.data).decode("utf-8")
+        return {
+            "type": "document",
+            "source": {
+                "type": "text",
+                "media_type": "text/plain",
+                "data": text_data,
+            },
+        }
+
+    raise ValueError(f"Unsupported media type for Anthropic: {mt}")
+
+
+async def _messages_to_anthropic(
     messages: list[core.messages.Message],
 ) -> tuple[str | None, list[dict[str, Any]]]:
     """Convert internal messages to Anthropic API format.
@@ -89,12 +155,21 @@ def _messages_to_anthropic(
                 result.append({"role": "assistant", "content": content})
             if tool_results:
                 result.append({"role": "user", "content": tool_results})
-        else:
-            # User messages
-            content_text = "".join(
-                p.text for p in msg.parts if isinstance(p, core.messages.TextPart)
-            )
-            result.append({"role": "user", "content": content_text})
+        elif msg.role == "user":
+            has_files = any(isinstance(p, core.messages.FilePart) for p in msg.parts)
+            if not has_files:
+                content_text = "".join(
+                    p.text for p in msg.parts if isinstance(p, core.messages.TextPart)
+                )
+                result.append({"role": "user", "content": content_text})
+            else:
+                user_content: list[dict[str, Any]] = []
+                for p in msg.parts:
+                    if isinstance(p, core.messages.TextPart):
+                        user_content.append({"type": "text", "text": p.text})
+                    elif isinstance(p, core.messages.FilePart):
+                        user_content.append(_file_part_to_anthropic(p))
+                result.append({"role": "user", "content": user_content})
 
     # Merge consecutive same-role messages (e.g. synthetic user(tool_result)
     # followed by a real user message).
@@ -162,7 +237,7 @@ class AnthropicModel(core.llm.LanguageModel):
         output_type: type[pydantic.BaseModel] | None = None,
     ) -> AsyncGenerator[core.llm.StreamEvent]:
         """Yield raw stream events from Anthropic API."""
-        system_prompt, anthropic_messages = _messages_to_anthropic(messages)
+        system_prompt, anthropic_messages = await _messages_to_anthropic(messages)
         anthropic_tools = _tools_to_anthropic(tools) if tools else None
 
         kwargs: dict[str, Any] = {

@@ -467,9 +467,17 @@ def to_messages(
                         )
                         resolved_any_approval = True
 
+                case ui_message.UIFilePart() as fp:
+                    internal_parts.append(
+                        core.messages.FilePart(
+                            data=fp.url,
+                            media_type=fp.media_type,
+                            filename=fp.filename,
+                        )
+                    )
+
                 case (
                     ui_message.UIStepStartPart()
-                    | ui_message.UIFilePart()
                     | ui_message.UISourceUrlPart()
                     | ui_message.UISourceDocumentPart()
                 ):

@@ -8,6 +8,7 @@ import pytest
 
 import vercel_ai_sdk as ai
 from vercel_ai_sdk.core.llm import (
+    FileEvent,
     MessageDone,
     ReasoningDelta,
     ReasoningEnd,
@@ -20,7 +21,13 @@ from vercel_ai_sdk.core.llm import (
     ToolEnd,
     ToolStart,
 )
-from vercel_ai_sdk.core.messages import ReasoningPart, TextPart, ToolPart, Usage
+from vercel_ai_sdk.core.messages import (
+    FilePart,
+    ReasoningPart,
+    TextPart,
+    ToolPart,
+    Usage,
+)
 
 from ..conftest import MockLLM, text_msg
 
@@ -239,3 +246,50 @@ async def test_buffer_structured_output_invalid_json_raises() -> None:
 
     with pytest.raises((json.JSONDecodeError, pydantic.ValidationError)):
         await llm.buffer(ai.make_messages(user="weather?"), output_type=_Weather)
+
+
+# -- File event (inline images from LLMs like Gemini/GPT-5) ---------------
+
+
+def test_file_event_accumulates() -> None:
+    """FileEvent should produce a FilePart in the message."""
+    h = StreamHandler(message_id="m1")
+    m = h.handle_event(
+        FileEvent(block_id="f1", media_type="image/png", data="iVBORw0KGgo=")
+    )
+    file_parts = [p for p in m.parts if isinstance(p, FilePart)]
+    assert len(file_parts) == 1
+    assert file_parts[0].media_type == "image/png"
+    assert file_parts[0].data == "iVBORw0KGgo="
+
+
+def test_file_event_with_text() -> None:
+    """A message can have both text and file parts (e.g. Gemini image gen)."""
+    h = StreamHandler(message_id="m1")
+    h.handle_event(TextStart(block_id="t1"))
+    h.handle_event(TextDelta(block_id="t1", delta="Here is your image:"))
+    h.handle_event(TextEnd(block_id="t1"))
+    h.handle_event(
+        FileEvent(block_id="f1", media_type="image/png", data="iVBORw0KGgo=")
+    )
+    m = h.handle_event(MessageDone(finish_reason="stop"))
+
+    assert len(m.parts) == 2
+    assert isinstance(m.parts[0], TextPart)
+    assert m.parts[0].text == "Here is your image:"
+    assert isinstance(m.parts[1], FilePart)
+    assert m.parts[1].media_type == "image/png"
+    assert m.is_done
+
+
+def test_multiple_file_events() -> None:
+    """Multiple FileEvents produce multiple FileParts."""
+    h = StreamHandler(message_id="m1")
+    h.handle_event(FileEvent(block_id="f1", media_type="image/png", data="png_data"))
+    m = h.handle_event(
+        FileEvent(block_id="f2", media_type="image/jpeg", data="jpeg_data")
+    )
+    file_parts = [p for p in m.parts if isinstance(p, FilePart)]
+    assert len(file_parts) == 2
+    assert file_parts[0].media_type == "image/png"
+    assert file_parts[1].media_type == "image/jpeg"

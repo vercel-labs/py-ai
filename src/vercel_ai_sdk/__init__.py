@@ -3,9 +3,11 @@ from .core import telemetry
 from .core.checkpoint import Checkpoint, PendingHookInfo
 from .core.hooks import Hook, ToolApproval, hook
 from .core.llm import LanguageModel
+from .core.media import ImageModel, MediaModel, MediaResult, VideoModel
 
 # Re-export core types
 from .core.messages import (
+    FilePart,
     HookPart,
     Message,
     Part,
@@ -40,11 +42,16 @@ __all__ = [
     "ToolPart",
     "ToolDelta",
     "ReasoningPart",
+    "FilePart",
     "ToolLike",
     "ToolSchema",
     "Tool",
     "Usage",
     "LanguageModel",
+    "MediaModel",
+    "MediaResult",
+    "ImageModel",
+    "VideoModel",
     "Runtime",
     "RunResult",
     "HookInfo",

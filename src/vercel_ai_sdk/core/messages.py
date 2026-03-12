@@ -6,6 +6,8 @@ from typing import Annotated, Any, Literal
 
 import pydantic
 
+from . import media
+
 # Streaming state for parts
 PartState = Literal["streaming", "done"]
 
@@ -109,8 +111,65 @@ class StructuredOutputPart(pydantic.BaseModel):
         return self._hydrated
 
 
+class FilePart(pydantic.BaseModel):
+    """File, image, or audio content part.
+
+    Covers images (``image/*``), documents (``application/pdf``, ``text/*``),
+    and audio (``audio/*``).  The ``media_type`` field tells provider
+    converters how to format this part for each API.
+
+    ``data`` accepts:
+
+    * **str** -- a URL (``http(s)://...`` or ``data:...``) *or* raw base-64 text.
+    * **bytes** -- raw binary data (will be base-64 encoded when serialized
+      to JSON for providers that need it).
+    """
+
+    data: str | bytes
+    media_type: str  # IANA media type, e.g. "image/png", "audio/wav"
+    filename: str | None = None
+    type: Literal["file"] = "file"
+
+    @classmethod
+    def from_url(cls, url: str, *, media_type: str | None = None) -> FilePart:
+        """Create from a URL, inferring ``media_type`` from the URL if omitted.
+
+        Inference handles ``data:`` URLs (the media type is embedded in the
+        prefix) and ``http(s)://`` URLs (via :func:`mimetypes.guess_type`).
+        Raises :class:`ValueError` if inference fails and no explicit
+        ``media_type`` is provided.
+        """
+        if media_type is None:
+            media_type = media.data.infer_media_type(url)
+        return cls(data=url, media_type=media_type)
+
+    @classmethod
+    def from_bytes(
+        cls,
+        data: bytes,
+        *,
+        media_type: str | None = None,
+        filename: str | None = None,
+    ) -> FilePart:
+        """Create from raw bytes, detecting ``media_type`` via magic bytes.
+
+        Attempts image detection first, then audio.  Raises
+        :class:`ValueError` if no ``media_type`` is provided and
+        detection fails.
+        """
+        if media_type is None:
+            media_type = media.detect_media_type.detect_image_media_type(
+                data
+            ) or media.detect_media_type.detect_audio_media_type(data)
+        if media_type is None:
+            raise ValueError(
+                "Cannot detect media_type from bytes. Provide media_type explicitly."
+            )
+        return cls(data=data, media_type=media_type, filename=filename)
+
+
 Part = Annotated[
-    TextPart | ToolPart | ReasoningPart | HookPart | StructuredOutputPart,
+    TextPart | ToolPart | ReasoningPart | HookPart | StructuredOutputPart | FilePart,
     pydantic.Field(discriminator="type"),
 ]
 
@@ -231,6 +290,29 @@ class Message(pydantic.BaseModel):
                     )
                 )
         return deltas
+
+    @property
+    def files(self) -> list[FilePart]:
+        """All file parts in the message."""
+        return [p for p in self.parts if isinstance(p, FilePart)]
+
+    @property
+    def images(self) -> list[FilePart]:
+        """File parts with ``image/*`` media types."""
+        return [
+            p
+            for p in self.parts
+            if isinstance(p, FilePart) and p.media_type.startswith("image/")
+        ]
+
+    @property
+    def videos(self) -> list[FilePart]:
+        """File parts with ``video/*`` media types."""
+        return [
+            p
+            for p in self.parts
+            if isinstance(p, FilePart) and p.media_type.startswith("video/")
+        ]
 
     @property
     def text(self) -> str:

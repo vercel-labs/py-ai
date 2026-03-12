@@ -61,6 +61,15 @@ class ToolEnd:
 
 
 @dataclasses.dataclass
+class FileEvent:
+    """A complete generated file from the LLM (e.g. inline image from Gemini/GPT)."""
+
+    block_id: str
+    media_type: str
+    data: str  # base64 string or data-URL from the gateway
+
+
+@dataclasses.dataclass
 class MessageDone:
     finish_reason: str | None = None
     usage: messages_.Usage | None = None
@@ -76,6 +85,7 @@ StreamEvent = (
     | ToolStart
     | ToolArgsDelta
     | ToolEnd
+    | FileEvent
     | MessageDone
 )
 
@@ -98,6 +108,9 @@ class StreamHandler:
     _tool_calls: dict[str, tuple[str, str]] = dataclasses.field(
         default_factory=dict
     )  # (name, args)
+    _files: dict[str, tuple[str, str]] = dataclasses.field(
+        default_factory=dict
+    )  # block_id -> (media_type, data)
 
     # Active tracking
     _active_text_id: str | None = None
@@ -155,6 +168,9 @@ class StreamHandler:
             case ToolEnd(tool_call_id=tcid):
                 self._active_tool_ids.discard(tcid)
 
+            case FileEvent(block_id=bid, media_type=mt, data=d):
+                self._files[bid] = (mt, d)
+
             case MessageDone(usage=usage):
                 self._is_done = True
                 self._usage = usage
@@ -207,6 +223,10 @@ class StreamHandler:
                     args_delta=tool_deltas.get(tcid),
                 )
             )
+
+        # File parts (inline images/videos from LLMs like Gemini, GPT-5)
+        for _bid, (media_type, data) in self._files.items():
+            parts.append(messages_.FilePart(data=data, media_type=media_type))
 
         return messages_.Message(
             id=self.message_id,
