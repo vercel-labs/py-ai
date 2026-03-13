@@ -116,6 +116,14 @@ Approval.resolve("approve_send_email", {"granted": True, "reason": "User approve
 Approval.cancel("approve_send_email")  # or cancel it
 ```
 
+The built-in `ToolApproval` hook gates tool execution and integrates with the AI SDK UI protocol automatically:
+
+```python
+approval = await ai.ToolApproval.create("approve_send_email", metadata={"tool": "send_email"})
+if approval.granted:
+    ...
+```
+
 **Long-running mode** (`cancel_on_hooks=False`, the default): the `await` in `create()` blocks until `resolve()` or `cancel()` is called from external code.
 
 **Serverless mode** (`cancel_on_hooks=True`): if no resolution is available, the hook's future is cancelled and the branch dies. Inspect `result.pending_hooks` and `result.checkpoint` to resume later:
@@ -135,16 +143,16 @@ if result.pending_hooks:
 
 ### Convenience Functions
 
-#### `ai.stream_step(llm, messages, tools=None, label=None)`
+#### `ai.stream_step(llm, messages, tools=None, label=None, output_type=None)`
 
 Single LLM call. Built on `@ai.stream`. Returns `StreamResult`.
 
 ```python
 result = await ai.stream_step(llm, messages, tools=[search])
-# result.text, result.tool_calls, result.last_message
+# result.text, result.tool_calls, result.last_message, result.usage, result.output
 ```
 
-#### `ai.stream_loop(llm, messages, tools, label=None)`
+#### `ai.stream_loop(llm, messages, tools, label=None, output_type=None)`
 
 Full agent loop: calls LLM, executes tools, repeats until no more tool calls. Returns final `StreamResult`.
 
@@ -178,6 +186,85 @@ Get the current `Checkpoint` from the active Runtime context. Call this from wit
 checkpoint = ai.get_checkpoint()
 ```
 
+### Structured Output
+
+Pass a Pydantic model as `output_type` to constrain LLM output:
+
+```python
+class Forecast(pydantic.BaseModel):
+    city: str
+    temperature: float
+    conditions: str
+
+result = await ai.stream_step(llm, messages, output_type=Forecast)
+result.output  # Forecast instance (validated Pydantic model)
+```
+
+During streaming, raw JSON tokens arrive via `msg.text_delta`. The validated model is available on the final message as `msg.output`.
+
+### Multimodal Inputs
+
+Include images, audio, or documents in messages via `FilePart`:
+
+```python
+messages = [
+    ai.Message(role="user", parts=[
+        ai.TextPart(text="What's in this image?"),
+        ai.FilePart.from_url("https://example.com/photo.jpg"),
+    ])
+]
+result = await ai.stream_loop(llm, messages=messages, tools=[])
+```
+
+Constructors: `FilePart.from_url(url, *, media_type=None)`, `FilePart.from_bytes(data, *, media_type=None)`. Media type is auto-detected when possible. Providers auto-download URLs when their API requires it.
+
+### Image & Video Generation
+
+```python
+# Image generation
+img_model = ai.ai_gateway.GatewayImageModel(model="google/imagen-4.0-generate-001")
+msg = await img_model.generate(ai.make_messages(user="A sunset over Tokyo"), n=2, aspect_ratio="16:9")
+for img in msg.images:
+    print(img.data)  # base64 or URL
+
+# Video generation
+vid_model = ai.ai_gateway.GatewayVideoModel(model="google/veo-3.0-generate-001")
+msg = await vid_model.generate(ai.make_messages(user="A timelapse of clouds"), aspect_ratio="16:9")
+```
+
+`ImageModel.generate()` accepts `n`, `size`, `aspect_ratio`, `seed`, `provider_options`. `VideoModel.generate()` accepts `n`, `aspect_ratio`, `resolution`, `duration`, `fps`, `seed`, `provider_options`. Both return a `Message` with `FilePart`s accessible via `msg.images` / `msg.videos`.
+
+### Usage
+
+Every assistant message carries token usage:
+
+```python
+result = await ai.stream_step(llm, messages)
+result.usage.input_tokens      # int
+result.usage.output_tokens     # int
+result.usage.total_tokens      # computed property
+result.total_usage             # accumulated across all messages in the result
+```
+
+`Usage` fields: `input_tokens`, `output_tokens`, `reasoning_tokens`, `cache_read_tokens`, `cache_write_tokens` (optional breakdowns), `raw` (provider-specific dict). Supports `+` for accumulation.
+
+### Telemetry
+
+```python
+ai.telemetry.enable()                    # auto-creates OtelHandler (requires opentelemetry-api)
+ai.telemetry.enable(my_custom_handler)   # or provide a custom Handler
+ai.telemetry.disable()
+```
+
+Events: `RunStartEvent`, `RunFinishEvent` (with accumulated `usage`), `StepStartEvent`, `StepFinishEvent`, `ToolCallStartEvent`, `ToolCallFinishEvent`. Any object with a `handle(event)` method satisfies the `Handler` protocol.
+
+Built-in `OtelHandler` creates spans following `gen_ai.*` semantic conventions:
+
+```python
+from vercel_ai_sdk.otel import OtelHandler
+ai.telemetry.enable(OtelHandler(record_inputs=True, record_outputs=False))
+```
+
 ### Checkpoints
 
 `Checkpoint` records completed work (LLM steps, tool executions, hook resolutions) so a run can be replayed without re-executing already-finished operations.
@@ -206,8 +293,9 @@ Three event types are tracked:
 # Uses AI_GATEWAY_API_KEY env var by default
 llm = ai.ai_gateway.GatewayModel(
     model="anthropic/claude-opus-4.6",
-    thinking=True,           # enable reasoning output
-    budget_tokens=10000,     # or reasoning_effort="medium"
+    provider_options={                      # pass-through to gateway/provider
+        "anthropic": {"thinking": {"type": "enabled", "budget_tokens": 10000}},
+    },
 )
 
 # OpenAI (direct)
@@ -225,7 +313,7 @@ llm = ai.anthropic.AnthropicModel(
 )
 ```
 
-The gateway provider automatically routes Anthropic models through the native Anthropic API for full feature support, and falls back to the OpenAI-compatible endpoint for structured output and non-Anthropic models.
+The gateway uses the AI SDK v3 protocol — a single provider-agnostic wire format. The gateway server handles all provider-specific translation. Use `provider_options` for provider-specific settings (thinking, routing order, BYOK keys, etc.).
 
 #### MCP
 
@@ -268,23 +356,30 @@ return StreamingResponse(stream_response(), headers=UI_MESSAGE_STREAM_HEADERS)
 
 | Type | Description |
 |------|-------------|
-| `Message` | Universal message with `role`, `parts`, `label`. Properties: `text`, `text_delta`, `reasoning_delta`, `tool_deltas`, `tool_calls`, `is_done` |
+| `Message` | Universal message with `role`, `parts`, `label`. Properties: `text`, `text_delta`, `reasoning_delta`, `tool_deltas`, `tool_calls`, `is_done`, `usage`, `output`, `files`, `images`, `videos` |
 | `TextPart` | Text content with streaming `state` and `delta` |
 | `ToolPart` | Tool call with `tool_call_id`, `tool_name`, `tool_args`, `status`, `result`. Has `.set_result()` |
 | `ToolDelta` | Tool argument streaming delta (`tool_call_id`, `tool_name`, `args_delta`) |
 | `ReasoningPart` | Model reasoning/thinking with optional `signature` (Anthropic) |
 | `HookPart` | Hook suspension with `hook_id`, `hook_type`, `status` (`pending`/`resolved`/`cancelled`), `metadata`, `resolution` |
-| `Part` | Union: `TextPart \| ToolPart \| ReasoningPart \| HookPart` |
+| `FilePart` | File/image/audio content: `data`, `media_type`. Constructors: `.from_url()`, `.from_bytes()` |
+| `StructuredOutputPart` | Validated structured output: `data` (dict), `value` (typed Pydantic model) |
+| `Part` | Union: `TextPart \| ToolPart \| ReasoningPart \| HookPart \| StructuredOutputPart \| FilePart` |
 | `PartState` | Literal: `"streaming"` \| `"done"` |
-| `StreamResult` | Result of a stream step: `messages`, `tool_calls`, `text`, `last_message` |
+| `StreamResult` | Result of a stream step: `messages`, `tool_calls`, `text`, `last_message`, `usage`, `total_usage`, `output` |
 | `Tool` | Tool definition: `name`, `description`, `schema`, `fn` |
 | `ToolSchema` | Serializable tool description: `name`, `description`, `tool_schema` (no `fn`) |
 | `Runtime` | Central coordinator for the agent loop. Step queue, message queue, checkpoint replay/record |
 | `RunResult` | Return type of `run()`. Async-iterable for messages, then `.checkpoint` and `.pending_hooks` |
 | `HookInfo` | Pending hook info: `label`, `hook_type`, `metadata` |
 | `Hook` | Generic hook base with `.create()`, `.resolve()`, `.cancel()` class methods |
-| `Checkpoint` | Pydantic model — serializable snapshot of completed work: `steps[]`, `tools[]`, `hooks[]`. Use `.model_dump()` / `.model_validate()` |
+| `ToolApproval` | Built-in hook for tool approval: `granted: bool`, `reason: str \| None` |
+| `Usage` | Token usage: `input_tokens`, `output_tokens`, `total_tokens` (computed), optional breakdowns, `raw`. Supports `+` |
+| `Checkpoint` | Pydantic model — serializable snapshot of completed work: `steps[]`, `tools[]`, `hooks[]`, `pending_hooks[]`. Use `.model_dump()` / `.model_validate()` |
+| `PendingHookInfo` | Pending hook in checkpoint: `label`, `hook_type`, `metadata` |
 | `LanguageModel` | Abstract base class for LLM providers |
+| `ImageModel` | Abstract base for image generation. `generate()` returns `Message` with `FilePart`s |
+| `VideoModel` | Abstract base for video generation. `generate()` returns `Message` with `FilePart`s |
 
 ## Examples
 
@@ -300,6 +395,11 @@ See the `examples/` directory:
 - `custom_loop.py` — Custom step with `@ai.stream`
 - `mcp_tools.py` — MCP integration (Context7)
 - `structured_output.py` — Structured output with Pydantic models
+- `media/multimodal.py` — Multimodal inputs (images in messages)
+- `media/image_gen_dedicated.py` — Image generation with dedicated model
+- `media/image_gen_inline.py` — Inline image generation (Gemini)
+- `media/image_edit.py` — Image editing
+- `media/video_gen.py` — Video generation
 
 **Projects**:
 
