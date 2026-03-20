@@ -1,7 +1,7 @@
 """Hooks: live resolution, cancellation, pre-registration, schema validation."""
 
 import asyncio
-from typing import Any
+from typing import Any, ClassVar
 
 import pydantic
 import pytest
@@ -13,6 +13,13 @@ from ..conftest import MockLLM, text_msg
 
 @ai.hook
 class Confirmation(pydantic.BaseModel):
+    approved: bool
+    reason: str = ""
+
+
+@ai.hook
+class CancellingConfirmation(pydantic.BaseModel):
+    cancels_future: ClassVar[bool] = True
     approved: bool
     reason: str = ""
 
@@ -32,7 +39,7 @@ async def test_resolve_live_future() -> None:
         resolved_value = result
 
     llm = MockLLM([[text_msg("OK")]])
-    # Default cancel_on_hooks=False -> long-running mode
+    # Confirmation.cancels_future=False -> long-running mode
     run_result = ai.run(graph, llm)
 
     collected = []
@@ -159,9 +166,11 @@ async def test_resolved_hook_emits_message() -> None:
 async def test_hook_metadata_in_pending() -> None:
     async def graph(llm: ai.LanguageModel) -> None:
         await ai.stream_step(llm, ai.make_messages(user="go"))
-        await Confirmation.create("meta_test", metadata={"tool": "rm -rf", "path": "/"})  # type: ignore[attr-defined]
+        await CancellingConfirmation.create(  # type: ignore[attr-defined]
+            "meta_test", metadata={"tool": "rm -rf", "path": "/"}
+        )
 
-    run_result = ai.run(graph, MockLLM([[text_msg("OK")]]), cancel_on_hooks=True)
+    run_result = ai.run(graph, MockLLM([[text_msg("OK")]]))
     [m async for m in run_result]
 
     info = run_result.pending_hooks["meta_test"]

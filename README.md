@@ -39,7 +39,7 @@ async for msg in ai.run(agent, llm, "When will the robots take over?"):
 
 ### Core Primitives
 
-#### `ai.run(root, *args, checkpoint=None, cancel_on_hooks=False)`
+#### `ai.run(root, *args, checkpoint=None)`
 
 Entry point. Starts `root` as a background task, processes the step/hook queue, yields `Message` objects. Returns a `RunResult`.
 
@@ -97,6 +97,7 @@ Decorator that creates a suspension point from a pydantic model. The model defin
 ```python
 @ai.hook
 class Approval(pydantic.BaseModel):
+    cancels_future: ClassVar[bool] = True  # cancel on suspend (serverless)
     granted: bool
     reason: str
 ```
@@ -124,12 +125,12 @@ if approval.granted:
     ...
 ```
 
-**Long-running mode** (`cancel_on_hooks=False`, the default): the `await` in `create()` blocks until `resolve()` or `cancel()` is called from external code.
+**Long-running mode** (`cancels_future=False`, the default): the `await` in `create()` blocks until `resolve()` or `cancel()` is called from external code.
 
-**Serverless mode** (`cancel_on_hooks=True`): if no resolution is available, the hook's future is cancelled and the branch dies. Inspect `result.pending_hooks` and `result.checkpoint` to resume later:
+**Serverless mode** (`cancels_future=True`): if no resolution is available, the hook's future is cancelled and the branch dies. Inspect `result.pending_hooks` and `result.checkpoint` to resume later:
 
 ```python
-result = ai.run(my_agent, llm, query, cancel_on_hooks=True)
+result = ai.run(my_agent, llm, query)
 async for msg in result:
     ...
 

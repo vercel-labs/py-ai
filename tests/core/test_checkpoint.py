@@ -1,7 +1,7 @@
 """Checkpoint replay, hook cancellation/resolution, serialization."""
 
 import asyncio
-from typing import Any
+from typing import Any, ClassVar
 
 import pydantic
 import pytest
@@ -14,6 +14,7 @@ from ..conftest import MockLLM, text_msg, tool_msg
 
 @ai.hook
 class Approval(pydantic.BaseModel):
+    cancels_future: ClassVar[bool] = True
     granted: bool
 
 
@@ -82,7 +83,7 @@ async def test_hook_cancellation_pending() -> None:
         await ai.stream_step(llm, ai.make_messages(system="t", user="go"))
         return await Approval.create("my_approval", metadata={"tool": "test"})  # type: ignore[attr-defined]
 
-    result = ai.run(graph, MockLLM([[text_msg("OK")]]), cancel_on_hooks=True)
+    result = ai.run(graph, MockLLM([[text_msg("OK")]]))
     msgs = [msg async for msg in result]
     assert "my_approval" in result.pending_hooks
     hook_msgs = [m for m in msgs if any(isinstance(p, ai.HookPart) for p in m.parts)]
@@ -96,7 +97,7 @@ async def test_hook_resolution_on_reentry() -> None:
         return await Approval.create("my_approval")  # type: ignore[attr-defined]
 
     resp = [text_msg("OK")]
-    result1 = ai.run(graph, MockLLM([resp]), cancel_on_hooks=True)
+    result1 = ai.run(graph, MockLLM([resp]))
     [msg async for msg in result1]
     cp = result1.checkpoint
 
@@ -122,7 +123,7 @@ async def test_parallel_hooks_all_collected() -> None:
             tg.create_task(a())
             tg.create_task(b())
 
-    result = ai.run(graph, MockLLM([[text_msg("OK")]]), cancel_on_hooks=True)
+    result = ai.run(graph, MockLLM([[text_msg("OK")]]))
     [msg async for msg in result]
     assert {"hook_a", "hook_b"} <= set(result.pending_hooks)
 
@@ -144,7 +145,7 @@ async def test_parallel_hooks_resolve_on_reentry() -> None:
         return ta.result(), tb.result()
 
     resp = [text_msg("OK")]
-    result1 = ai.run(graph, MockLLM([resp]), cancel_on_hooks=True)
+    result1 = ai.run(graph, MockLLM([resp]))
     [msg async for msg in result1]
     cp = result1.checkpoint
 
