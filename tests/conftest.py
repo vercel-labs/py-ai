@@ -6,8 +6,8 @@ from collections.abc import AsyncGenerator, Sequence
 import pydantic
 
 import vercel_ai_sdk as ai
-from vercel_ai_sdk.core import messages
-from vercel_ai_sdk.core.messages import StructuredOutputPart
+from vercel_ai_sdk.types import messages
+from vercel_ai_sdk.types.messages import StructuredOutputPart
 
 
 class MockLLM(ai.LanguageModel):

@@ -1,12 +1,38 @@
-from . import ai_gateway, ai_sdk_ui, anthropic, mcp, openai
-from .core import telemetry
-from .core.checkpoint import Checkpoint, PendingHookInfo
-from .core.hooks import Hook, ToolApproval, hook
-from .core.llm import LanguageModel
-from .core.media import ImageModel, MediaModel, MediaResult, VideoModel
+from . import adapters, telemetry
+from .adapters import ai_sdk_ui
+from .agents import (
+    Checkpoint,
+    Hook,
+    HookInfo,
+    PendingHookInfo,
+    RunResult,
+    Runtime,
+    StreamResult,
+    Tool,
+    ToolApproval,
+    execute_tool,
+    get_checkpoint,
+    hook,
+    mcp,
+    run,
+    stream,
+    stream_loop,
+    stream_step,
+    tool,
+)
+from .models import (
+    ImageModel,
+    LanguageModel,
+    MediaModel,
+    MediaResult,
+    VideoModel,
+    ai_gateway,
+    anthropic,
+    openai,
+)
 
 # Re-export core types
-from .core.messages import (
+from .types import (
     FilePart,
     HookPart,
     Message,
@@ -16,25 +42,15 @@ from .core.messages import (
     StructuredOutputPart,
     TextPart,
     ToolDelta,
+    ToolLike,
     ToolPart,
+    ToolSchema,
     Usage,
     make_messages,
 )
-from .core.runtime import (
-    HookInfo,
-    RunResult,
-    Runtime,
-    execute_tool,
-    get_checkpoint,
-    run,
-    stream_loop,
-    stream_step,
-)
-from .core.streams import StreamResult, stream
-from .core.tools import Tool, ToolLike, ToolSchema, tool
 
 __all__ = [
-    # Types
+    # Types (from types/)
     "Message",
     "Part",
     "PartState",
@@ -43,26 +59,29 @@ __all__ = [
     "ToolDelta",
     "ReasoningPart",
     "FilePart",
+    "HookPart",
+    "StructuredOutputPart",
     "ToolLike",
     "ToolSchema",
-    "Tool",
     "Usage",
+    "make_messages",
+    # Models (from models/)
     "LanguageModel",
     "MediaModel",
     "MediaResult",
     "ImageModel",
     "VideoModel",
+    # Agents (from agents/)
+    "Tool",
     "Runtime",
     "RunResult",
     "HookInfo",
     "StreamResult",
     "Hook",
-    "HookPart",
     "ToolApproval",
-    "StructuredOutputPart",
     "Checkpoint",
     "PendingHookInfo",
-    # Functions
+    # Functions (from agents/)
     "tool",
     "stream",
     "stream_step",
@@ -70,13 +89,13 @@ __all__ = [
     "execute_tool",
     "get_checkpoint",
     "run",
-    "make_messages",
     "hook",
     # Submodules
     "telemetry",
     "ai_gateway",
     "anthropic",
-    "mcp",
     "openai",
+    "mcp",
     "ai_sdk_ui",
+    "adapters",
 ]
