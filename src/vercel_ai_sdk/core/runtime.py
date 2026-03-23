@@ -32,6 +32,7 @@ class HookSuspension:
     hook_type: str
     metadata: dict[str, Any]
     future: asyncio.Future[Any]
+    cancels_future: bool = False
 
 
 # ── Runtime ───────────────────────────────────────────────────────
@@ -393,7 +394,6 @@ def run(
     root: Callable[..., Coroutine[Any, Any, Any]],
     *args: Any,
     checkpoint: checkpoint_.Checkpoint | None = None,
-    cancel_on_hooks: bool = False,
 ) -> RunResult:
     """
     Main entry point.
@@ -401,10 +401,11 @@ def run(
     1. Starts the root function as a background task
     2. Pulls steps and hook suspensions from the Runtime queue
     3. Executes each step, yielding messages
-    4. Resolves or suspends hooks depending on mode:
-       - cancel_on_hooks=True  (serverless): cancel the future, branch dies,
+    4. Resolves or suspends hooks depending on the hook's cancels_future
+       class variable:
+       - cancels_future=True  (serverless): cancel the future, branch dies,
          caller inspects result.pending_hooks and result.checkpoint to resume
-       - cancel_on_hooks=False (long-running, default): future stays alive,
+       - cancels_future=False (long-running, default): future stays alive,
          external code calls Hook.resolve() / Hook.cancel() to unblock
     5. Returns RunResult with .checkpoint and .pending_hooks
     """
@@ -485,7 +486,7 @@ def run(
                         else:
                             # No resolution available
                             runtime._pending_hooks[step_item.label] = step_item
-                            if cancel_on_hooks:
+                            if step_item.cancels_future:
                                 # Serverless: cancel the future so the branch
                                 # dies with CancelledError. Caller inspects
                                 # result.pending_hooks to resume later.

@@ -64,7 +64,6 @@ async def chat(request: ChatRequest) -> fastapi.responses.StreamingResponse:
         messages,
         agent.TOOLS,
         checkpoint=checkpoint,
-        cancel_on_hooks=True,
     )
 
     async def stream_response() -> AsyncGenerator[str]:

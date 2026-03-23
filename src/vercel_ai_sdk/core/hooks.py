@@ -59,13 +59,13 @@ class Hook[T: pydantic.BaseModel]:
 
         ToolApproval.resolve("approve_delete", {"granted": True, ...})
 
-    Behavior depends on the cancel_on_hooks flag passed to ai.run():
+    Behavior depends on the ``cancels_future`` class variable:
 
-    cancel_on_hooks=False (default, long-running): the await blocks until
+    cancels_future=False (default, long-running): the await blocks until
     Hook.resolve() is called from outside the graph (e.g., websocket
     handler, API endpoint).
 
-    cancel_on_hooks=True (serverless): if no resolution is available, the
+    cancels_future=True (serverless): if no resolution is available, the
     hook's future is cancelled by run(). The branch receives CancelledError
     and dies cleanly. On re-entry, call Hook.resolve() before ai.run() to
     pre-register the resolution, then pass checkpoint= to replay.
@@ -73,6 +73,7 @@ class Hook[T: pydantic.BaseModel]:
 
     _schema: ClassVar[type[pydantic.BaseModel]]
     hook_type: ClassVar[str]
+    cancels_future: ClassVar[bool] = False
 
     @classmethod
     async def create(cls, label: str, metadata: dict[str, Any] | None = None) -> T:
@@ -82,8 +83,8 @@ class Hook[T: pydantic.BaseModel]:
         The hook is submitted to the Runtime's step queue. run() will either:
         - Resolve immediately (if a resolution is available from checkpoint
           or pre-registered via Hook.resolve())
-        - Cancel the future (cancel_on_hooks=True, serverless mode)
-        - Hold the future (cancel_on_hooks=False, long-running mode)
+        - Cancel the future (cancels_future=True, serverless mode)
+        - Hold the future (cancels_future=False, long-running mode)
 
         Args:
             label: Stable identifier for this hook. Used to match resolutions
@@ -116,6 +117,7 @@ class Hook[T: pydantic.BaseModel]:
             hook_type=cls.hook_type,
             metadata=metadata or {},
             future=future,
+            cancels_future=cls.cancels_future,
         )
         await rt.put_hook_suspension(suspension)
 
@@ -236,6 +238,7 @@ def hook[T: pydantic.BaseModel](cls: type[T]) -> type[Hook[T]]:
         {
             "_schema": cls,
             "hook_type": cls.__name__,
+            "cancels_future": cls.__dict__.get("cancels_future", False),
             "__doc__": cls.__doc__,
         },
     )
@@ -251,6 +254,8 @@ class ToolApproval(pydantic.BaseModel):
     tool-approval-request / approval-responded flow to the
     hook system.
     """
+
+    cancels_future: ClassVar[bool] = True
 
     granted: bool
     reason: str | None = None

@@ -622,7 +622,7 @@ def test_approval_responded_resolves_hook() -> None:
 async def test_runtime_tool_approval_same_step() -> None:
     """E2E: tool-approval-request must land in the same SSE step as the tool call.
 
-    Runs a graph with ToolApproval through ai.run(cancel_on_hooks=True),
+    Runs a graph with ToolApproval (cancels_future=True) through ai.run(),
     collects runtime messages, streams through the adapter, and asserts
     that no spurious step boundary appears between tool-input-available
     and tool-approval-request.
@@ -674,7 +674,7 @@ async def test_runtime_tool_approval_same_step() -> None:
     )
 
     runtime_messages: list[messages.Message] = []
-    result = ai.run(graph, mock_llm, cancel_on_hooks=True)
+    result = ai.run(graph, mock_llm)
     async for msg in result:
         runtime_messages.append(msg)
 

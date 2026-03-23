@@ -15,7 +15,7 @@ import vercel_ai_sdk as ai
 
 ## Core workflow
 
-`ai.run(root, *args, checkpoint=None, cancel_on_hooks=False)` is the entry point. It creates a `Runtime` (stored in a context var), starts `root` as a background task, processes an internal step queue, and yields `Message` objects. All SDK functions (`stream_step`, `execute_tool`, hooks) require this Runtime context -- they must be called within `ai.run()`.
+`ai.run(root, *args, checkpoint=None)` is the entry point. It creates a `Runtime` (stored in a context var), starts `root` as a background task, processes an internal step queue, and yields `Message` objects. All SDK functions (`stream_step`, `execute_tool`, hooks) require this Runtime context -- they must be called within `ai.run()`.
 
 The root function is any async function. If it declares a param typed `ai.Runtime`, it's auto-injected.
 
@@ -136,6 +136,7 @@ Hooks are typed suspension points for human-in-the-loop. Decorate a Pydantic mod
 ```python
 @ai.hook
 class Approval(pydantic.BaseModel):
+    cancels_future: ClassVar[bool] = True  # cancel on suspend (serverless)
     granted: bool
     reason: str
 ```
@@ -155,9 +156,9 @@ Approval.resolve("approve_send_email", {"granted": True, "reason": "User approve
 Approval.cancel("approve_send_email")
 ```
 
-**Long-running mode** (`cancel_on_hooks=False`, default): `create()` blocks until `resolve()` or `cancel()` is called externally. Use for websocket/interactive UIs.
+**Long-running mode** (`cancels_future=False`, default): `create()` blocks until `resolve()` or `cancel()` is called externally. Use for websocket/interactive UIs.
 
-**Serverless mode** (`cancel_on_hooks=True`): unresolved hooks are cancelled, the run ends. Inspect `result.pending_hooks` and `result.checkpoint` to resume later.
+**Serverless mode** (`cancels_future=True`): unresolved hooks are cancelled, the run ends. Inspect `result.pending_hooks` and `result.checkpoint` to resume later.
 
 Consuming hooks in the iterator:
 
