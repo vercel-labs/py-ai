@@ -102,72 +102,74 @@ async def _messages_to_openai(
     """
     result: list[dict[str, Any]] = []
     for msg in messages:
-        if msg.role == "assistant":
-            content = ""
-            reasoning = ""
-            tool_calls = []
-            tool_results = []
+        match msg.role:
+            case "assistant":
+                content = ""
+                reasoning = ""
+                tool_calls = []
+                tool_results = []
 
-            for part in msg.parts:
-                if isinstance(part, messages_.ReasoningPart):
-                    reasoning += part.text
-                elif isinstance(part, messages_.TextPart):
-                    content += part.text
-                elif isinstance(part, messages_.ToolPart):
-                    tool_calls.append(
-                        {
-                            "id": part.tool_call_id,
-                            "type": "function",
-                            "function": {
-                                "name": part.tool_name,
-                                "arguments": part.tool_args,
-                            },
-                        }
-                    )
-                    if part.status in ("result", "error"):
-                        tool_results.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": part.tool_call_id,
-                                "content": str(part.result)
-                                if part.result is not None
-                                else "",
-                            }
-                        )
+                for part in msg.parts:
+                    match part:
+                        case messages_.ReasoningPart(text=text):
+                            reasoning += text
+                        case messages_.TextPart(text=text):
+                            content += text
+                        case messages_.ToolPart():
+                            tool_calls.append(
+                                {
+                                    "id": part.tool_call_id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": part.tool_name,
+                                        "arguments": part.tool_args,
+                                    },
+                                }
+                            )
+                            if part.status in ("result", "error"):
+                                tool_results.append(
+                                    {
+                                        "role": "tool",
+                                        "tool_call_id": part.tool_call_id,
+                                        "content": str(part.result)
+                                        if part.result is not None
+                                        else "",
+                                    }
+                                )
 
-            entry: dict[str, Any] = {"role": "assistant"}
-            if content:
-                entry["content"] = content
-            if reasoning:
-                entry["reasoning"] = reasoning
-            if tool_calls:
-                entry["tool_calls"] = tool_calls
-            result.append(entry)
+                entry: dict[str, Any] = {"role": "assistant"}
+                if content:
+                    entry["content"] = content
+                if reasoning:
+                    entry["reasoning"] = reasoning
+                if tool_calls:
+                    entry["tool_calls"] = tool_calls
+                result.append(entry)
 
-            # Emit tool results as separate messages (OpenAI API format)
-            result.extend(tool_results)
-        elif msg.role == "system":
-            content = "".join(
-                p.text for p in msg.parts if isinstance(p, messages_.TextPart)
-            )
-            result.append({"role": "system", "content": content})
-        else:
-            # User messages — may contain multimodal FileParts
-            has_files = any(isinstance(p, messages_.FilePart) for p in msg.parts)
-            if not has_files:
-                # Text-only: keep simple string format (cheaper, no content array)
-                text = "".join(
+                # Emit tool results as separate messages (OpenAI API format)
+                result.extend(tool_results)
+            case "system":
+                content = "".join(
                     p.text for p in msg.parts if isinstance(p, messages_.TextPart)
                 )
-                result.append({"role": "user", "content": text})
-            else:
-                parts: list[dict[str, Any]] = []
-                for p in msg.parts:
-                    if isinstance(p, messages_.TextPart):
-                        parts.append({"type": "text", "text": p.text})
-                    elif isinstance(p, messages_.FilePart):
-                        parts.append(await _file_part_to_openai(p))
-                result.append({"role": "user", "content": parts})
+                result.append({"role": "system", "content": content})
+            case "user":
+                has_files = any(isinstance(p, messages_.FilePart) for p in msg.parts)
+                if not has_files:
+                    # Text-only: keep simple string format (cheaper, no content array)
+                    text = "".join(
+                        p.text for p in msg.parts if isinstance(p, messages_.TextPart)
+                    )
+                    result.append({"role": "user", "content": text})
+                else:
+                    parts: list[dict[str, Any]] = []
+                    for p in msg.parts:
+                        match p:
+                            case messages_.TextPart(text=text):
+                                parts.append({"type": "text", "text": text})
+                            case messages_.FilePart():
+                                parts.append(await _file_part_to_openai(p))
+                    result.append({"role": "user", "content": parts})
     return result
 
 

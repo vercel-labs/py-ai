@@ -95,84 +95,77 @@ def _file_part_to_anthropic(part: messages_.FilePart) -> dict[str, Any]:
 async def _messages_to_anthropic(
     messages: list[messages_.Message],
 ) -> tuple[str | None, list[dict[str, Any]]]:
-    """Convert internal messages to Anthropic API format.
-
-    Returns (system_prompt, messages) tuple since Anthropic handles
-    system prompts separately.
-
-    Converts to the Anthropic wire format:
-
-    - ``tool_use`` blocks in assistant messages
-    - ``tool_result`` blocks in user messages (immediately after)
-
-    A final merge pass ensures strictly alternating roles (Anthropic
-    rejects consecutive same-role messages).
-    """
+    """Convert internal messages to Anthropic API format."""
     system_prompt: str | None = None
     result: list[dict[str, Any]] = []
 
     for msg in messages:
-        if msg.role == "system":
-            system_prompt = "".join(
-                p.text for p in msg.parts if isinstance(p, messages_.TextPart)
-            )
-        elif msg.role == "assistant":
-            content: list[dict[str, Any]] = []
-            tool_results: list[dict[str, Any]] = []
-
-            for part in msg.parts:
-                if isinstance(part, messages_.ReasoningPart):
-                    if part.signature:
-                        content.append(
-                            {
-                                "type": "thinking",
-                                "thinking": part.text,
-                                "signature": part.signature,
-                            }
-                        )
-                elif isinstance(part, messages_.TextPart):
-                    content.append({"type": "text", "text": part.text})
-                elif isinstance(part, messages_.ToolPart):
-                    tool_input = json.loads(part.tool_args) if part.tool_args else {}
-                    content.append(
-                        {
-                            "type": "tool_use",
-                            "id": part.tool_call_id,
-                            "name": part.tool_name,
-                            "input": tool_input,
-                        }
-                    )
-                    if part.status in ("result", "error"):
-                        entry: dict[str, Any] = {
-                            "type": "tool_result",
-                            "tool_use_id": part.tool_call_id,
-                            "content": str(part.result)
-                            if part.result is not None
-                            else "",
-                        }
-                        if part.status == "error":
-                            entry["is_error"] = True
-                        tool_results.append(entry)
-
-            if content:
-                result.append({"role": "assistant", "content": content})
-            if tool_results:
-                result.append({"role": "user", "content": tool_results})
-        elif msg.role == "user":
-            has_files = any(isinstance(p, messages_.FilePart) for p in msg.parts)
-            if not has_files:
-                content_text = "".join(
+        match msg.role:
+            case "system":
+                system_prompt = "".join(
                     p.text for p in msg.parts if isinstance(p, messages_.TextPart)
                 )
-                result.append({"role": "user", "content": content_text})
-            else:
-                user_content: list[dict[str, Any]] = []
-                for p in msg.parts:
-                    if isinstance(p, messages_.TextPart):
-                        user_content.append({"type": "text", "text": p.text})
-                    elif isinstance(p, messages_.FilePart):
-                        user_content.append(_file_part_to_anthropic(p))
-                result.append({"role": "user", "content": user_content})
+            case "assistant":
+                content: list[dict[str, Any]] = []
+                tool_results: list[dict[str, Any]] = []
+
+                for part in msg.parts:
+                    match part:
+                        case messages_.ReasoningPart(text=text, signature=signature):
+                            if signature:
+                                content.append(
+                                    {
+                                        "type": "thinking",
+                                        "thinking": text,
+                                        "signature": signature,
+                                    }
+                                )
+                        case messages_.TextPart(text=text):
+                            content.append({"type": "text", "text": text})
+                        case messages_.ToolPart():
+                            tool_input = (
+                                json.loads(part.tool_args) if part.tool_args else {}
+                            )
+                            content.append(
+                                {
+                                    "type": "tool_use",
+                                    "id": part.tool_call_id,
+                                    "name": part.tool_name,
+                                    "input": tool_input,
+                                }
+                            )
+                            if part.status in ("result", "error"):
+                                entry: dict[str, Any] = {
+                                    "type": "tool_result",
+                                    "tool_use_id": part.tool_call_id,
+                                    "content": str(part.result)
+                                    if part.result is not None
+                                    else "",
+                                }
+                                if part.status == "error":
+                                    entry["is_error"] = True
+                                tool_results.append(entry)
+
+                if content:
+                    result.append({"role": "assistant", "content": content})
+                if tool_results:
+                    result.append({"role": "user", "content": tool_results})
+            case "user":
+                has_files = any(isinstance(p, messages_.FilePart) for p in msg.parts)
+                if not has_files:
+                    content_text = "".join(
+                        p.text for p in msg.parts if isinstance(p, messages_.TextPart)
+                    )
+                    result.append({"role": "user", "content": content_text})
+                else:
+                    user_content: list[dict[str, Any]] = []
+                    for p in msg.parts:
+                        match p:
+                            case messages_.TextPart(text=text):
+                                user_content.append({"type": "text", "text": text})
+                            case messages_.FilePart():
+                                user_content.append(_file_part_to_anthropic(p))
+                    result.append({"role": "user", "content": user_content})
 
     # Merge consecutive same-role messages (e.g. synthetic user(tool_result)
     # followed by a real user message).
@@ -273,58 +266,63 @@ class AnthropicModel(llm_.LanguageModel):
 
         async with stream_cm as stream:
             async for event in stream:
-                if event.type == "content_block_start":
-                    block = event.content_block
-                    idx = event.index
-                    block_types[idx] = block.type
+                match event.type:
+                    case "content_block_start":
+                        block = event.content_block
+                        idx = event.index
+                        block_types[idx] = block.type
 
-                    if block.type == "text":
-                        yield llm_.TextStart(block_id=str(idx))
-                    elif block.type == "thinking":
-                        yield llm_.ReasoningStart(block_id=str(idx))
-                    elif block.type == "tool_use":
-                        tool_ids[idx] = block.id
-                        yield llm_.ToolStart(
-                            tool_call_id=block.id, tool_name=block.name
-                        )
+                        match block.type:
+                            case "text":
+                                yield llm_.TextStart(block_id=str(idx))
+                            case "thinking":
+                                yield llm_.ReasoningStart(block_id=str(idx))
+                            case "tool_use":
+                                tool_ids[idx] = block.id
+                                yield llm_.ToolStart(
+                                    tool_call_id=block.id, tool_name=block.name
+                                )
 
-                elif event.type == "content_block_delta":
-                    delta = event.delta
-                    idx = event.index
+                    case "content_block_delta":
+                        delta = event.delta
+                        idx = event.index
 
-                    if delta.type == "text_delta":
-                        yield llm_.TextDelta(block_id=str(idx), delta=delta.text)
-                    elif delta.type == "thinking_delta":
-                        yield llm_.ReasoningDelta(
-                            block_id=str(idx), delta=delta.thinking
-                        )
-                    elif delta.type == "signature_delta":
-                        # Accumulate signature for ReasoningEnd
-                        signature_buffer[idx] = (
-                            signature_buffer.get(idx, "") + delta.signature
-                        )
-                    elif delta.type == "input_json_delta":
-                        tool_id = tool_ids.get(idx)
-                        if tool_id:
-                            yield llm_.ToolArgsDelta(
-                                tool_call_id=tool_id, delta=delta.partial_json
-                            )
+                        match delta.type:
+                            case "text_delta":
+                                yield llm_.TextDelta(
+                                    block_id=str(idx), delta=delta.text
+                                )
+                            case "thinking_delta":
+                                yield llm_.ReasoningDelta(
+                                    block_id=str(idx), delta=delta.thinking
+                                )
+                            case "signature_delta":
+                                # Accumulate signature for ReasoningEnd
+                                signature_buffer[idx] = (
+                                    signature_buffer.get(idx, "") + delta.signature
+                                )
+                            case "input_json_delta":
+                                tool_id = tool_ids.get(idx)
+                                if tool_id:
+                                    yield llm_.ToolArgsDelta(
+                                        tool_call_id=tool_id,
+                                        delta=delta.partial_json,
+                                    )
 
-                elif event.type == "content_block_stop":
-                    idx = event.index
-                    block_type = block_types.get(idx)
-
-                    if block_type == "text":
-                        yield llm_.TextEnd(block_id=str(idx))
-                    elif block_type == "thinking":
-                        yield llm_.ReasoningEnd(
-                            block_id=str(idx),
-                            signature=signature_buffer.get(idx),
-                        )
-                    elif block_type == "tool_use":
-                        tool_id = tool_ids.get(idx)
-                        if tool_id:
-                            yield llm_.ToolEnd(tool_call_id=tool_id)
+                    case "content_block_stop":
+                        idx = event.index
+                        match block_types.get(idx):
+                            case "text":
+                                yield llm_.TextEnd(block_id=str(idx))
+                            case "thinking":
+                                yield llm_.ReasoningEnd(
+                                    block_id=str(idx),
+                                    signature=signature_buffer.get(idx),
+                                )
+                            case "tool_use":
+                                tool_id = tool_ids.get(idx)
+                                if tool_id:
+                                    yield llm_.ToolEnd(tool_call_id=tool_id)
 
             # The Anthropic SDK accumulates usage across message_start and
             # message_delta events into current_message_snapshot.  Read it
