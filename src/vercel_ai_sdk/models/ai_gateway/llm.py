@@ -87,6 +87,7 @@ class GatewayModel(llm_.LanguageModel):
 
     # -- Stream events -------------------------------------------------------
 
+    @override
     async def stream_events(
         self,
         messages: list[messages_.Message],
@@ -143,34 +144,6 @@ class GatewayModel(llm_.LanguageModel):
                 ),
                 cause=exc,
             ) from exc
-
-    # -- LanguageModel interface ---------------------------------------------
-
-    @override
-    async def stream(
-        self,
-        messages: list[messages_.Message],
-        tools: Sequence[tools_.ToolLike] | None = None,
-        output_type: type[pydantic.BaseModel] | None = None,
-    ) -> AsyncGenerator[messages_.Message]:
-        handler = llm_.StreamHandler()
-        msg: messages_.Message | None = None
-        async for event in self.stream_events(messages, tools, output_type):
-            msg = handler.handle_event(event)
-            yield msg
-
-        if output_type is not None and msg is not None and msg.text:
-            data = json.loads(msg.text)
-            output_type.model_validate(data)
-            part = messages_.StructuredOutputPart(
-                data=data,
-                output_type_name=(
-                    f"{output_type.__module__}.{output_type.__qualname__}"
-                ),
-            )
-            msg = msg.model_copy()
-            msg.parts = [*msg.parts, part]
-            yield msg
 
 
 # ---------------------------------------------------------------------------

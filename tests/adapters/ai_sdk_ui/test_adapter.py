@@ -308,22 +308,27 @@ async def test_runtime_tool_roundtrip() -> None:
     ]
 
     # This is what SHOULD happen:
-    # 1. First step yields tool call with status="pending"
-    #    -> tool-input-start, tool-input-available
+    # 1. First step streams tool call args then completes
+    #    -> tool-input-start, tool-input-delta, tool-input-available
     # 2. After tool execution, we yield the same message with
     #    status="result" -> tool-output-available
     #    (same step because same message ID)
-    # 3. Second LLM step yields final text -> text-start, text-end
+    # 3. Second LLM step streams text then completes
+    #    -> text-start, text-delta, text-end, (final done msg) text-start, text-end
     expected = [
         "start",
         "start-step",
         "tool-input-start",
+        "tool-input-delta",
         "tool-input-available",
         "tool-output-available",  # Same step as input (same message ID)
         "finish-step",
         # Second LLM call (new message ID = new step)
         "start-step",
         "text-start",
+        "text-delta",
+        "text-end",
+        "text-start",  # Final done message re-emits completed text
         "text-end",
         "finish-step",
         "finish",
@@ -697,6 +702,7 @@ async def test_runtime_tool_approval_same_step() -> None:
         "start",
         "start-step",
         "tool-input-start",
+        "tool-input-delta",
         "tool-input-available",
         "tool-approval-request",
         "finish-step",

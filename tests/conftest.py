@@ -1,58 +1,77 @@
 from __future__ import annotations
 
-import json
 from collections.abc import AsyncGenerator, Sequence
 
 import pydantic
 
 import vercel_ai_sdk as ai
-from vercel_ai_sdk.types import messages
-from vercel_ai_sdk.types.messages import StructuredOutputPart
+from vercel_ai_sdk.models.core import llm as llm_
+from vercel_ai_sdk.types import messages as messages_
 
 
 class MockLLM(ai.LanguageModel):
-    """LLM that yields pre-configured response sequences, one per call."""
+    """LLM that yields pre-configured response sequences, one per call.
 
-    def __init__(self, responses: list[list[messages.Message]]) -> None:
+    Converts pre-configured ``Message`` objects into ``StreamEvent`` sequences
+    so the base-class ``stream()`` (which uses ``StreamHandler``) can
+    reconstruct them.
+    """
+
+    def __init__(self, responses: list[list[messages_.Message]]) -> None:
         self._responses = list(responses)
         self._call_index = 0
         self.call_count = 0
 
-    async def stream(
+    async def stream_events(
         self,
-        messages: list[messages.Message],
+        messages: list[messages_.Message],
         tools: Sequence[ai.ToolLike] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
-    ) -> AsyncGenerator[messages.Message]:
+    ) -> AsyncGenerator[llm_.StreamEvent]:
         if self._call_index >= len(self._responses):
             raise RuntimeError("MockLLM: no more responses configured")
         self.call_count += 1
         seq = self._responses[self._call_index]
         self._call_index += 1
-        msg = None
-        for msg in seq:
-            yield msg
 
-        # Simulate structured output validation (matching real provider behavior)
-        if output_type is not None and msg is not None and msg.text:
-            data = json.loads(msg.text)
-            output_type.model_validate(data)  # fail fast on bad data
-            part = StructuredOutputPart(
-                data=data,
-                output_type_name=f"{output_type.__module__}.{output_type.__qualname__}",
-            )
-            msg = msg.model_copy()
-            msg.parts = [*msg.parts, part]
-            yield msg
+        for msg in seq:
+            for i, part in enumerate(msg.parts):
+                if isinstance(part, messages_.TextPart):
+                    bid = f"text-{i}"
+                    yield llm_.TextStart(block_id=bid)
+                    if part.text:
+                        yield llm_.TextDelta(block_id=bid, delta=part.text)
+                    yield llm_.TextEnd(block_id=bid)
+
+                elif isinstance(part, messages_.ReasoningPart):
+                    bid = f"reasoning-{i}"
+                    yield llm_.ReasoningStart(block_id=bid)
+                    if part.text:
+                        yield llm_.ReasoningDelta(block_id=bid, delta=part.text)
+                    yield llm_.ReasoningEnd(block_id=bid, signature=part.signature)
+
+                elif isinstance(part, messages_.ToolPart):
+                    yield llm_.ToolStart(
+                        tool_call_id=part.tool_call_id,
+                        tool_name=part.tool_name,
+                    )
+                    if part.tool_args:
+                        yield llm_.ToolArgsDelta(
+                            tool_call_id=part.tool_call_id,
+                            delta=part.tool_args,
+                        )
+                    yield llm_.ToolEnd(tool_call_id=part.tool_call_id)
+
+        yield llm_.MessageDone()
 
 
 def text_msg(
     text: str, *, id: str = "msg-1", state: str = "done", delta: str | None = None
-) -> messages.Message:
-    return messages.Message(
+) -> messages_.Message:
+    return messages_.Message(
         id=id,
         role="assistant",
-        parts=[messages.TextPart(text=text, state=state, delta=delta)],
+        parts=[messages_.TextPart(text=text, state=state, delta=delta)],
     )
 
 
@@ -64,12 +83,12 @@ def tool_msg(
     args: str = "{}",
     status: str = "pending",
     result: dict[str, object] | None = None,
-) -> messages.Message:
-    return messages.Message(
+) -> messages_.Message:
+    return messages_.Message(
         id=id,
         role="assistant",
         parts=[
-            messages.ToolPart(
+            messages_.ToolPart(
                 tool_call_id=tc_id,
                 tool_name=name,
                 tool_args=args,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import AsyncGenerator, Sequence
 from typing import Any, override
@@ -212,6 +211,7 @@ class OpenAIModel(llm_.LanguageModel):
         resolved_key = api_key or os.environ.get("OPENAI_API_KEY") or ""
         self._client = openai.AsyncOpenAI(base_url=base_url, api_key=resolved_key)
 
+    @override
     async def stream_events(
         self,
         messages: list[messages_.Message],
@@ -363,29 +363,3 @@ class OpenAIModel(llm_.LanguageModel):
                 # finish_reason. We'll emit MessageDone after the loop.
 
         yield llm_.MessageDone(finish_reason=finish_reason, usage=usage)
-
-    @override
-    async def stream(
-        self,
-        messages: list[messages_.Message],
-        tools: Sequence[tools_.ToolLike] | None = None,
-        output_type: type[pydantic.BaseModel] | None = None,
-    ) -> AsyncGenerator[messages_.Message]:
-        """Stream Messages (uses StreamHandler internally)."""
-        handler = llm_.StreamHandler()
-        msg: messages_.Message | None = None
-        async for event in self.stream_events(messages, tools, output_type=output_type):
-            msg = handler.handle_event(event)
-            yield msg
-
-        # After stream completes, validate and attach structured output part
-        if output_type is not None and msg is not None and msg.text:
-            data = json.loads(msg.text)
-            output_type.model_validate(data)  # fail fast on bad data
-            part = messages_.StructuredOutputPart(
-                data=data,
-                output_type_name=f"{output_type.__module__}.{output_type.__qualname__}",
-            )
-            msg = msg.model_copy()
-            msg.parts = [*msg.parts, part]
-            yield msg
