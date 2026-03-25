@@ -1,4 +1,4 @@
-from . import adapters, telemetry
+from . import adapters, models, telemetry
 from .adapters import ai_sdk_ui
 from .agents import (
     Checkpoint,
@@ -25,6 +25,8 @@ from .models import (
     LanguageModel,
     MediaModel,
     MediaResult,
+    Model,
+    Stream,
     VideoModel,
     ai_gateway,
     anthropic,
@@ -66,11 +68,14 @@ __all__ = [
     "Usage",
     "make_messages",
     # Models (from models/)
+    "Model",
+    "Stream",
     "LanguageModel",
     "MediaModel",
     "MediaResult",
     "ImageModel",
     "VideoModel",
+    "models",
     # Agents (from agents/)
     "Tool",
     "Runtime",
