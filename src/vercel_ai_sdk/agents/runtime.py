@@ -10,7 +10,7 @@ from typing import Any, get_type_hints
 
 import pydantic
 
-from ..models.core import llm as llm_
+from .. import models2
 from ..telemetry import events as telemetry_
 from ..types import messages as messages_
 from . import checkpoint as checkpoint_
@@ -213,15 +213,16 @@ def _find_runtime_param(fn: Callable[..., Any]) -> str | None:
 
 @streams_.stream
 async def stream_step(
-    llm: llm_.LanguageModel,
+    model: models2.Model,
     messages: list[messages_.Message],
     tools: Sequence[tools_.ToolLike] | None = None,
     label: str | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
+    **kwargs: Any,
 ) -> AsyncGenerator[messages_.Message]:
     """Single LLM call that streams to Runtime."""
-    async for msg in llm.stream(
-        messages=messages, tools=tools, output_type=output_type
+    async for msg in models2.stream(
+        model, messages, tools=tools, output_type=output_type, **kwargs
     ):
         msg.label = label
         yield msg
@@ -301,18 +302,19 @@ async def execute_tool(
 
 
 async def stream_loop(
-    llm: llm_.LanguageModel,
+    model: models2.Model,
     messages: list[messages_.Message],
     tools: Sequence[tools_.ToolLike],
     label: str | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
+    **kwargs: Any,
 ) -> streams_.StreamResult:
     """Agent loop: stream LLM, execute tools, repeat until done."""
     local_messages = list(messages)
 
     while True:
         result = await stream_step(
-            llm, local_messages, tools, label=label, output_type=output_type
+            model, local_messages, tools, label=label, output_type=output_type, **kwargs
         )
 
         if not result.tool_calls:

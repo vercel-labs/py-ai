@@ -12,7 +12,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 import vercel_ai_sdk as ai
 from vercel_ai_sdk.telemetry.otel import OtelHandler
 
-from ..conftest import MockLLM, text_msg, tool_msg
+from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_msg
 
 
 @pytest.fixture
@@ -36,10 +36,13 @@ async def double(x: int) -> int:
 async def test_text_only_spans(spans: InMemorySpanExporter) -> None:
     """Text-only run produces ai.run > ai.stream span hierarchy."""
 
-    async def root(llm: ai.LanguageModel) -> ai.StreamResult:
-        return await ai.stream_loop(llm, messages=ai.make_messages(user="Hi"), tools=[])
+    async def root(model: ai.Model) -> ai.StreamResult:
+        return await ai.stream_loop(
+            model, messages=ai.make_messages(user="Hi"), tools=[]
+        )
 
-    result = ai.run(root, MockLLM([[text_msg("Hello!")]]))
+    mock_llm([[text_msg("Hello!")]])
+    result = ai.run(root, MOCK_MODEL)
     [m async for m in result]
 
     finished = spans.get_finished_spans()
@@ -63,18 +66,18 @@ async def test_text_only_spans(spans: InMemorySpanExporter) -> None:
 async def test_tool_call_spans(spans: InMemorySpanExporter) -> None:
     """Tool-calling run produces ai.tool spans with correct attributes."""
 
-    async def root(llm: ai.LanguageModel) -> ai.StreamResult:
+    async def root(model: ai.Model) -> ai.StreamResult:
         return await ai.stream_loop(
-            llm, messages=ai.make_messages(user="Double 5"), tools=[double]
+            model, messages=ai.make_messages(user="Double 5"), tools=[double]
         )
 
-    llm = MockLLM(
+    mock_llm(
         [
             [tool_msg(tc_id="tc-1", name="double", args='{"x": 5}')],
             [text_msg("10")],
         ]
     )
-    result = ai.run(root, llm)
+    result = ai.run(root, MOCK_MODEL)
     [m async for m in result]
 
     finished = spans.get_finished_spans()

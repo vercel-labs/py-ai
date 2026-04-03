@@ -10,7 +10,7 @@ import vercel_ai_sdk as ai
 from vercel_ai_sdk.agents.mcp.client import _mcp_tool_to_native
 from vercel_ai_sdk.agents.tools import _tool_registry, get_tool
 
-from ...conftest import MockLLM, text_msg, tool_msg
+from ...conftest import MOCK_MODEL, mock_llm, text_msg, tool_msg
 
 
 def _fake_mcp_tool(
@@ -84,18 +84,18 @@ async def test_mcp_tool_executes_through_stream_loop() -> None:
     native._fn = fake_fn
     _tool_registry[native.name] = native
 
-    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
+    async def graph(model: ai.Model) -> ai.StreamResult:
         return await ai.stream_loop(
-            llm,
+            model,
             messages=ai.make_messages(user="echo hello"),
             tools=[native],
         )
 
     call1 = [tool_msg(tc_id="tc-mcp-1", name="mcp_e2e_echo", args='{"text": "hello"}')]
     call2 = [text_msg("Done.", id="msg-2")]
-    llm = MockLLM([call1, call2])
+    llm = mock_llm([call1, call2])
 
-    result = ai.run(graph, llm)
+    result = ai.run(graph, MOCK_MODEL)
     msgs = [m async for m in result]
 
     # Tool was called with the right args

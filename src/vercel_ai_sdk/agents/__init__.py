@@ -1,6 +1,6 @@
 """Agent loop orchestration — tools, hooks, runtime, and streaming.
 
-Depends on types/ and models/. Provides the loop machinery that
+Depends on types/ and models2/. Provides the loop machinery that
 plugs a model into a tool-calling loop with hooks and checkpoints.
 """
 

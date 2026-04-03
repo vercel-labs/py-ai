@@ -69,6 +69,22 @@ def _ensure_adapters() -> None:
     _stream_adapters["anthropic"] = anthropic_stream
 
 
+def register_stream(adapter: str, fn: StreamFn) -> None:
+    """Register a stream adapter function for the given adapter key.
+
+    Use this to add custom adapters (or override built-in ones).
+    """
+    _stream_adapters[adapter] = fn
+
+
+def register_generate(adapter: str, fn: GenerateFn) -> None:
+    """Register a generate adapter function for the given adapter key.
+
+    Use this to add custom adapters (or override built-in ones).
+    """
+    _generate_adapters[adapter] = fn
+
+
 # ---------------------------------------------------------------------------
 # Provider defaults — base URLs and env var names for auto-client creation.
 # ---------------------------------------------------------------------------
@@ -183,5 +199,7 @@ __all__ = [
     # Public API
     "buffer",
     "generate",
+    "register_generate",
+    "register_stream",
     "stream",
 ]

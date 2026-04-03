@@ -1,4 +1,4 @@
-from . import adapters, models, telemetry
+from . import adapters, models, models2, telemetry
 from .adapters import ai_sdk_ui
 from .agents import (
     Checkpoint,
@@ -20,18 +20,7 @@ from .agents import (
     stream_step,
     tool,
 )
-from .models import (
-    ImageModel,
-    LanguageModel,
-    MediaModel,
-    MediaResult,
-    Model,
-    Stream,
-    VideoModel,
-    ai_gateway,
-    anthropic,
-    openai,
-)
+from .models2 import Client, Model, ModelCost
 
 # Re-export core types
 from .types import (
@@ -67,14 +56,12 @@ __all__ = [
     "ToolSchema",
     "Usage",
     "make_messages",
-    # Models (from models/)
+    # Models (from models2/)
     "Model",
-    "Stream",
-    "LanguageModel",
-    "MediaModel",
-    "MediaResult",
-    "ImageModel",
-    "VideoModel",
+    "ModelCost",
+    "Client",
+    "models2",
+    # Legacy (from models/) — kept during transition
     "models",
     # Agents (from agents/)
     "Tool",
@@ -97,9 +84,6 @@ __all__ = [
     "hook",
     # Submodules
     "telemetry",
-    "ai_gateway",
-    "anthropic",
-    "openai",
     "mcp",
     "ai_sdk_ui",
     "adapters",

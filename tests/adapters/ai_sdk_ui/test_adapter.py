@@ -12,7 +12,7 @@ from vercel_ai_sdk.adapters.ai_sdk_ui import adapter, ui_message
 from vercel_ai_sdk.agents import hooks
 from vercel_ai_sdk.types import messages
 
-from ...conftest import MockLLM, tool_msg
+from ...conftest import MOCK_MODEL, mock_llm, tool_msg
 
 
 async def get_event_types(msgs: list[messages.Message]) -> list[str]:
@@ -241,12 +241,12 @@ async def get_weather(city: str) -> str:
 
 
 async def mock_agent(
-    llm: ai.LanguageModel,
+    model: ai.Model,
     user_query: str,
 ) -> ai.StreamResult:
     """Agent using stream_loop directly."""
     return await ai.stream_loop(
-        llm,
+        model,
         messages=ai.make_messages(system="You are helpful.", user=user_query),
         tools=[get_weather],
     )
@@ -294,11 +294,11 @@ async def test_runtime_tool_roundtrip() -> None:
         ),
     ]
 
-    mock_llm = MockLLM([tool_call_response, final_text_response])
+    mock_llm([tool_call_response, final_text_response])
 
     # Collect all messages from the runtime
     runtime_messages: list[messages.Message] = []
-    async for msg in ai.run(mock_agent, mock_llm, "What's the weather in London?"):
+    async for msg in ai.run(mock_agent, MOCK_MODEL, "What's the weather in London?"):
         runtime_messages.append(msg)
 
     # Stream through UI adapter
@@ -643,9 +643,9 @@ async def test_runtime_tool_approval_same_step() -> None:
         """Do something dangerous."""
         return f"deleted {path}"
 
-    async def graph(llm: ai.LanguageModel) -> None:
+    async def graph(model: ai.Model) -> None:
         result = await ai.stream_step(
-            llm,
+            model,
             ai.make_messages(system="You are helpful.", user="delete /tmp"),
             [dangerous_action],
         )
@@ -667,7 +667,7 @@ async def test_runtime_tool_approval_same_step() -> None:
 
         await asyncio.gather(*(approve_and_execute(tc) for tc in result.tool_calls))
 
-    mock_llm = MockLLM(
+    mock_llm(
         [
             [
                 tool_msg(
@@ -680,7 +680,7 @@ async def test_runtime_tool_approval_same_step() -> None:
     )
 
     runtime_messages: list[messages.Message] = []
-    result = ai.run(graph, mock_llm)
+    result = ai.run(graph, MOCK_MODEL)
     async for msg in result:
         runtime_messages.append(msg)
 

@@ -17,7 +17,7 @@ from vercel_ai_sdk.telemetry.events import (
     ToolCallStartEvent,
 )
 
-from ..conftest import MockLLM, text_msg, tool_msg
+from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_msg
 
 # ── Recording handler ────────────────────────────────────────────
 
@@ -56,10 +56,13 @@ async def double(x: int) -> int:
 async def test_text_only_run_events(handler: RecordingHandler) -> None:
     """Simplest run emits RunStart, StepStart, StepFinish, RunFinish."""
 
-    async def root(llm: ai.LanguageModel) -> ai.StreamResult:
-        return await ai.stream_loop(llm, messages=ai.make_messages(user="Hi"), tools=[])
+    async def root(model: ai.Model) -> ai.StreamResult:
+        return await ai.stream_loop(
+            model, messages=ai.make_messages(user="Hi"), tools=[]
+        )
 
-    result = ai.run(root, MockLLM([[text_msg("Hello!")]]))
+    mock_llm([[text_msg("Hello!")]])
+    result = ai.run(root, MOCK_MODEL)
     [m async for m in result]
 
     types = [type(e).__name__ for e in handler.events]
@@ -79,18 +82,18 @@ async def test_text_only_run_events(handler: RecordingHandler) -> None:
 async def test_tool_call_events(handler: RecordingHandler) -> None:
     """Tool-calling run emits tool events between steps with correct payloads."""
 
-    async def root(llm: ai.LanguageModel) -> ai.StreamResult:
+    async def root(model: ai.Model) -> ai.StreamResult:
         return await ai.stream_loop(
-            llm, messages=ai.make_messages(user="Double 5"), tools=[double]
+            model, messages=ai.make_messages(user="Double 5"), tools=[double]
         )
 
-    llm = MockLLM(
+    mock_llm(
         [
             [tool_msg(tc_id="tc-1", name="double", args='{"x": 5}')],
             [text_msg("10")],
         ]
     )
-    result = ai.run(root, llm)
+    result = ai.run(root, MOCK_MODEL)
     [m async for m in result]
 
     types = [type(e).__name__ for e in handler.events]
@@ -131,12 +134,13 @@ async def test_run_id_available_during_run() -> None:
     ai.telemetry.enable(Capture())
     try:
 
-        async def root(llm: ai.LanguageModel) -> ai.StreamResult:
+        async def root(model: ai.Model) -> ai.StreamResult:
             return await ai.stream_loop(
-                llm, messages=ai.make_messages(user="Hi"), tools=[]
+                model, messages=ai.make_messages(user="Hi"), tools=[]
             )
 
-        result = ai.run(root, MockLLM([[text_msg("Hello!")]]))
+        mock_llm([[text_msg("Hello!")]])
+        result = ai.run(root, MOCK_MODEL)
         [m async for m in result]
         assert len(captured) == 16
     finally:
@@ -152,17 +156,21 @@ async def test_disable_reverts_to_noop() -> None:
     handler = RecordingHandler()
     ai.telemetry.enable(handler)
 
-    async def root(llm: ai.LanguageModel) -> ai.StreamResult:
-        return await ai.stream_loop(llm, messages=ai.make_messages(user="Hi"), tools=[])
+    async def root(model: ai.Model) -> ai.StreamResult:
+        return await ai.stream_loop(
+            model, messages=ai.make_messages(user="Hi"), tools=[]
+        )
 
-    result = ai.run(root, MockLLM([[text_msg("Hello!")]]))
+    mock_llm([[text_msg("Hello!")]])
+    result = ai.run(root, MOCK_MODEL)
     [m async for m in result]
     assert len(handler.of_type(RunStartEvent)) == 1
 
     ai.telemetry.disable()
     handler.events.clear()
 
-    result = ai.run(root, MockLLM([[text_msg("Hello!")]]))
+    mock_llm([[text_msg("Hello!")]])
+    result = ai.run(root, MOCK_MODEL)
     [m async for m in result]
     assert len(handler.events) == 0
 
@@ -178,11 +186,14 @@ async def test_user_emitted_custom_event(handler: RecordingHandler) -> None:
     class CustomEvent(TelemetryEvent):
         message: str
 
-    async def root(llm: ai.LanguageModel) -> ai.StreamResult:
+    async def root(model: ai.Model) -> ai.StreamResult:
         ai.telemetry.handle(CustomEvent(message="hello"))
-        return await ai.stream_loop(llm, messages=ai.make_messages(user="Hi"), tools=[])
+        return await ai.stream_loop(
+            model, messages=ai.make_messages(user="Hi"), tools=[]
+        )
 
-    result = ai.run(root, MockLLM([[text_msg("Hello!")]]))
+    mock_llm([[text_msg("Hello!")]])
+    result = ai.run(root, MOCK_MODEL)
     [m async for m in result]
 
     custom = [e for e in handler.events if isinstance(e, CustomEvent)]
@@ -197,10 +208,11 @@ async def test_user_emitted_custom_event(handler: RecordingHandler) -> None:
 async def test_run_error_in_finish_event(handler: RecordingHandler) -> None:
     """RunFinishEvent captures the error when the root function raises."""
 
-    async def root(llm: ai.LanguageModel) -> None:
+    async def root(model: ai.Model) -> None:
         raise ValueError("boom")
 
-    result = ai.run(root, MockLLM([]))
+    mock_llm([])
+    result = ai.run(root, MOCK_MODEL)
     with pytest.raises(ExceptionGroup):
         [m async for m in result]
 

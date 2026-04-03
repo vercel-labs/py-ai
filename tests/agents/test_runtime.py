@@ -8,7 +8,7 @@ import vercel_ai_sdk as ai
 from vercel_ai_sdk.agents.runtime import Runtime
 from vercel_ai_sdk.types import messages
 
-from ..conftest import MockLLM, text_msg, tool_msg
+from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_msg
 
 # -- Tool definitions for tests --------------------------------------------
 
@@ -32,15 +32,15 @@ async def concat(a: str, b: str) -> str:
 async def test_stream_loop_text_only() -> None:
     """stream_loop with no tool calls returns after one LLM call."""
 
-    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
+    async def graph(model: ai.Model) -> ai.StreamResult:
         return await ai.stream_loop(
-            llm,
+            model,
             messages=ai.make_messages(user="Hi"),
             tools=[double],
         )
 
-    llm = MockLLM([[text_msg("Hello!")]])
-    result = ai.run(graph, llm)
+    llm = mock_llm([[text_msg("Hello!")]])
+    result = ai.run(graph, MOCK_MODEL)
     msgs = [m async for m in result]
     assert llm.call_count == 1
     assert any(m.text == "Hello!" for m in msgs)
@@ -53,18 +53,18 @@ async def test_stream_loop_text_only() -> None:
 async def test_stream_loop_tool_then_text() -> None:
     """stream_loop calls tool, feeds result back, gets final text."""
 
-    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
+    async def graph(model: ai.Model) -> ai.StreamResult:
         return await ai.stream_loop(
-            llm,
+            model,
             messages=ai.make_messages(user="Double 5"),
             tools=[double],
         )
 
     call1 = [tool_msg(tc_id="tc-1", name="double", args='{"x": 5}')]
     call2 = [text_msg("The answer is 10.")]
-    llm = MockLLM([call1, call2])
+    llm = mock_llm([call1, call2])
 
-    result = ai.run(graph, llm)
+    result = ai.run(graph, MOCK_MODEL)
     msgs = [m async for m in result]
     assert llm.call_count == 2
     # Tool should have been executed: 5 * 2 = 10
@@ -82,9 +82,9 @@ async def test_stream_loop_tool_then_text() -> None:
 async def test_stream_loop_parallel_tools() -> None:
     """LLM returns two tool calls in one message; both execute."""
 
-    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
+    async def graph(model: ai.Model) -> ai.StreamResult:
         return await ai.stream_loop(
-            llm,
+            model,
             messages=ai.make_messages(user="Double 3 and 7"),
             tools=[double],
         )
@@ -110,9 +110,9 @@ async def test_stream_loop_parallel_tools() -> None:
         ],
     )
     call2 = [text_msg("6 and 14", id="msg-2")]
-    llm = MockLLM([[two_tools], call2])
+    llm = mock_llm([[two_tools], call2])
 
-    result = ai.run(graph, llm)
+    result = ai.run(graph, MOCK_MODEL)
     msgs = [m async for m in result]
     assert llm.call_count == 2
     # Both tools should have results
@@ -131,9 +131,9 @@ async def test_stream_loop_parallel_tools() -> None:
 async def test_stream_loop_multi_turn() -> None:
     """LLM calls a tool, then calls another tool, then returns text."""
 
-    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
+    async def graph(model: ai.Model) -> ai.StreamResult:
         return await ai.stream_loop(
-            llm,
+            model,
             messages=ai.make_messages(user="Concat then double"),
             tools=[double, concat],
         )
@@ -143,9 +143,9 @@ async def test_stream_loop_multi_turn() -> None:
     ]
     turn2 = [tool_msg(tc_id="tc-2", name="double", args='{"x": 3}', id="msg-2")]
     turn3 = [text_msg("Done: hello world, 6", id="msg-3")]
-    llm = MockLLM([turn1, turn2, turn3])
+    llm = mock_llm([turn1, turn2, turn3])
 
-    result = ai.run(graph, llm)
+    result = ai.run(graph, MOCK_MODEL)
     [m async for m in result]
     assert llm.call_count == 3
 
@@ -163,10 +163,11 @@ async def test_execute_tool_missing_raises() -> None:
         tool_call_id="tc-1", tool_name="nonexistent_tool_zzz", tool_args="{}"
     )
 
-    async def graph(llm: ai.LanguageModel) -> None:
+    async def graph(model: ai.Model) -> None:
         await ai.execute_tool(tc)
 
-    result = ai.run(graph, MockLLM([]))
+    mock_llm([])
+    result = ai.run(graph, MOCK_MODEL)
     with pytest.raises(ExceptionGroup) as exc_info:
         [m async for m in result]
     assert any(isinstance(e, ValueError) for e in exc_info.value.exceptions)
@@ -187,8 +188,8 @@ async def test_execute_tool_injects_runtime() -> None:
         received_rt = rt
         return "ok"
 
-    async def graph(llm: ai.LanguageModel) -> None:
-        result = await ai.stream_step(llm, ai.make_messages(user="go"))
+    async def graph(model: ai.Model) -> None:
+        result = await ai.stream_step(model, ai.make_messages(user="go"))
         if result.tool_calls:
             await asyncio.gather(
                 *(
@@ -198,7 +199,8 @@ async def test_execute_tool_injects_runtime() -> None:
             )
 
     call = [tool_msg(tc_id="tc-1", name="introspect", args='{"query": "test"}')]
-    result = ai.run(graph, MockLLM([call]))
+    mock_llm([call])
+    result = ai.run(graph, MOCK_MODEL)
     [m async for m in result]
     assert received_rt is not None
     assert isinstance(received_rt, Runtime)
@@ -211,8 +213,8 @@ async def test_execute_tool_injects_runtime() -> None:
 async def test_execute_tool_updates_message() -> None:
     """After execute_tool, the ToolPart in the message has status=result."""
 
-    async def graph(llm: ai.LanguageModel) -> None:
-        result = await ai.stream_step(llm, ai.make_messages(user="go"))
+    async def graph(model: ai.Model) -> None:
+        result = await ai.stream_step(model, ai.make_messages(user="go"))
         if result.tool_calls:
             msg = result.last_message
             for tc in result.tool_calls:
@@ -223,7 +225,8 @@ async def test_execute_tool_updates_message() -> None:
             assert msg.tool_calls[0].result == 10
 
     call = [tool_msg(tc_id="tc-1", name="double", args='{"x": 5}')]
-    result = ai.run(graph, MockLLM([call]))
+    mock_llm([call])
+    result = ai.run(graph, MOCK_MODEL)
     [m async for m in result]
 
 
@@ -234,18 +237,18 @@ async def test_execute_tool_updates_message() -> None:
 async def test_stream_loop_checkpoint_records_tools() -> None:
     """stream_loop's tool executions are recorded in the checkpoint."""
 
-    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
+    async def graph(model: ai.Model) -> ai.StreamResult:
         return await ai.stream_loop(
-            llm,
+            model,
             messages=ai.make_messages(user="Double 4"),
             tools=[double],
         )
 
     call1 = [tool_msg(tc_id="tc-1", name="double", args='{"x": 4}')]
     call2 = [text_msg("8", id="msg-2")]
-    llm = MockLLM([call1, call2])
+    mock_llm([call1, call2])
 
-    result = ai.run(graph, llm)
+    result = ai.run(graph, MOCK_MODEL)
     [m async for m in result]
 
     cp = result.checkpoint
