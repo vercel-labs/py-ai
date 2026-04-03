@@ -43,12 +43,17 @@ class StreamFn(Protocol):
 
 @runtime_checkable
 class GenerateFn(Protocol):
-    """Protocol for non-streaming adapter functions (images, video, etc.)."""
+    """Protocol for non-streaming adapter functions (images, video, etc.).
+
+    ``params`` is typed as ``Any`` at the protocol level because each adapter
+    defines its own parameter types (e.g. ``ImageParams | VideoParams``).
+    Type safety is enforced at the top-level ``generate()`` function.
+    """
 
     async def __call__(
         self,
         client: Client,
         model: Model,
         messages: list[messages_.Message],
-        **kwargs: Any,
+        params: Any = None,
     ) -> messages_.Message: ...

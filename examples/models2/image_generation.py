@@ -32,7 +32,7 @@ messages = [
 
 
 async def main() -> None:
-    result = await m.generate(model, messages, n=2, aspect_ratio="16:9")
+    result = await m.generate(model, messages, m.ImageParams(n=2, aspect_ratio="16:9"))
 
     print(f"Generated {len(result.images)} image(s)")
     for i, img in enumerate(result.images):

@@ -4,7 +4,7 @@ import asyncio
 import os
 
 from vercel_ai_sdk import models2 as m
-from vercel_ai_sdk.models2.ai_gateway import adapter as ai_gateway_v3
+from vercel_ai_sdk.models2 import ai_gateway as ai_gateway_v3
 from vercel_ai_sdk.types import messages as messages_
 
 model = m.Model(

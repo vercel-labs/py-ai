@@ -37,8 +37,7 @@ async def main() -> None:
     result = await m.generate(
         model,
         messages,
-        aspect_ratio="16:9",
-        duration=8,
+        m.VideoParams(aspect_ratio="16:9", duration=8),
     )
 
     print(f"Generated {len(result.videos)} video(s)")

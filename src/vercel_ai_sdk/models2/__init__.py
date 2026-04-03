@@ -36,6 +36,7 @@ import pydantic
 
 from ..types import messages as messages_
 from ..types import tools as tools_
+from .ai_gateway.generate import GenerateParams, ImageParams, VideoParams
 from .core.client import Client
 from .core.model import Model, ModelCost
 from .core.proto import GenerateFn, StreamFn
@@ -57,10 +58,11 @@ def _ensure_adapters() -> None:
         return
     _adapters_loaded = True
 
-    from .ai_gateway import adapter as ai_gateway_v3
+    from .ai_gateway import generate as ai_gw_generate
+    from .ai_gateway import stream as ai_gw_stream
 
-    _stream_adapters["ai-gateway-v3"] = ai_gateway_v3.stream
-    _generate_adapters["ai-gateway-v3"] = ai_gateway_v3.generate
+    _stream_adapters["ai-gateway-v3"] = ai_gw_stream
+    _generate_adapters["ai-gateway-v3"] = ai_gw_generate
 
 
 # ---------------------------------------------------------------------------
@@ -124,14 +126,20 @@ async def stream(
 async def generate(
     model: Model,
     messages: list[messages_.Message],
+    params: GenerateParams | None = None,
     *,
     client: Client | None = None,
-    **kwargs: Any,
 ) -> messages_.Message:
     """Generate a response (images, video, etc.).
 
     Resolves the adapter function from ``model.adapter``, auto-creates a
     :class:`Client` from env vars if none is provided.
+
+    ``params`` controls the generation type:
+
+    * :class:`ImageParams` — image generation (``/image-model``).
+    * :class:`VideoParams` — video generation (``/video-model``).
+    * ``None`` — auto-detect from ``model.capabilities``.
     """
     _ensure_adapters()
     c = client or _auto_client(model)
@@ -142,7 +150,7 @@ async def generate(
             f"No generate adapter registered for adapter={model.adapter!r}. "
             f"Registered: {registered}"
         )
-    return await adapter_fn(c, model, messages, **kwargs)
+    return await adapter_fn(c, model, messages, params=params)
 
 
 async def buffer(gen: AsyncGenerator[messages_.Message]) -> messages_.Message:
@@ -162,9 +170,12 @@ __all__ = [
     # Core types
     "Client",
     "GenerateFn",
+    "GenerateParams",
+    "ImageParams",
     "Model",
     "ModelCost",
     "StreamFn",
+    "VideoParams",
     # Public API
     "buffer",
     "generate",
