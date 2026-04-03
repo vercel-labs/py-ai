@@ -14,6 +14,7 @@ import mcp.client.stdio
 import mcp.client.streamable_http
 import mcp.types
 
+from .. import context as context_
 from .. import tools as tools_
 
 __all__ = [
@@ -243,11 +244,30 @@ def _mcp_tool_to_native(
         return_type=Any,
     )
 
+    # Determine source provenance from connection key
+    if connection_key.startswith("http:"):
+        source = context_.ToolSource(
+            kind="mcp_http",
+            uri=connection_key.removeprefix("http:"),
+        )
+    elif connection_key.startswith("stdio:"):
+        source = context_.ToolSource(
+            kind="mcp_stdio",
+            server_command=connection_key.removeprefix("stdio:"),
+        )
+    else:
+        source = context_.ToolSource(kind="mcp")
+
     t = tools_.Tool(
         fn=_make_tool_fn(connection_key, mcp_tool.name, transport_factory),
         schema=schema,
+        source=source,
     )
-    # Register so execute_tool() can find it by name
+
+    # Register on active Context if available, else fall back to global
+    ctx = context_._context.get(None)
+    if ctx is not None:
+        ctx.register_tool(t)
     tools_._tool_registry[name] = t
     return t
 

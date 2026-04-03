@@ -9,6 +9,7 @@ import pydantic
 
 from ..types.tools import ToolLike as ToolLike
 from ..types.tools import ToolSchema as ToolSchema
+from .context import ToolSource
 
 if TYPE_CHECKING:
     from . import runtime as runtime_
@@ -36,10 +37,12 @@ class Tool[**P, R]:
         fn: Callable[P, Awaitable[R]],
         schema: ToolSchema,
         validator: type[pydantic.BaseModel] | None = None,
+        source: ToolSource | None = None,
     ) -> None:
         self._fn = fn
         self._validator = validator
         self.schema = schema
+        self.source = source
 
     async def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:
         return await self._fn(*args, **kwargs)
@@ -102,8 +105,32 @@ def tool[**P, R](fn: Callable[P, Awaitable[R]]) -> Tool[P, R]:
         return_type=hints.get("return", None),
     )
 
-    t = Tool(fn=fn, schema=schema, validator=validator)
+    source = ToolSource(
+        kind="python",
+        module=getattr(fn, "__module__", None),
+        qualname=getattr(fn, "__qualname__", None),
+    )
+
+    t = Tool(fn=fn, schema=schema, validator=validator, source=source)
 
     # 3. register in global registry
     _tool_registry[t.name] = t
     return t
+
+
+def _unresolvable_tool_fn(name: str) -> Callable[..., Awaitable[Any]]:
+    """Create a placeholder async function for schema-only tools.
+
+    Used by ``Context.from_dict()`` when a tool's source cannot be
+    resolved to live code.
+    """
+
+    async def _placeholder(**kwargs: Any) -> Any:
+        raise RuntimeError(
+            f"Tool {name!r} was reconstructed from serialized context "
+            f"and has no executable implementation."
+        )
+
+    _placeholder.__name__ = name
+    _placeholder.__qualname__ = name
+    return _placeholder

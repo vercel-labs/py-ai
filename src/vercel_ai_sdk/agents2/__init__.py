@@ -6,6 +6,7 @@ plugs a model into a tool-calling loop with hooks and checkpoints.
 
 from . import mcp
 from .checkpoint import Checkpoint, PendingHookInfo
+from .context import Context, ToolSource, get_context
 from .hooks import Hook, ToolApproval, hook
 from .runtime import (
     EventLog,
@@ -25,6 +26,10 @@ __all__ = [
     "run",
     "execute_tool",
     "get_checkpoint",
+    # Context
+    "Context",
+    "ToolSource",
+    "get_context",
     # Runtime (composition)
     "Runtime",
     "EventLog",

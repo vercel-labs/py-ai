@@ -13,6 +13,7 @@ import pydantic
 from ..telemetry import events as telemetry_
 from ..types import messages as messages_
 from . import checkpoint as checkpoint_
+from . import context as context_
 from . import hooks as hooks_
 from . import mcp
 from . import streams as streams_
@@ -288,10 +289,11 @@ async def execute_tool(
 ) -> Any:
     """Execute a single tool call with replay support.
 
-    Looks up the tool by name from the global registry, executes it,
-    and updates the ToolPart (and parent Message) with the result.
-    Emits the updated message to the LoopExecutor queue so the UI sees
-    the transition from status="pending" to status="result" (or "error").
+    Looks up the tool by name — first from the active Context (if any),
+    then from the global registry.  Executes it and updates the ToolPart
+    (and parent Message) with the result.  Emits the updated message to
+    the LoopExecutor queue so the UI sees the transition from
+    status="pending" to status="result" (or "error").
 
     If a checkpoint exists with a cached result for this tool_call_id,
     returns the cached result without re-executing.
@@ -317,8 +319,13 @@ async def execute_tool(
     )
     t0 = telemetry_.time_ms()
 
-    # Fresh execution
-    tool = tools_.get_tool(tool_call.tool_name)
+    # Fresh execution — resolve from Context first, then global registry
+    tool: tools_.Tool[..., Any] | None = None
+    ctx = context_._context.get(None)
+    if ctx is not None:
+        tool = ctx.get_tool(tool_call.tool_name)
+    if tool is None:
+        tool = tools_.get_tool(tool_call.tool_name)
     if tool is None:
         raise ValueError(f"Tool not found in registry: {tool_call.tool_name}")
 
@@ -418,6 +425,7 @@ def run(
     root: Callable[..., Coroutine[Any, Any, Any]],
     *args: Any,
     checkpoint: checkpoint_.Checkpoint | None = None,
+    context: context_.Context | None = None,
 ) -> RunResult:
     """Main entry point.
 
@@ -426,6 +434,13 @@ def run(
     3. Executes each step, yielding messages
     4. Resolves or suspends hooks depending on the hook's cancels_future
     5. Returns RunResult with .checkpoint and .pending_hooks
+
+    Args:
+        root: The loop function to execute.
+        *args: Positional arguments forwarded to ``root``.
+        checkpoint: Checkpoint to resume from.
+        context: LLM prompt context (tools, system prompt, messages).
+            If ``None``, an empty Context is created automatically.
     """
     result = RunResult()
 
@@ -455,6 +470,10 @@ def run(
         rt = Runtime(checkpoint=effective_checkpoint)
         result._runtime = rt
         token_runtime = _runtime.set(rt)
+
+        ctx = context or context_.Context()
+        token_context = context_._context.set(ctx)
+
         token_run_id = telemetry_.start_run()
 
         telemetry_.handle(telemetry_.RunStartEvent())
@@ -584,6 +603,7 @@ def run(
                 await mcp.client.close_connections()
                 mcp.client._pool.reset(mcp_token)
 
+            context_._context.reset(token_context)
             _runtime.reset(token_runtime)
 
     result._messages = _generate()
