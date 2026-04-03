@@ -17,6 +17,7 @@ from ..core import client as client_
 from ..core import model as model_
 from ..core.helpers import media as media_
 from . import _common
+from . import errors as errors_
 
 # ---------------------------------------------------------------------------
 # Parameter types
@@ -85,9 +86,10 @@ async def _generate_image(
 
     response = await client.http.post(url, json=body, headers=headers)
     if response.status_code >= 400:
-        raise RuntimeError(
-            f"AI Gateway image-model returned HTTP {response.status_code}: "
-            f"{response.text}"
+        raise errors_.create_gateway_error(
+            response_body=response.text,
+            status_code=response.status_code,
+            api_key_provided=bool(client.api_key),
         )
 
     data = response.json()
@@ -143,9 +145,10 @@ async def _generate_video(
     ) as response:
         if response.status_code >= 400:
             await response.aread()
-            raise RuntimeError(
-                f"AI Gateway video-model returned HTTP {response.status_code}: "
-                f"{response.text}"
+            raise errors_.create_gateway_error(
+                response_body=response.text,
+                status_code=response.status_code,
+                api_key_provided=bool(client.api_key),
             )
 
         # Read first SSE data event — the gateway sends a single result event.
@@ -154,10 +157,15 @@ async def _generate_video(
             event_data = parsed
             break
 
+    if not event_data:
+        raise errors_.GatewayResponseError(
+            "SSE stream ended without any data events",
+        )
+
     if event_data.get("type") == "error":
-        raise RuntimeError(
-            f"AI Gateway video generation error: "
-            f"{event_data.get('message', 'unknown error')}"
+        raise errors_.GatewayInvalidRequestError(
+            message=event_data.get("message", "unknown error"),
+            status_code=event_data.get("statusCode", 400),
         )
 
     raw_videos: list[dict[str, Any]] = event_data.get("videos", [])

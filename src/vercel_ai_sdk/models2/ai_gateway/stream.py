@@ -9,6 +9,7 @@ import json
 from collections.abc import AsyncGenerator, Sequence
 from typing import Any
 
+import httpx
 import pydantic
 
 from ...types import messages as messages_
@@ -18,6 +19,7 @@ from ..core import model as model_
 from ..core.helpers import media as media_
 from ..core.helpers import streaming as streaming_
 from . import _common
+from . import errors as errors_
 
 # ---------------------------------------------------------------------------
 # Request building — Message list → v3 prompt
@@ -306,19 +308,31 @@ async def stream(
 
     handler = streaming_.StreamHandler()
 
-    async with client.http.stream(
-        "POST",
-        url,
-        json=body,
-        headers=headers,
-    ) as response:
-        if response.status_code >= 400:
-            await response.aread()
-            raise RuntimeError(
-                f"AI Gateway returned HTTP {response.status_code}: {response.text}"
-            )
+    try:
+        async with client.http.stream(
+            "POST",
+            url,
+            json=body,
+            headers=headers,
+        ) as response:
+            if response.status_code >= 400:
+                await response.aread()
+                raise errors_.create_gateway_error(
+                    response_body=response.text,
+                    status_code=response.status_code,
+                    api_key_provided=bool(client.api_key),
+                )
 
-        async for data in _common.parse_sse_lines(response):
-            for event in _parse_stream_part(data):
-                msg = handler.handle_event(event)
-                yield msg
+            async for data in _common.parse_sse_lines(response):
+                for event in _parse_stream_part(data):
+                    msg = handler.handle_event(event)
+                    yield msg
+    except errors_.GatewayError:
+        raise
+    except httpx.TimeoutException as exc:
+        raise errors_.GatewayTimeoutError(cause=exc) from exc
+    except Exception as exc:
+        raise errors_.GatewayResponseError(
+            message=f"Unexpected error during streaming: {exc}",
+            cause=exc,
+        ) from exc
