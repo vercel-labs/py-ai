@@ -16,8 +16,6 @@ from .runtime import (
     execute_tool,
     get_checkpoint,
     run,
-    stream_loop,
-    stream_step,
 )
 from .streams import StreamResult, stream
 from .tools import Tool, ToolLike, ToolSchema, get_tool, tool
@@ -25,8 +23,6 @@ from .tools import Tool, ToolLike, ToolSchema, get_tool, tool
 __all__ = [
     # Core loop
     "run",
-    "stream_step",
-    "stream_loop",
     "execute_tool",
     "get_checkpoint",
     # Runtime (composition)

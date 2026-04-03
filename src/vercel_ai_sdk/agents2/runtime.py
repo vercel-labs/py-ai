@@ -5,12 +5,11 @@ import contextvars
 import dataclasses
 import json
 import logging
-from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
 from typing import Any, get_type_hints
 
 import pydantic
 
-from .. import models2
 from ..telemetry import events as telemetry_
 from ..types import messages as messages_
 from . import checkpoint as checkpoint_
@@ -283,26 +282,6 @@ def _find_runtime_param(fn: Callable[..., Any]) -> str | None:
     return None
 
 
-# ── Convenience functions ─────────────────────────────────────────
-
-
-@streams_.stream
-async def stream_step(
-    model: models2.Model,
-    messages: list[messages_.Message],
-    tools: Sequence[tools_.ToolLike] | None = None,
-    label: str | None = None,
-    output_type: type[pydantic.BaseModel] | None = None,
-    **kwargs: Any,
-) -> AsyncGenerator[messages_.Message]:
-    """Single LLM call that streams to Runtime."""
-    async for msg in models2.stream(
-        model, messages, tools=tools, output_type=output_type, **kwargs
-    ):
-        msg.label = label
-        yield msg
-
-
 async def execute_tool(
     tool_call: messages_.ToolPart,
     message: messages_.Message | None = None,
@@ -371,34 +350,6 @@ async def execute_tool(
         await rt.executor.put_message(message.model_copy(deep=True))
 
     return result
-
-
-async def stream_loop(
-    model: models2.Model,
-    messages: list[messages_.Message],
-    tools: Sequence[tools_.ToolLike],
-    label: str | None = None,
-    output_type: type[pydantic.BaseModel] | None = None,
-    **kwargs: Any,
-) -> streams_.StreamResult:
-    """Agent loop: stream LLM, execute tools, repeat until done."""
-    local_messages = list(messages)
-
-    while True:
-        result = await stream_step(
-            model, local_messages, tools, label=label, output_type=output_type, **kwargs
-        )
-
-        if not result.tool_calls:
-            return result
-
-        last_msg = result.last_message
-        if last_msg is not None:
-            local_messages.append(last_msg)
-
-        await asyncio.gather(
-            *(execute_tool(tc, message=last_msg) for tc in result.tool_calls)
-        )
 
 
 # ── RunResult ─────────────────────────────────────────────────────
