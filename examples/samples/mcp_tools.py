@@ -9,8 +9,12 @@ import rich
 import vercel_ai_sdk as ai
 
 
-async def context7_agent(llm: ai.LanguageModel, user_query: str) -> ai.StreamResult:
-    """Agent with Context7 MCP tools for up-to-date library documentation."""
+async def main() -> None:
+    model = ai.Model(
+        id="anthropic/claude-opus-4.6",
+        adapter="ai-gateway-v3",
+        provider="ai-gateway",
+    )
 
     context7_tools: list[ai.Tool[..., Any]] = await ai.mcp.get_http_tools(
         "https://mcp.context7.com/mcp",
@@ -18,22 +22,14 @@ async def context7_agent(llm: ai.LanguageModel, user_query: str) -> ai.StreamRes
         tool_prefix="context7",
     )
 
-    return await ai.stream_loop(
-        llm,
-        messages=ai.make_messages(
-            system="You are a helpful assistant. Use context7 to look up documentation.",
-            user=user_query,
-        ),
+    my_agent = ai.agent(
+        model=model,
+        system="You are a helpful assistant. Use context7 to look up documentation.",
         tools=context7_tools,
-        label="context7",
     )
 
-
-async def main() -> None:
-    llm = ai.ai_gateway.GatewayModel(model="anthropic/claude-opus-4.6")
-
-    async for msg in ai.run(
-        context7_agent, llm, "How do I create middleware in Next.js?"
+    async for msg in my_agent.run(
+        ai.make_messages(user="How do I create middleware in Next.js?")
     ):
         rich.print(msg)
 

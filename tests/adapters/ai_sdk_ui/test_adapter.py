@@ -12,7 +12,7 @@ from vercel_ai_sdk.adapters.ai_sdk_ui import adapter, ui_message
 from vercel_ai_sdk.agents import hooks
 from vercel_ai_sdk.types import messages
 
-from ...conftest import MockLLM, tool_msg
+from ...conftest import MOCK_MODEL, mock_llm, tool_msg
 
 
 async def get_event_types(msgs: list[messages.Message]) -> list[str]:
@@ -240,22 +240,10 @@ async def get_weather(city: str) -> str:
     return f"Sunny in {city}"
 
 
-async def mock_agent(
-    llm: ai.LanguageModel,
-    user_query: str,
-) -> ai.StreamResult:
-    """Agent using stream_loop directly."""
-    return await ai.stream_loop(
-        llm,
-        messages=ai.make_messages(system="You are helpful.", user=user_query),
-        tools=[get_weather],
-    )
-
-
 @pytest.mark.asyncio
 async def test_runtime_tool_roundtrip() -> None:
     """
-    Integration test: run a mock agent loop through ai.run() and verify
+    Integration test: run an Agent through agent.run() and verify
     that tool-input-available and tool-output-available events are emitted.
 
     This test demonstrates the bug: the runtime yields the message with
@@ -263,11 +251,17 @@ async def test_runtime_tool_roundtrip() -> None:
     executed and the ToolPart has been mutated to status="result". The UI
     adapter never sees the intermediate status="pending" state.
 
-    Root cause: stream_loop appends the message, then executes tools which
-    mutate the message in-place. The message was already yielded with
+    Root cause: the default loop appends the message, then executes tools
+    which mutate the message in-place. The message was already yielded with
     status="pending", but pydantic models are mutable so when we collect
     them at the end, we see the mutated state.
     """
+    weather_agent = ai.agent(
+        model=MOCK_MODEL,
+        system="You are helpful.",
+        tools=[get_weather],
+    )
+
     # First LLM call: returns a tool call
     tool_call_response = [
         messages.Message(
@@ -294,11 +288,13 @@ async def test_runtime_tool_roundtrip() -> None:
         ),
     ]
 
-    mock_llm = MockLLM([tool_call_response, final_text_response])
+    mock_llm([tool_call_response, final_text_response])
 
     # Collect all messages from the runtime
     runtime_messages: list[messages.Message] = []
-    async for msg in ai.run(mock_agent, mock_llm, "What's the weather in London?"):
+    async for msg in weather_agent.run(
+        ai.make_messages(user="What's the weather in London?")
+    ):
         runtime_messages.append(msg)
 
     # Stream through UI adapter
@@ -308,22 +304,27 @@ async def test_runtime_tool_roundtrip() -> None:
     ]
 
     # This is what SHOULD happen:
-    # 1. First step yields tool call with status="pending"
-    #    -> tool-input-start, tool-input-available
+    # 1. First step streams tool call args then completes
+    #    -> tool-input-start, tool-input-delta, tool-input-available
     # 2. After tool execution, we yield the same message with
     #    status="result" -> tool-output-available
     #    (same step because same message ID)
-    # 3. Second LLM step yields final text -> text-start, text-end
+    # 3. Second LLM step streams text then completes
+    #    -> text-start, text-delta, text-end, (final done msg) text-start, text-end
     expected = [
         "start",
         "start-step",
         "tool-input-start",
+        "tool-input-delta",
         "tool-input-available",
         "tool-output-available",  # Same step as input (same message ID)
         "finish-step",
         # Second LLM call (new message ID = new step)
         "start-step",
         "text-start",
+        "text-delta",
+        "text-end",
+        "text-start",  # Final done message re-emits completed text
         "text-end",
         "finish-step",
         "finish",
@@ -638,12 +639,15 @@ async def test_runtime_tool_approval_same_step() -> None:
         """Do something dangerous."""
         return f"deleted {path}"
 
-    async def graph(llm: ai.LanguageModel) -> None:
-        result = await ai.stream_step(
-            llm,
-            ai.make_messages(system="You are helpful.", user="delete /tmp"),
-            [dangerous_action],
-        )
+    approval_agent = ai.agent(
+        model=MOCK_MODEL,
+        system="You are helpful.",
+        tools=[dangerous_action],
+    )
+
+    @approval_agent.loop
+    async def custom(agent: ai.Agent, msgs: list[ai.Message]) -> None:
+        result = await ai.stream_step(agent.model, msgs, agent.tools)
         if not result.tool_calls:
             return
 
@@ -662,7 +666,7 @@ async def test_runtime_tool_approval_same_step() -> None:
 
         await asyncio.gather(*(approve_and_execute(tc) for tc in result.tool_calls))
 
-    mock_llm = MockLLM(
+    mock_llm(
         [
             [
                 tool_msg(
@@ -675,7 +679,7 @@ async def test_runtime_tool_approval_same_step() -> None:
     )
 
     runtime_messages: list[messages.Message] = []
-    result = ai.run(graph, mock_llm)
+    result = approval_agent.run(ai.make_messages(user="delete /tmp"))
     async for msg in result:
         runtime_messages.append(msg)
 
@@ -697,6 +701,7 @@ async def test_runtime_tool_approval_same_step() -> None:
         "start",
         "start-step",
         "tool-input-start",
+        "tool-input-delta",
         "tool-input-available",
         "tool-approval-request",
         "finish-step",

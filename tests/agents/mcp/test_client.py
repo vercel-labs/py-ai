@@ -10,7 +10,7 @@ import vercel_ai_sdk as ai
 from vercel_ai_sdk.agents.mcp.client import _mcp_tool_to_native
 from vercel_ai_sdk.agents.tools import _tool_registry, get_tool
 
-from ...conftest import MockLLM, text_msg, tool_msg
+from ...conftest import MOCK_MODEL, mock_llm, text_msg, tool_msg
 
 
 def _fake_mcp_tool(
@@ -64,12 +64,12 @@ def test_mcp_tool_to_native_schema_preserved() -> None:
     assert native.description == "Echo input"
 
 
-# -- End-to-end: MCP tool executes through stream_loop --------------------
+# -- End-to-end: MCP tool executes through Agent default loop ---------------
 
 
 @pytest.mark.asyncio
-async def test_mcp_tool_executes_through_stream_loop() -> None:
-    """MCP-style tool via _mcp_tool_to_native can be called by the agent loop."""
+async def test_mcp_tool_executes_through_agent() -> None:
+    """MCP-style tool via _mcp_tool_to_native works with Agent."""
     call_log: list[dict[str, str]] = []
 
     async def fake_fn(**kwargs: str) -> str:
@@ -84,18 +84,13 @@ async def test_mcp_tool_executes_through_stream_loop() -> None:
     native._fn = fake_fn
     _tool_registry[native.name] = native
 
-    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
-        return await ai.stream_loop(
-            llm,
-            messages=ai.make_messages(user="echo hello"),
-            tools=[native],
-        )
+    my_agent = ai.agent(model=MOCK_MODEL, tools=[native])
 
     call1 = [tool_msg(tc_id="tc-mcp-1", name="mcp_e2e_echo", args='{"text": "hello"}')]
     call2 = [text_msg("Done.", id="msg-2")]
-    llm = MockLLM([call1, call2])
+    llm = mock_llm([call1, call2])
 
-    result = ai.run(graph, llm)
+    result = my_agent.run(ai.make_messages(user="echo hello"))
     msgs = [m async for m in result]
 
     # Tool was called with the right args

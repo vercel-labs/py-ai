@@ -7,7 +7,7 @@ import vercel_ai_sdk as ai
 from vercel_ai_sdk.agents.streams import StreamResult
 from vercel_ai_sdk.types import messages
 
-from ..conftest import MockLLM, text_msg
+from ..conftest import MOCK_MODEL, mock_llm, text_msg
 
 
 class _Weather(pydantic.BaseModel):
@@ -58,9 +58,10 @@ def test_stream_result_tool_calls() -> None:
 @pytest.mark.asyncio
 async def test_stream_outside_run_raises() -> None:
     """@stream-decorated fn called without ai.run() should raise."""
+    mock_llm([[text_msg("hi")]])
     with pytest.raises(ValueError, match="No Runtime context"):
         await ai.stream_step(
-            MockLLM([[text_msg("hi")]]),
+            MOCK_MODEL,
             ai.make_messages(user="test"),
         )
 
@@ -70,20 +71,23 @@ async def test_stream_outside_run_raises() -> None:
 
 @pytest.mark.asyncio
 async def test_stream_step_replays_from_checkpoint() -> None:
-    """stream_step inside ai.run with a checkpoint replays without calling LLM."""
+    """stream_step inside Agent.run with a checkpoint replays without calling LLM."""
 
-    async def graph(llm: ai.LanguageModel) -> ai.StreamResult:
-        return await ai.stream_step(llm, ai.make_messages(user="hello"))
+    my_agent = ai.agent(model=MOCK_MODEL)
+
+    @my_agent.loop
+    async def custom(agent: ai.Agent, msgs: list[ai.Message]) -> ai.StreamResult:
+        return await ai.stream_step(agent.model, msgs)
 
     # First run
-    llm1 = MockLLM([[text_msg("Hi")]])
-    r1 = ai.run(graph, llm1)
+    mock_llm([[text_msg("Hi")]])
+    r1 = my_agent.run(ai.make_messages(user="hello"))
     [msg async for msg in r1]
     cp = r1.checkpoint
 
     # Replay
-    llm2 = MockLLM([])
-    r2 = ai.run(graph, llm2, checkpoint=cp)
+    llm2 = mock_llm([])
+    r2 = my_agent.run(ai.make_messages(user="hello"), checkpoint=cp)
     [msg async for msg in r2]
     assert llm2.call_count == 0
 

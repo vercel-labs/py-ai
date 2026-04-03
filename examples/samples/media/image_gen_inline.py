@@ -15,24 +15,13 @@ import pathlib
 import vercel_ai_sdk as ai
 
 
-async def agent(llm: ai.LanguageModel, user_query: str) -> ai.StreamResult:
-    return await ai.stream_loop(
-        llm,
-        messages=ai.make_messages(
-            system=(
-                "You are an anime art assistant. When asked to draw or create "
-                "an image, generate it in a soft pastel anime style with "
-                "detailed backgrounds and expressive characters."
-            ),
-            user=user_query,
-        ),
-        tools=[],
-    )
-
-
 async def main() -> None:
     # Gemini 3 Pro Image is a language model that can output images inline
-    llm = ai.ai_gateway.GatewayModel(model="google/gemini-3-pro-image")
+    model = ai.Model(
+        id="google/gemini-3-pro-image",
+        adapter="ai-gateway-v3",
+        provider="ai-gateway",
+    )
 
     prompt = (
         "Draw an anime girl with long silver hair and violet eyes, "
@@ -40,7 +29,17 @@ async def main() -> None:
         "She's wearing a traditional kimono and reading a book."
     )
 
-    async for msg in ai.run(agent, llm, prompt):
+    my_agent = ai.agent(
+        model=model,
+        system=(
+            "You are an anime art assistant. When asked to draw or create "
+            "an image, generate it in a soft pastel anime style with "
+            "detailed backgrounds and expressive characters."
+        ),
+        tools=[],
+    )
+
+    async for msg in my_agent.run(ai.make_messages(user=prompt)):
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)
 

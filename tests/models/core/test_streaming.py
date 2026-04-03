@@ -1,13 +1,7 @@
-"""StreamHandler: event accumulation, state transitions, message building.
-LanguageModel.buffer() with structured output."""
+"""StreamHandler: event accumulation, state transitions, message building."""
 
-import json
 
-import pydantic
-import pytest
-
-import vercel_ai_sdk as ai
-from vercel_ai_sdk.models.core.llm import (
+from vercel_ai_sdk.models.core.helpers.streaming import (
     FileEvent,
     MessageDone,
     ReasoningDelta,
@@ -28,14 +22,6 @@ from vercel_ai_sdk.types.messages import (
     ToolPart,
     Usage,
 )
-
-from ...conftest import MockLLM, text_msg
-
-
-class _Weather(pydantic.BaseModel):
-    city: str
-    temperature: float
-
 
 # -- Text streaming --------------------------------------------------------
 
@@ -222,30 +208,6 @@ def test_deltas_only_on_active_blocks() -> None:
     text_parts = [p for p in m.parts if isinstance(p, TextPart)]
     assert text_parts[0].delta is None  # t1 is done
     assert text_parts[1].delta == "second"  # t2 is active
-
-
-# -- LanguageModel.buffer() with structured output -------------------------
-
-
-@pytest.mark.asyncio
-async def test_buffer_structured_output() -> None:
-    """buffer() returns a message with a validated StructuredOutputPart."""
-    json_text = '{"city":"Tokyo","temperature":28.5}'
-    llm = MockLLM([[text_msg(json_text)]])
-
-    msg = await llm.buffer(ai.make_messages(user="weather?"), output_type=_Weather)
-
-    assert isinstance(msg.output, _Weather)
-    assert msg.output.city == "Tokyo"
-
-
-@pytest.mark.asyncio
-async def test_buffer_structured_output_invalid_json_raises() -> None:
-    """Bad LLM output with output_type should raise, not silently pass."""
-    llm = MockLLM([[text_msg("not json")]])
-
-    with pytest.raises((json.JSONDecodeError, pydantic.ValidationError)):
-        await llm.buffer(ai.make_messages(user="weather?"), output_type=_Weather)
 
 
 # -- File event (inline images from LLMs like Gemini/GPT-5) ---------------
