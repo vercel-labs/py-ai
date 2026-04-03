@@ -126,7 +126,7 @@ class MockLLM(ai.models.LanguageModel):
         messages: list[messages_.Message],
         tools: Sequence[ai.ToolLike] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
-    ) -> AsyncGenerator[Any, None]:
+    ) -> AsyncGenerator[Any]:
         from vercel_ai_sdk.models.core import llm as llm_
 
         if self._call_index >= len(self._responses):

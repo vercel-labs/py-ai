@@ -5,6 +5,7 @@ plugs a model into a tool-calling loop with hooks and checkpoints.
 """
 
 from . import mcp
+from .agent import Agent, AgentRun, agent
 from .checkpoint import Checkpoint, PendingHookInfo
 from .context import Context, ToolSource, get_context
 from .hooks import Hook, ToolApproval, hook
@@ -22,6 +23,10 @@ from .streams import StreamResult, stream
 from .tools import Tool, ToolLike, ToolSchema, get_tool, tool
 
 __all__ = [
+    # Agent (primary user API)
+    "Agent",
+    "AgentRun",
+    "agent",
     # Core loop
     "run",
     "execute_tool",
