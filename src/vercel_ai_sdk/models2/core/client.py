@@ -1,4 +1,4 @@
-"""HTTP client for wire functions."""
+"""HTTP client for adapter functions."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ import httpx
 class Client:
     """Connection parameters for a provider API.
 
-    Wire functions receive a ``Client`` instead of creating their own HTTP
-    session.  This keeps auth and base URL decoupled from the wire logic.
+    Adapter functions receive a ``Client`` instead of creating their own HTTP
+    session.  This keeps auth and base URL decoupled from the adapter logic.
 
     The :pyattr:`http` property lazily creates a shared
     :class:`httpx.AsyncClient` so that consecutive calls reuse the same

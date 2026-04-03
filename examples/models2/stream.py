@@ -7,7 +7,7 @@ from vercel_ai_sdk.types import messages as messages_
 
 model = m.Model(
     id="anthropic/claude-sonnet-4",
-    api="ai-gateway",
+    adapter="ai-gateway-v3",
     provider="ai-gateway",
 )
 

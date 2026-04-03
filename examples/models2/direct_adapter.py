@@ -1,15 +1,15 @@
-"""Direct wire call — bypass the registry, call the wire function directly."""
+"""Direct adapter call — bypass the registry, call the adapter function directly."""
 
 import asyncio
 import os
 
 from vercel_ai_sdk import models2 as m
-from vercel_ai_sdk.models2.wires import ai_gateway_v3
+from vercel_ai_sdk.models2.ai_gateway import adapter as ai_gateway_v3
 from vercel_ai_sdk.types import messages as messages_
 
 model = m.Model(
     id="anthropic/claude-sonnet-4",
-    api="ai-gateway",
+    adapter="ai-gateway-v3",
     provider="ai-gateway",
 )
 
@@ -27,7 +27,7 @@ messages = [
 
 
 async def main() -> None:
-    # Call the wire function directly — no registry lookup, no auto-client.
+    # Call the adapter function directly — no registry lookup, no auto-client.
     # This is the lowest level of the API.
     try:
         async for msg in ai_gateway_v3.stream(client, model, messages):

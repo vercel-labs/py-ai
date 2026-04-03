@@ -15,7 +15,7 @@ from vercel_ai_sdk.types import messages as messages_
 # This is a language model that can also output images inline.
 model = m.Model(
     id="google/gemini-3-pro-image",
-    api="ai-gateway",
+    adapter="ai-gateway-v3",
     provider="ai-gateway",
     capabilities=("text", "image"),
 )

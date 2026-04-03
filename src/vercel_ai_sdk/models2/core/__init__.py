@@ -2,7 +2,7 @@
 
 from .client import Client
 from .model import Model, ModelCost
-from .wire import GenerateFn, StreamFn
+from .proto import GenerateFn, StreamFn
 
 __all__ = [
     "Client",

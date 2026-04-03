@@ -20,12 +20,12 @@ class Model:
     """Pure-data description of a model.
 
     * ``id`` — identifier sent to the provider (e.g. ``"claude-sonnet-4-20250514"``).
-    * ``api`` — wire protocol key (e.g. ``"ai-gateway"``, ``"anthropic-messages"``).
+    * ``adapter`` — adapter key (e.g. ``"ai-gateway-v3"``, ``"anthropic-messages"``).
     * ``provider`` — hosting service (e.g. ``"ai-gateway"``, ``"anthropic"``).
     """
 
     id: str
-    api: str
+    adapter: str
     provider: str
     name: str = ""
     capabilities: tuple[str, ...] = ("text",)

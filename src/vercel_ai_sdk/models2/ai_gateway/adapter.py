@@ -1,6 +1,6 @@
-"""Vercel AI Gateway v3 wire — streaming and generation.
+"""Vercel AI Gateway v3 adapter — streaming and generation.
 
-Wire protocol for the AI Gateway's v3 endpoints:
+Adapter for the AI Gateway's v3 endpoints:
 
 * ``/language-model`` — streaming text/tool/reasoning responses.
 * ``/image-model`` — dedicated image generation.
@@ -309,7 +309,7 @@ def _request_headers(
 
 
 # ---------------------------------------------------------------------------
-# Public wire functions
+# Public adapter functions
 # ---------------------------------------------------------------------------
 
 

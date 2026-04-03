@@ -9,7 +9,7 @@ from vercel_ai_sdk.types import messages as messages_
 
 model = m.Model(
     id="google/veo-3.0-generate-001",
-    api="ai-gateway",
+    adapter="ai-gateway-v3",
     provider="ai-gateway",
     capabilities=("video",),
 )

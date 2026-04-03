@@ -1,9 +1,9 @@
-"""Wire function protocols.
+"""Adapter function protocols.
 
-A *wire function* translates between our ``Message`` types and a specific
-provider API (e.g. ``"ai-gateway"``, ``"anthropic-messages"``).
+An *adapter function* translates between our ``Message`` types and a specific
+provider API (e.g. ``"ai-gateway-v3"``, ``"anthropic-messages"``).
 
-Wire functions are plain async generators / coroutines — no base class
+Adapter functions are plain async generators / coroutines — no base class
 required.  The protocols below exist only for static type-checking.
 """
 
@@ -22,7 +22,7 @@ from .model import Model
 
 @runtime_checkable
 class StreamFn(Protocol):
-    """Protocol for streaming wire functions.
+    """Protocol for streaming adapter functions.
 
     Implementations yield ``Message`` snapshots as the response streams
     in.  Each snapshot is a complete, self-contained message reflecting
@@ -43,7 +43,7 @@ class StreamFn(Protocol):
 
 @runtime_checkable
 class GenerateFn(Protocol):
-    """Protocol for non-streaming wire functions (images, video, etc.)."""
+    """Protocol for non-streaming adapter functions (images, video, etc.)."""
 
     async def __call__(
         self,

@@ -7,7 +7,7 @@ Usage::
 
     model = m.Model(
         id="anthropic/claude-sonnet-4",
-        api="ai-gateway",
+        adapter="ai-gateway-v3",
         provider="ai-gateway",
     )
     msgs = [Message(role="user", parts=[TextPart(text="hello")])]
@@ -38,29 +38,29 @@ from ..types import messages as messages_
 from ..types import tools as tools_
 from .core.client import Client
 from .core.model import Model, ModelCost
-from .core.wire import GenerateFn, StreamFn
+from .core.proto import GenerateFn, StreamFn
 
 # ---------------------------------------------------------------------------
-# Wire registry — maps api string → wire function.
-# Wire modules are imported lazily on first use.
+# Adapter registry — maps adapter string → adapter function.
+# Adapter modules are imported lazily on first use.
 # ---------------------------------------------------------------------------
 
-_stream_wires: dict[str, StreamFn] = {}
-_generate_wires: dict[str, GenerateFn] = {}
-_wires_loaded = False
+_stream_adapters: dict[str, StreamFn] = {}
+_generate_adapters: dict[str, GenerateFn] = {}
+_adapters_loaded = False
 
 
-def _ensure_wires() -> None:
-    """Lazily register built-in wire functions on first call."""
-    global _wires_loaded  # noqa: PLW0603
-    if _wires_loaded:
+def _ensure_adapters() -> None:
+    """Lazily register built-in adapter functions on first call."""
+    global _adapters_loaded  # noqa: PLW0603
+    if _adapters_loaded:
         return
-    _wires_loaded = True
+    _adapters_loaded = True
 
-    from .wires import ai_gateway_v3
+    from .ai_gateway import adapter as ai_gateway_v3
 
-    _stream_wires["ai-gateway"] = ai_gateway_v3.stream
-    _generate_wires["ai-gateway"] = ai_gateway_v3.generate
+    _stream_adapters["ai-gateway-v3"] = ai_gateway_v3.stream
+    _generate_adapters["ai-gateway-v3"] = ai_gateway_v3.generate
 
 
 # ---------------------------------------------------------------------------
@@ -102,19 +102,20 @@ async def stream(
 ) -> AsyncGenerator[messages_.Message]:
     """Stream an LLM response.
 
-    Resolves the wire function from ``model.api``, auto-creates a
+    Resolves the adapter function from ``model.adapter``, auto-creates a
     :class:`Client` from env vars if none is provided, and yields
     ``Message`` snapshots.
     """
-    _ensure_wires()
+    _ensure_adapters()
     c = client or _auto_client(model)
-    wire_fn = _stream_wires.get(model.api)
-    if wire_fn is None:
-        registered = ", ".join(sorted(_stream_wires)) or "(none)"
+    adapter_fn = _stream_adapters.get(model.adapter)
+    if adapter_fn is None:
+        registered = ", ".join(sorted(_stream_adapters)) or "(none)"
         raise KeyError(
-            f"No stream wire registered for api={model.api!r}. Registered: {registered}"
+            f"No stream adapter registered for adapter={model.adapter!r}. "
+            f"Registered: {registered}"
         )
-    async for msg in wire_fn(
+    async for msg in adapter_fn(
         c, model, messages, tools=tools, output_type=output_type, **kwargs
     ):
         yield msg
@@ -129,19 +130,19 @@ async def generate(
 ) -> messages_.Message:
     """Generate a response (images, video, etc.).
 
-    Resolves the wire function from ``model.api``, auto-creates a
+    Resolves the adapter function from ``model.adapter``, auto-creates a
     :class:`Client` from env vars if none is provided.
     """
-    _ensure_wires()
+    _ensure_adapters()
     c = client or _auto_client(model)
-    wire_fn = _generate_wires.get(model.api)
-    if wire_fn is None:
-        registered = ", ".join(sorted(_generate_wires)) or "(none)"
+    adapter_fn = _generate_adapters.get(model.adapter)
+    if adapter_fn is None:
+        registered = ", ".join(sorted(_generate_adapters)) or "(none)"
         raise KeyError(
-            f"No generate wire registered for api={model.api!r}. "
+            f"No generate adapter registered for adapter={model.adapter!r}. "
             f"Registered: {registered}"
         )
-    return await wire_fn(c, model, messages, **kwargs)
+    return await adapter_fn(c, model, messages, **kwargs)
 
 
 async def buffer(gen: AsyncGenerator[messages_.Message]) -> messages_.Message:
