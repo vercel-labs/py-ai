@@ -31,16 +31,18 @@ class CancellingConfirmation(pydantic.BaseModel):
 async def test_resolve_live_future() -> None:
     """In long-running mode, Hook.resolve() unblocks the awaiting coroutine."""
     resolved_value = None
+    my_agent = ai.agent(model=MOCK_MODEL)
 
-    async def graph(model: ai.Model) -> None:
+    @my_agent.loop
+    async def custom(agent: ai.Agent, msgs: list[ai.Message]) -> None:
         nonlocal resolved_value
-        await ai.stream_step(model, ai.make_messages(user="go"))
+        await ai.stream_step(agent.model, msgs)
         result = await Confirmation.create("confirm_1")  # type: ignore[attr-defined]
         resolved_value = result
 
     mock_llm([[text_msg("OK")]])
     # Confirmation.cancels_future=False -> long-running mode
-    run_result = ai.run(graph, MOCK_MODEL)
+    run_result = my_agent.run(ai.make_messages(user="go"))
 
     collected = []
     async for msg in run_result:
@@ -54,10 +56,6 @@ async def test_resolve_live_future() -> None:
     assert resolved_value is not None
     assert resolved_value.approved is True
     assert resolved_value.reason == "looks good"
-    # The graph completed successfully (resolved_value proves it).
-    # Note: pending_hooks is not cleaned up after live resolution --
-    # that's a known runtime limitation. The important thing is the
-    # graph continued past the hook.
 
 
 # -- Hook.cancel() --------------------------------------------------------
@@ -67,17 +65,19 @@ async def test_resolve_live_future() -> None:
 async def test_cancel_live_hook() -> None:
     """Hook.cancel() cancels the future, causing CancelledError in graph."""
     was_cancelled = False
+    my_agent = ai.agent(model=MOCK_MODEL)
 
-    async def graph(model: ai.Model) -> None:
+    @my_agent.loop
+    async def custom(agent: ai.Agent, msgs: list[ai.Message]) -> None:
         nonlocal was_cancelled
-        await ai.stream_step(model, ai.make_messages(user="go"))
+        await ai.stream_step(agent.model, msgs)
         try:
             await Confirmation.create("cancel_me")  # type: ignore[attr-defined]
         except asyncio.CancelledError:
             was_cancelled = True
 
     mock_llm([[text_msg("OK")]])
-    run_result = ai.run(graph, MOCK_MODEL)
+    run_result = my_agent.run(ai.make_messages(user="go"))
 
     async for msg in run_result:
         if any(isinstance(p, ai.HookPart) and p.status == "pending" for p in msg.parts):
@@ -101,9 +101,11 @@ async def test_cancel_nonexistent_raises() -> None:
 @pytest.mark.asyncio
 async def test_pre_registered_resolution_consumed() -> None:
     """Pre-registered resolution is consumed by Hook.create() without suspending."""
+    my_agent = ai.agent(model=MOCK_MODEL)
 
-    async def graph(model: ai.Model) -> Any:
-        await ai.stream_step(model, ai.make_messages(user="go"))
+    @my_agent.loop
+    async def custom(agent: ai.Agent, msgs: list[ai.Message]) -> Any:
+        await ai.stream_step(agent.model, msgs)
         result = await Confirmation.create("pre_reg_1")  # type: ignore[attr-defined]
         return result
 
@@ -111,7 +113,7 @@ async def test_pre_registered_resolution_consumed() -> None:
     Confirmation.resolve("pre_reg_1", {"approved": True})  # type: ignore[attr-defined]
 
     mock_llm([[text_msg("OK")]])
-    run_result = ai.run(graph, MOCK_MODEL)
+    run_result = my_agent.run(ai.make_messages(user="go"))
     [m async for m in run_result]
 
     # Should have completed with no pending hooks
@@ -136,13 +138,15 @@ def test_resolve_validates_schema() -> None:
 @pytest.mark.asyncio
 async def test_resolved_hook_emits_message() -> None:
     """After resolution, a 'resolved' HookPart message is emitted."""
+    my_agent = ai.agent(model=MOCK_MODEL)
 
-    async def graph(model: ai.Model) -> None:
-        await ai.stream_step(model, ai.make_messages(user="go"))
+    @my_agent.loop
+    async def custom(agent: ai.Agent, msgs: list[ai.Message]) -> None:
+        await ai.stream_step(agent.model, msgs)
         await Confirmation.create("emit_test")  # type: ignore[attr-defined]
 
     mock_llm([[text_msg("OK")]])
-    run_result = ai.run(graph, MOCK_MODEL)
+    run_result = my_agent.run(ai.make_messages(user="go"))
 
     msgs = []
     async for msg in run_result:
@@ -164,14 +168,17 @@ async def test_resolved_hook_emits_message() -> None:
 
 @pytest.mark.asyncio
 async def test_hook_metadata_in_pending() -> None:
-    async def graph(model: ai.Model) -> None:
-        await ai.stream_step(model, ai.make_messages(user="go"))
+    my_agent = ai.agent(model=MOCK_MODEL)
+
+    @my_agent.loop
+    async def custom(agent: ai.Agent, msgs: list[ai.Message]) -> None:
+        await ai.stream_step(agent.model, msgs)
         await CancellingConfirmation.create(  # type: ignore[attr-defined]
             "meta_test", metadata={"tool": "rm -rf", "path": "/"}
         )
 
     mock_llm([[text_msg("OK")]])
-    run_result = ai.run(graph, MOCK_MODEL)
+    run_result = my_agent.run(ai.make_messages(user="go"))
     [m async for m in run_result]
 
     info = run_result.pending_hooks["meta_test"]

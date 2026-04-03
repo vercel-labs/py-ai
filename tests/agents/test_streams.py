@@ -71,20 +71,23 @@ async def test_stream_outside_run_raises() -> None:
 
 @pytest.mark.asyncio
 async def test_stream_step_replays_from_checkpoint() -> None:
-    """stream_step inside ai.run with a checkpoint replays without calling LLM."""
+    """stream_step inside Agent.run with a checkpoint replays without calling LLM."""
 
-    async def graph(model: ai.Model) -> ai.StreamResult:
-        return await ai.stream_step(model, ai.make_messages(user="hello"))
+    my_agent = ai.agent(model=MOCK_MODEL)
+
+    @my_agent.loop
+    async def custom(agent: ai.Agent, msgs: list[ai.Message]) -> ai.StreamResult:
+        return await ai.stream_step(agent.model, msgs)
 
     # First run
     mock_llm([[text_msg("Hi")]])
-    r1 = ai.run(graph, MOCK_MODEL)
+    r1 = my_agent.run(ai.make_messages(user="hello"))
     [msg async for msg in r1]
     cp = r1.checkpoint
 
     # Replay
     llm2 = mock_llm([])
-    r2 = ai.run(graph, MOCK_MODEL, checkpoint=cp)
+    r2 = my_agent.run(ai.make_messages(user="hello"), checkpoint=cp)
     [msg async for msg in r2]
     assert llm2.call_count == 0
 

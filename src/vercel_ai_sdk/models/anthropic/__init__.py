@@ -1,5 +1,7 @@
-"""Anthropic provider adapter."""
+"""Anthropic provider — adapter for the Anthropic messages API."""
 
-from .llm import AnthropicModel, _messages_to_anthropic
+from .adapter import stream
 
-__all__ = ["AnthropicModel", "_messages_to_anthropic"]
+__all__ = [
+    "stream",
+]
