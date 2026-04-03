@@ -46,8 +46,7 @@ def _cleanup_run(labels: set[str]) -> None:
 
 
 class Hook[T: pydantic.BaseModel]:
-    """
-    Hook: a suspension point that requires external input to continue.
+    """Hook: a suspension point that requires external input to continue.
 
     Usage in graph code:
 
@@ -77,20 +76,14 @@ class Hook[T: pydantic.BaseModel]:
 
     @classmethod
     async def create(cls, label: str, metadata: dict[str, Any] | None = None) -> T:
-        """
-        Create a hook and await its resolution.
+        """Create a hook and await its resolution.
 
-        The hook is submitted to the Runtime's step queue. run() will either:
+        The hook is submitted to the LoopExecutor's step queue. run() will
+        either:
         - Resolve immediately (if a resolution is available from checkpoint
           or pre-registered via Hook.resolve())
         - Cancel the future (cancels_future=True, serverless mode)
         - Hold the future (cancels_future=False, long-running mode)
-
-        Args:
-            label: Stable identifier for this hook. Used to match resolutions
-                   across requests in serverless mode. Must be unique within
-                   a single run.
-            metadata: Optional metadata surfaced in the pending HookPart message.
         """
         from . import runtime as rt_mod
 
@@ -101,16 +94,16 @@ class Hook[T: pydantic.BaseModel]:
         # Check pre-registered resolutions (serverless re-entry path)
         pre_registered = _pending_resolutions.pop(label, None)
         if pre_registered is not None:
-            rt.record_hook(label, pre_registered)
+            rt.log.record_hook(label, pre_registered)
             return cls._schema(**pre_registered)  # type: ignore[return-value]
 
         # Check checkpoint for a previously resolved value
-        resolution = rt.get_hook_resolution(label)
+        resolution = rt.log.get_hook_resolution(label)
         if resolution is not None:
-            rt.record_hook(label, resolution)
+            rt.log.record_hook(label, resolution)
             return cls._schema(**resolution)  # type: ignore[return-value]
 
-        # Submit to step queue — run() decides what to do
+        # Submit to executor queue — run() decides what to do
         future: asyncio.Future[dict[str, Any]] = asyncio.Future()
         suspension = rt_mod.HookSuspension(
             label=label,
@@ -119,12 +112,12 @@ class Hook[T: pydantic.BaseModel]:
             future=future,
             cancels_future=cls.cancels_future,
         )
-        await rt.put_hook_suspension(suspension)
+        await rt.executor.put_hook(suspension)
 
         # Register in module-level registry for external resolution
         hook_metadata = metadata or {}
         _live_hooks[label] = (future, hook_metadata, rt)
-        rt.track_hook_label(label)
+        rt.executor.track_hook_label(label)
 
         # Await resolution — may be resolved immediately by run(),
         # cancelled by run() (serverless), or resolved later by
@@ -135,10 +128,10 @@ class Hook[T: pydantic.BaseModel]:
         _live_hooks.pop(label, None)
 
         # Record for checkpoint
-        rt.record_hook(label, resolution)
+        rt.log.record_hook(label, resolution)
 
         # Emit resolved message
-        await rt.put_message(
+        await rt.executor.put_message(
             messages_.Message(
                 role="assistant",
                 parts=[
@@ -157,8 +150,7 @@ class Hook[T: pydantic.BaseModel]:
 
     @classmethod
     def resolve(cls, label: str, data: T | dict[str, Any]) -> None:
-        """
-        Resolve a hook by label.
+        """Resolve a hook by label.
 
         Works in two modes:
 
@@ -169,19 +161,12 @@ class Hook[T: pydantic.BaseModel]:
            stashes it in the pre-registration registry. When ai.run()
            replays the graph and Hook.create() executes, it finds the
            pre-registered resolution and returns without suspending.
-
-        Args:
-            label: The hook label to resolve.
-            data: Resolution payload (dict or pydantic model). Validated
-                  against the hook's schema immediately.
         """
         # Validate and normalize to dict
         if isinstance(data, dict):
-            # Validate by constructing the schema model
             validated = cls._schema(**data)
             resolution = validated.model_dump()
         else:
-            # Already a model instance — validate it's the right type
             if not isinstance(data, cls._schema):
                 raise TypeError(
                     f"Expected {cls._schema.__name__} or dict, "
@@ -211,7 +196,7 @@ class Hook[T: pydantic.BaseModel]:
         future, hook_metadata, rt = _live_hooks.pop(label)
         future.cancel(reason)
 
-        await rt.put_message(
+        await rt.executor.put_message(
             messages_.Message(
                 role="assistant",
                 parts=[
@@ -227,8 +212,7 @@ class Hook[T: pydantic.BaseModel]:
 
 
 def hook[T: pydantic.BaseModel](cls: type[T]) -> type[Hook[T]]:
-    """
-    Decorator to create a Hook type from a pydantic model.
+    """Decorator to create a Hook type from a pydantic model.
 
     The pydantic model defines the schema for the hook's resolution payload.
     """

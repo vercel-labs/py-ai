@@ -138,9 +138,9 @@ class FilePart(pydantic.BaseModel):
         ``media_type`` is provided.
         """
         if media_type is None:
-            from ..models.core.media import data as media_data
+            from ..models.core.helpers import media as media_helpers
 
-            media_type = media_data.infer_media_type(url)
+            media_type = media_helpers.infer_media_type(url)
         return cls(data=url, media_type=media_type)
 
     @classmethod
@@ -158,11 +158,11 @@ class FilePart(pydantic.BaseModel):
         detection fails.
         """
         if media_type is None:
-            from ..models.core.media import detect as media_detect
+            from ..models.core.helpers import media as media_helpers
 
-            media_type = media_detect.detect_image_media_type(
+            media_type = media_helpers.detect_image_media_type(
                 data
-            ) or media_detect.detect_audio_media_type(data)
+            ) or media_helpers.detect_audio_media_type(data)
         if media_type is None:
             raise ValueError(
                 "Cannot detect media_type from bytes. Provide media_type explicitly."

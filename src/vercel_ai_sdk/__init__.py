@@ -1,6 +1,6 @@
-from . import adapters, models, models2, telemetry
+from . import adapters, models, telemetry
 from .adapters import ai_sdk_ui
-from .agents2 import (
+from .agents import (
     Agent,
     AgentRun,
     Checkpoint,
@@ -25,7 +25,7 @@ from .agents2 import (
     stream_step,
     tool,
 )
-from .models2 import Client, Model, ModelCost
+from .models import Client, Model, ModelCost
 
 # Re-export core types
 from .types import (
@@ -61,12 +61,10 @@ __all__ = [
     "ToolSchema",
     "Usage",
     "make_messages",
-    # Models (from models2/)
+    # Models (from models/)
     "Model",
     "ModelCost",
     "Client",
-    "models2",
-    # Legacy (from models/) — kept during transition
     "models",
     # Agents — primary API
     "Agent",

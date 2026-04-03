@@ -2,7 +2,7 @@
 
 NOTE: This example still uses the old models.LanguageModel ABC because
 it wraps Temporal activities as a custom model. When the models layer
-is fully migrated to models2, this will need a custom adapter instead.
+is fully migrated to models, this will need a custom adapter instead.
 """
 
 from __future__ import annotations
@@ -85,7 +85,7 @@ async def get_population(city: str) -> int:
 #
 # TODO: This example uses the old LanguageModel ABC and ai.run() /
 # ai.stream_loop free-function patterns. Once the models layer is
-# migrated, convert to use ai.agent() + models2.Model with a custom
+# migrated, convert to use ai.agent() + models.Model with a custom
 # adapter for Temporal activity-based LLM calls.
 
 
@@ -94,7 +94,7 @@ async def agent(llm: Any, user_query: str) -> ai.StreamResult:
 
     This is a transitional pattern. The old ai.stream_loop and ai.run
     are no longer part of the public API. This example needs a custom
-    models2 adapter to work with the new Agent API.
+    models adapter to work with the new Agent API.
     """
     messages = ai.make_messages(
         system="Answer questions using the weather and population tools.",
@@ -139,9 +139,9 @@ class AgentWorkflow:
             )
         )
 
-        # TODO: This uses the old free-function pattern. Once models2
+        # TODO: This uses the old free-function pattern. Once models
         # supports custom adapters for Temporal, use Agent.run() instead.
-        from vercel_ai_sdk.agents2 import run
+        from vercel_ai_sdk.agents import run
 
         final_text = ""
         async for msg in run(agent, llm, user_query):

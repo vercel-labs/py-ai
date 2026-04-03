@@ -9,7 +9,7 @@ import pytest
 
 import vercel_ai_sdk as ai
 from vercel_ai_sdk.adapters.ai_sdk_ui import adapter, ui_message
-from vercel_ai_sdk.agents2 import hooks
+from vercel_ai_sdk.agents import hooks
 from vercel_ai_sdk.types import messages
 
 from ...conftest import MOCK_MODEL, mock_llm, tool_msg

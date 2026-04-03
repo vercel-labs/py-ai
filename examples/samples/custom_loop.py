@@ -28,8 +28,8 @@ async def custom_stream_step(
     tools: list[ai.Tool[..., Any]],
     label: str | None = None,
 ) -> AsyncGenerator[ai.Message]:
-    """Wraps models2.stream to inject a label on every message."""
-    async for msg in ai.models2.stream(model, messages, tools=tools):
+    """Wraps models.stream to inject a label on every message."""
+    async for msg in ai.models.stream(model, messages, tools=tools):
         msg.label = label
         yield msg
 
