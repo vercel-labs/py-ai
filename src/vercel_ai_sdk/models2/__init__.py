@@ -60,9 +60,13 @@ def _ensure_adapters() -> None:
 
     from .ai_gateway import generate as ai_gw_generate
     from .ai_gateway import stream as ai_gw_stream
+    from .anthropic.adapter import stream as anthropic_stream
+    from .openai.adapter import stream as openai_stream
 
     _stream_adapters["ai-gateway-v3"] = ai_gw_stream
     _generate_adapters["ai-gateway-v3"] = ai_gw_generate
+    _stream_adapters["openai"] = openai_stream
+    _stream_adapters["anthropic"] = anthropic_stream
 
 
 # ---------------------------------------------------------------------------
