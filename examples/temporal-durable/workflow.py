@@ -1,10 +1,16 @@
-"""Temporal workflow — the durable agent loop."""
+"""Temporal workflow — the durable agent loop.
+
+NOTE: This example still uses the old models.LanguageModel ABC because
+it wraps Temporal activities as a custom model. When the models layer
+is fully migrated to models2, this will need a custom adapter instead.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
-from typing import override
+from typing import Any, override
 
 import pydantic
 import temporalio.common
@@ -16,7 +22,7 @@ with temporalio.workflow.unsafe.imports_passed_through():
     import vercel_ai_sdk as ai
 
 
-class DurableModel(ai.LanguageModel):
+class DurableModel(ai.models.LanguageModel):
     def __init__(
         self,
         call_fn: Callable[
@@ -76,15 +82,45 @@ async def get_population(city: str) -> int:
 
 
 # ── Agent ────────────────────────────────────────────────────────
+#
+# TODO: This example uses the old LanguageModel ABC and ai.run() /
+# ai.stream_loop free-function patterns. Once the models layer is
+# migrated, convert to use ai.agent() + models2.Model with a custom
+# adapter for Temporal activity-based LLM calls.
 
 
-async def agent(llm: ai.LanguageModel, user_query: str) -> ai.StreamResult:
-    """Agent loop — identical to the non-Temporal version."""
+async def agent(llm: Any, user_query: str) -> ai.StreamResult:
+    """Agent loop — uses old-style stream_loop via models.LanguageModel.
+
+    This is a transitional pattern. The old ai.stream_loop and ai.run
+    are no longer part of the public API. This example needs a custom
+    models2 adapter to work with the new Agent API.
+    """
     messages = ai.make_messages(
         system="Answer questions using the weather and population tools.",
         user=user_query,
     )
-    return await ai.stream_loop(llm, messages, [get_weather, get_population])
+
+    # Manually implement the loop since we can't use Agent with LanguageModel
+    tools = [get_weather, get_population]
+    local_messages = list(messages)
+
+    while True:
+        result_messages: list[ai.Message] = []
+        async for msg in llm.stream(local_messages, tools=tools):
+            result_messages.append(msg)
+        result = ai.StreamResult(messages=result_messages)
+
+        if not result.tool_calls:
+            return result
+
+        last_msg = result.last_message
+        if last_msg is not None:
+            local_messages.append(last_msg)
+
+        await asyncio.gather(
+            *(ai.execute_tool(tc, message=last_msg) for tc in result.tool_calls)
+        )
 
 
 # ── Workflow ─────────────────────────────────────────────────────
@@ -103,8 +139,12 @@ class AgentWorkflow:
             )
         )
 
+        # TODO: This uses the old free-function pattern. Once models2
+        # supports custom adapters for Temporal, use Agent.run() instead.
+        from vercel_ai_sdk.agents2 import run
+
         final_text = ""
-        async for msg in ai.run(agent, llm, user_query):
+        async for msg in run(agent, llm, user_query):
             if msg.text:
                 final_text = msg.text
         return final_text

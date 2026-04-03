@@ -35,14 +35,10 @@ async def double(x: int) -> int:
 @pytest.mark.asyncio
 async def test_text_only_spans(spans: InMemorySpanExporter) -> None:
     """Text-only run produces ai.run > ai.stream span hierarchy."""
-
-    async def root(model: ai.Model) -> ai.StreamResult:
-        return await ai.stream_loop(
-            model, messages=ai.make_messages(user="Hi"), tools=[]
-        )
+    my_agent = ai.agent(model=MOCK_MODEL, tools=[])
 
     mock_llm([[text_msg("Hello!")]])
-    result = ai.run(root, MOCK_MODEL)
+    result = my_agent.run(ai.make_messages(user="Hi"))
     [m async for m in result]
 
     finished = spans.get_finished_spans()
@@ -65,11 +61,7 @@ async def test_text_only_spans(spans: InMemorySpanExporter) -> None:
 @pytest.mark.asyncio
 async def test_tool_call_spans(spans: InMemorySpanExporter) -> None:
     """Tool-calling run produces ai.tool spans with correct attributes."""
-
-    async def root(model: ai.Model) -> ai.StreamResult:
-        return await ai.stream_loop(
-            model, messages=ai.make_messages(user="Double 5"), tools=[double]
-        )
+    my_agent = ai.agent(model=MOCK_MODEL, tools=[double])
 
     mock_llm(
         [
@@ -77,7 +69,7 @@ async def test_tool_call_spans(spans: InMemorySpanExporter) -> None:
             [text_msg("10")],
         ]
     )
-    result = ai.run(root, MOCK_MODEL)
+    result = my_agent.run(ai.make_messages(user="Double 5"))
     [m async for m in result]
 
     finished = spans.get_finished_spans()

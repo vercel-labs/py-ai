@@ -9,7 +9,7 @@ import pytest
 
 import vercel_ai_sdk as ai
 from vercel_ai_sdk.adapters.ai_sdk_ui import adapter, ui_message
-from vercel_ai_sdk.agents import hooks
+from vercel_ai_sdk.agents2 import hooks
 from vercel_ai_sdk.types import messages
 
 from ...conftest import MOCK_MODEL, mock_llm, tool_msg
@@ -240,22 +240,10 @@ async def get_weather(city: str) -> str:
     return f"Sunny in {city}"
 
 
-async def mock_agent(
-    model: ai.Model,
-    user_query: str,
-) -> ai.StreamResult:
-    """Agent using stream_loop directly."""
-    return await ai.stream_loop(
-        model,
-        messages=ai.make_messages(system="You are helpful.", user=user_query),
-        tools=[get_weather],
-    )
-
-
 @pytest.mark.asyncio
 async def test_runtime_tool_roundtrip() -> None:
     """
-    Integration test: run a mock agent loop through ai.run() and verify
+    Integration test: run an Agent through agent.run() and verify
     that tool-input-available and tool-output-available events are emitted.
 
     This test demonstrates the bug: the runtime yields the message with
@@ -263,11 +251,17 @@ async def test_runtime_tool_roundtrip() -> None:
     executed and the ToolPart has been mutated to status="result". The UI
     adapter never sees the intermediate status="pending" state.
 
-    Root cause: stream_loop appends the message, then executes tools which
-    mutate the message in-place. The message was already yielded with
+    Root cause: the default loop appends the message, then executes tools
+    which mutate the message in-place. The message was already yielded with
     status="pending", but pydantic models are mutable so when we collect
     them at the end, we see the mutated state.
     """
+    weather_agent = ai.agent(
+        model=MOCK_MODEL,
+        system="You are helpful.",
+        tools=[get_weather],
+    )
+
     # First LLM call: returns a tool call
     tool_call_response = [
         messages.Message(
@@ -298,7 +292,9 @@ async def test_runtime_tool_roundtrip() -> None:
 
     # Collect all messages from the runtime
     runtime_messages: list[messages.Message] = []
-    async for msg in ai.run(mock_agent, MOCK_MODEL, "What's the weather in London?"):
+    async for msg in weather_agent.run(
+        ai.make_messages(user="What's the weather in London?")
+    ):
         runtime_messages.append(msg)
 
     # Stream through UI adapter
@@ -643,12 +639,15 @@ async def test_runtime_tool_approval_same_step() -> None:
         """Do something dangerous."""
         return f"deleted {path}"
 
-    async def graph(model: ai.Model) -> None:
-        result = await ai.stream_step(
-            model,
-            ai.make_messages(system="You are helpful.", user="delete /tmp"),
-            [dangerous_action],
-        )
+    approval_agent = ai.agent(
+        model=MOCK_MODEL,
+        system="You are helpful.",
+        tools=[dangerous_action],
+    )
+
+    @approval_agent.loop
+    async def custom(agent: ai.Agent, msgs: list[ai.Message]) -> None:
+        result = await ai.stream_step(agent.model, msgs, agent.tools)
         if not result.tool_calls:
             return
 
@@ -680,7 +679,7 @@ async def test_runtime_tool_approval_same_step() -> None:
     )
 
     runtime_messages: list[messages.Message] = []
-    result = ai.run(graph, MOCK_MODEL)
+    result = approval_agent.run(ai.make_messages(user="delete /tmp"))
     async for msg in result:
         runtime_messages.append(msg)
 

@@ -19,46 +19,56 @@ class CommunicationApproval(pydantic.BaseModel):
     reason: str
 
 
-async def graph(llm: ai.LanguageModel, query: str) -> ai.StreamResult:
-    messages = ai.make_messages(
-        system="Use the contact_mothership tool when asked about the future.",
-        user=query,
-    )
-    tools = [contact_mothership]
-
-    while True:
-        result = await ai.stream_step(llm, messages, tools)
-
-        if not result.tool_calls:
-            break
-
-        for tc in result.tool_calls:
-            if tc.tool_name == "contact_mothership":
-                # Blocks until resolved (long-running) or cancelled (serverless)
-                # TODO: mypy doesn't support class decorators that change the
-                # class type — @ai.hook returns type[Hook[T]] but mypy still
-                # sees the original BaseModel.
-                approval = await CommunicationApproval.create(  # type: ignore[attr-defined]
-                    f"approve_{tc.tool_call_id}",
-                    metadata={"tool": tc.tool_name},
-                )
-                if approval.granted:
-                    await ai.execute_tool(tc, message=result.last_message)
-                else:
-                    tc.set_error(f"Rejected: {approval.reason}")
-            else:
-                await ai.execute_tool(tc, message=result.last_message)
-
-        if result.last_message is not None:
-            messages.append(result.last_message)
-
-    return result
-
-
 async def main() -> None:
-    llm = ai.ai_gateway.GatewayModel(model="anthropic/claude-opus-4.6")
+    model = ai.Model(
+        id="anthropic/claude-opus-4.6",
+        adapter="ai-gateway-v3",
+        provider="ai-gateway",
+    )
 
-    async for msg in ai.run(graph, llm, "When will the robots take over?"):
+    my_agent = ai.agent(
+        model=model,
+        system="Use the contact_mothership tool when asked about the future.",
+        tools=[contact_mothership],
+    )
+
+    @my_agent.loop
+    async def with_approval(
+        agent: ai.Agent, messages: list[ai.Message]
+    ) -> ai.StreamResult:
+        local_messages = list(messages)
+
+        while True:
+            result = await ai.stream_step(agent.model, local_messages, agent.tools)
+
+            if not result.tool_calls:
+                break
+
+            for tc in result.tool_calls:
+                if tc.tool_name == "contact_mothership":
+                    # Blocks until resolved (long-running) or cancelled (serverless)
+                    # TODO: mypy doesn't support class decorators that change the
+                    # class type — @ai.hook returns type[Hook[T]] but mypy still
+                    # sees the original BaseModel.
+                    approval = await CommunicationApproval.create(  # type: ignore[attr-defined]
+                        f"approve_{tc.tool_call_id}",
+                        metadata={"tool": tc.tool_name},
+                    )
+                    if approval.granted:
+                        await ai.execute_tool(tc, message=result.last_message)
+                    else:
+                        tc.set_error(f"Rejected: {approval.reason}")
+                else:
+                    await ai.execute_tool(tc, message=result.last_message)
+
+            if result.last_message is not None:
+                local_messages.append(result.last_message)
+
+        return result
+
+    async for msg in my_agent.run(
+        ai.make_messages(user="When will the robots take over?")
+    ):
         # Hook parts arrive as pending, waiting for resolution
         if (hook := msg.get_hook_part()) and hook.status == "pending":
             answer = input(f"Approve {hook.hook_id}? [y/n] ")

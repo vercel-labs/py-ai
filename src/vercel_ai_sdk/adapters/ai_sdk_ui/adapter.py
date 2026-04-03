@@ -11,7 +11,7 @@ import uuid
 from collections.abc import AsyncGenerator, AsyncIterable
 from typing import Any, Literal
 
-from ...agents import hooks
+from ...agents2 import hooks
 from ...types import messages as messages_
 from . import protocol, ui_message
 

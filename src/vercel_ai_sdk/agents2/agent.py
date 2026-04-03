@@ -24,8 +24,10 @@ Usage::
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from typing import Any
+
+import pydantic
 
 from .. import models2
 from ..types import messages as messages_
@@ -37,42 +39,35 @@ from . import tools as tools_
 
 # ── Types ─────────────────────────────────────────────────────────
 
-LoopFn = Callable[["Agent", list[messages_.Message]], Awaitable[streams_.StreamResult]]
+LoopFn = Callable[
+    ["Agent", list[messages_.Message]], Awaitable[streams_.StreamResult | None]
+]
 
 
-# ── Default loop primitives ───────────────────────────────────────
+# ── Composition primitives ────────────────────────────────────────
 
 
 @streams_.stream
-async def _stream_step(
+async def stream_step(
     model: models2.Model,
     messages: list[messages_.Message],
-    tools: list[tools_.Tool[..., Any]],
+    tools: Sequence[tools_.ToolLike] | None = None,
+    label: str | None = None,
+    output_type: type[pydantic.BaseModel] | None = None,
+    **kwargs: Any,
 ) -> AsyncGenerator[messages_.Message]:
-    """Single LLM call that streams into the Runtime queue."""
-    async for msg in models2.stream(model, messages, tools=tools):
+    """Single LLM call that streams into the Runtime queue.
+
+    This is a composition primitive for custom ``@agent.loop``
+    functions and multi-agent orchestration.  It is decorated with
+    ``@stream``, so each call becomes a replayable step in the
+    event log.
+    """
+    async for msg in models2.stream(
+        model, messages, tools=tools, output_type=output_type, **kwargs
+    ):
+        msg.label = label
         yield msg
-
-
-async def _default_loop(
-    agent: Agent, messages: list[messages_.Message]
-) -> streams_.StreamResult:
-    """Default agent loop: stream LLM, execute tools, repeat."""
-    local_messages = list(messages)
-
-    while True:
-        result = await _stream_step(agent.model, local_messages, agent.tools)
-
-        if not result.tool_calls:
-            return result
-
-        last_msg = result.last_message
-        if last_msg is not None:
-            local_messages.append(last_msg)
-
-        await asyncio.gather(
-            *(runtime_.execute_tool(tc, message=last_msg) for tc in result.tool_calls)
-        )
 
 
 # ── AgentRun ──────────────────────────────────────────────────────
@@ -186,6 +181,29 @@ class Agent:
         self._custom_loop = fn
         return fn
 
+    async def _default_loop(
+        self, messages: list[messages_.Message]
+    ) -> streams_.StreamResult:
+        """Built-in loop: stream LLM, execute tools, repeat."""
+        local_messages = list(messages)
+
+        while True:
+            result = await stream_step(self.model, local_messages, self.tools)
+
+            if not result.tool_calls:
+                return result
+
+            last_msg = result.last_message
+            if last_msg is not None:
+                local_messages.append(last_msg)
+
+            await asyncio.gather(
+                *(
+                    runtime_.execute_tool(tc, message=last_msg)
+                    for tc in result.tool_calls
+                )
+            )
+
     def run(
         self,
         messages: list[messages_.Message],
@@ -212,12 +230,13 @@ class Agent:
             )
         full_messages.extend(messages)
 
-        loop_fn = self._custom_loop or _default_loop
         ctx = context_.Context(tools=self.tools)
 
         # Build the graph function that runtime_.run() expects
-        async def _graph() -> streams_.StreamResult:
-            return await loop_fn(self, full_messages)
+        async def _graph() -> streams_.StreamResult | None:
+            if self._custom_loop:
+                return await self._custom_loop(self, full_messages)
+            return await self._default_loop(full_messages)
 
         inner = runtime_.run(
             _graph,

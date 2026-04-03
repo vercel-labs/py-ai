@@ -1,22 +1,27 @@
 from . import adapters, models, models2, telemetry
 from .adapters import ai_sdk_ui
-from .agents import (
+from .agents2 import (
+    Agent,
+    AgentRun,
     Checkpoint,
+    Context,
     Hook,
     HookInfo,
+    LoopFn,
     PendingHookInfo,
     RunResult,
     Runtime,
     StreamResult,
     Tool,
     ToolApproval,
+    ToolSource,
+    agent,
     execute_tool,
     get_checkpoint,
+    get_context,
     hook,
     mcp,
-    run,
     stream,
-    stream_loop,
     stream_step,
     tool,
 )
@@ -63,25 +68,35 @@ __all__ = [
     "models2",
     # Legacy (from models/) — kept during transition
     "models",
-    # Agents (from agents/)
+    # Agents — primary API
+    "Agent",
+    "AgentRun",
+    "agent",
+    "LoopFn",
+    # Agents — composition primitives
+    "stream_step",
+    "execute_tool",
+    "get_checkpoint",
+    "stream",
+    "StreamResult",
+    # Agents — tools
     "Tool",
+    "tool",
+    # Agents — hooks
+    "Hook",
+    "hook",
+    "ToolApproval",
+    # Agents — context
+    "Context",
+    "ToolSource",
+    "get_context",
+    # Agents — runtime (developer API)
     "Runtime",
     "RunResult",
     "HookInfo",
-    "StreamResult",
-    "Hook",
-    "ToolApproval",
+    # Agents — checkpoint
     "Checkpoint",
     "PendingHookInfo",
-    # Functions (from agents/)
-    "tool",
-    "stream",
-    "stream_step",
-    "stream_loop",
-    "execute_tool",
-    "get_checkpoint",
-    "run",
-    "hook",
     # Submodules
     "telemetry",
     "mcp",

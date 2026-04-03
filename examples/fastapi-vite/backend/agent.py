@@ -16,10 +16,11 @@ async def talk_to_mothership(question: str) -> str:
     return f"Mothership says: {question} -> Soon."
 
 
-def get_llm() -> ai.LanguageModel:
-    """Create the LLM instance."""
-    return ai.ai_gateway.GatewayModel(model="anthropic/claude-opus-4.6")
-
+MODEL = ai.Model(
+    id="anthropic/claude-opus-4.6",
+    adapter="ai-gateway-v3",
+    provider="ai-gateway",
+)
 
 TOOLS: list[ai.Tool[..., Any]] = [talk_to_mothership]
 
@@ -43,10 +44,17 @@ async def _execute_with_approval(
         tc.set_error("Tool call was denied by the user.")
 
 
+chat_agent = ai.agent(
+    model=MODEL,
+    system="",
+    tools=TOOLS,
+)
+
+
+@chat_agent.loop
 async def graph(
-    llm: ai.LanguageModel,
+    agent: ai.Agent,
     messages: list[ai.Message],
-    tools: list[ai.Tool[..., Any]],
 ) -> ai.StreamResult:
     """Agent graph with human-in-the-loop tool approval.
 
@@ -58,7 +66,7 @@ async def graph(
     local_messages = list(messages)
 
     while True:
-        result = await ai.stream_step(llm, local_messages, tools)
+        result = await ai.stream_step(agent.model, local_messages, agent.tools)
 
         if not result.tool_calls:
             return result

@@ -21,21 +21,22 @@ async def talk_to_mothership(question: str, runtime: ai.Runtime) -> str:
     return "The mothership says: Soon."
 
 
-async def agent(llm: ai.LanguageModel, user_query: str) -> ai.StreamResult:
-    return await ai.stream_loop(
-        llm,
-        messages=ai.make_messages(
-            system="Use the mothership tool when asked about the future.",
-            user=user_query,
-        ),
+async def main() -> None:
+    model = ai.Model(
+        id="anthropic/claude-opus-4.6",
+        adapter="ai-gateway-v3",
+        provider="ai-gateway",
+    )
+
+    my_agent = ai.agent(
+        model=model,
+        system="Use the mothership tool when asked about the future.",
         tools=[talk_to_mothership],
     )
 
-
-async def main() -> None:
-    llm = ai.ai_gateway.GatewayModel(model="anthropic/claude-opus-4.6")
-
-    async for msg in ai.run(agent, llm, "When will the robots take over?"):
+    async for msg in my_agent.run(
+        ai.make_messages(user="When will the robots take over?")
+    ):
         if msg.label == "tool_progress":
             print(f"  [{msg.text}]")
         elif msg.text_delta:
