@@ -51,20 +51,12 @@ async def chat(request: ChatRequest) -> fastapi.responses.StreamingResponse:
     session_id = request.session_id or "default"
     checkpoint_key = f"checkpoint:{session_id}"
 
-    llm = agent.get_llm()
-
     checkpoint = None
     saved = await file_storage.get(checkpoint_key)
     if saved:
         checkpoint = ai.Checkpoint.model_validate(saved)
 
-    result = ai.run(
-        agent.graph,
-        llm,
-        messages,
-        agent.TOOLS,
-        checkpoint=checkpoint,
-    )
+    result = agent.chat_agent.run(messages, checkpoint=checkpoint)
 
     async def stream_response() -> AsyncGenerator[str]:
         async for chunk in ai.ai_sdk_ui.to_sse_stream(result):

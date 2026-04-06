@@ -66,10 +66,9 @@ Stream = Callable[[], AsyncGenerator[messages_.Message]]
 def stream[**P](
     fn: Callable[P, AsyncGenerator[messages_.Message]],
 ) -> Callable[P, Awaitable[StreamResult]]:
-    """
-    Decorator to put an async generator into the Runtime queue.
+    """Decorator to put an async generator into the LoopExecutor queue.
 
-    The decorated function submits its work to the Runtime queue and
+    The decorated function submits its work to the executor queue and
     blocks until run() processes it, then returns the StreamResult.
 
     If a checkpoint exists with a cached result for this step index,
@@ -85,22 +84,22 @@ def stream[**P](
             raise ValueError("No Runtime context - must be called within ai.run()")
 
         # Replay: return cached result if available
-        cached = rt.try_replay_step()
+        cached = rt.log.try_replay_step()
         if cached is not None:
             return cached
 
-        # Fresh execution: submit to queue and wait
+        # Fresh execution: submit to executor queue and wait
         future: asyncio.Future[StreamResult] = asyncio.Future()
 
         async def stream_fn() -> AsyncGenerator[messages_.Message]:
             async for msg in fn(*args, **kwargs):
                 yield msg
 
-        await rt.put_step(stream_fn, future)
+        await rt.executor.put_step(stream_fn, future)
         result = await future
 
         # Record for checkpoint
-        rt.record_step(result)
+        rt.log.record_step(result)
         return result
 
     return wrapped

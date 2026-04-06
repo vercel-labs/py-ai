@@ -1,13 +1,100 @@
-"""Magic-byte media type detection.
-
-Port of ``@ai-sdk/ai/src/util/detect-media-type.ts``.  Detects image,
-audio, and video formats by inspecting the first bytes of binary data
-(or the first characters of a base-64 string).
-"""
-
 from __future__ import annotations
 
+import base64
 import base64 as _b64
+import mimetypes
+
+import httpx
+
+# -- URL helpers -----------------------------------------------------------
+
+
+def is_url(data: str) -> bool:
+    """Return True if *data* looks like a URL rather than raw base-64."""
+    return data.startswith(("http://", "https://", "data:"))
+
+
+def is_downloadable_url(data: str) -> bool:
+    """Return True if *data* is an ``http(s)://`` URL that can be fetched."""
+    return data.startswith(("http://", "https://"))
+
+
+def split_data_url(url: str) -> tuple[str | None, str | None]:
+    """Parse a ``data:`` URL into ``(media_type, base64_content)``.
+
+    Returns ``(None, None)`` if the input is not a valid ``data:`` URL.
+
+    Example::
+
+        >>> split_data_url("data:image/png;base64,iVBOR...")
+        ("image/png", "iVBOR...")
+    """
+    if not url.startswith("data:"):
+        return None, None
+    try:
+        header, b64_content = url.split(",", 1)
+        # header = "data:image/png;base64"
+        mt = header.split(";")[0].split(":", 1)[1]
+        return (mt or None), (b64_content or None)
+    except (ValueError, IndexError):
+        return None, None
+
+
+# -- encoding helpers ------------------------------------------------------
+
+
+def data_to_base64(data: str | bytes) -> str:
+    """Ensure *data* is a base-64 encoded string.
+
+    * ``bytes`` -> base-64 encoded.
+    * ``str`` that is a ``data:`` URL -> base-64 content extracted.
+    * ``str`` that is an ``http(s)://`` URL -> returned as-is (caller
+      must handle).
+    * ``str`` that is not a URL -> assumed to already be base-64.
+    """
+    if isinstance(data, bytes):
+        return base64.b64encode(data).decode("ascii")
+    if data.startswith("data:"):
+        _, b64 = split_data_url(data)
+        if b64 is not None:
+            return b64
+    return data
+
+
+def data_to_data_url(data: str | bytes, media_type: str) -> str:
+    """Convert *data* to a ``data:`` URL.  Passes through existing URLs."""
+    if isinstance(data, str) and is_url(data):
+        return data
+    b64 = data_to_base64(data)
+    return f"data:{media_type};base64,{b64}"
+
+
+# -- media-type inference --------------------------------------------------
+
+
+def infer_media_type(url: str) -> str:
+    """Infer IANA media type from a URL.
+
+    * ``data:image/png;base64,...`` -> ``"image/png"``
+    * ``https://example.com/cat.jpg`` -> ``"image/jpeg"`` (via :mod:`mimetypes`)
+    * Unknown -> raises :class:`ValueError`
+    """
+    if url.startswith("data:"):
+        # data:[<mediatype>][;base64],<data>
+        rest = url[5:]  # strip "data:"
+        sep = rest.find(",")
+        meta = rest[:sep] if sep != -1 else rest
+        mt = meta.split(";")[0]
+        if mt:
+            return mt
+    else:
+        guessed, _ = mimetypes.guess_type(url)
+        if guessed:
+            return guessed
+    raise ValueError(
+        f"Cannot infer media_type from URL: {url!r}. Provide media_type explicitly."
+    )
+
 
 # ---------------------------------------------------------------------------
 # Signature definitions
@@ -186,3 +273,98 @@ def detect_image_media_type(data: bytes | str) -> str | None:
 def detect_audio_media_type(data: bytes | str) -> str | None:
     """Detect audio format from magic bytes."""
     return detect_media_type(data, AUDIO_SIGNATURES)
+
+
+DEFAULT_MAX_BYTES = 100 * 1024 * 1024  # 100 MiB (matches TS SDK)
+_ALLOWED_SCHEMES = frozenset({"http", "https"})
+
+
+class DownloadError(Exception):
+    """Raised when a URL download fails."""
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        status_code: int | None = None,
+        status_text: str | None = None,
+        cause: BaseException | None = None,
+    ) -> None:
+        parts = [f"Failed to download {url!r}"]
+        if status_code is not None:
+            parts.append(f"status={status_code}")
+        if status_text:
+            parts.append(status_text)
+        super().__init__(": ".join(parts))
+        self.url = url
+        self.status_code = status_code
+        if cause is not None:
+            self.__cause__ = cause
+
+
+def _validate_url(url: str) -> None:
+    """Reject non-HTTP(S) URLs (SSRF prevention)."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in _ALLOWED_SCHEMES:
+        raise DownloadError(
+            url, status_text=f"Unsupported URL scheme: {parsed.scheme!r}"
+        )
+
+
+async def download(
+    url: str,
+    *,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+) -> tuple[bytes, str | None]:
+    """Download *url* and return ``(data, content_type)``.
+
+    Args:
+        url: The URL to fetch (must be ``http`` or ``https``).
+        max_bytes: Maximum response size.  Defaults to 100 MiB.
+
+    Returns:
+        A tuple of ``(raw_bytes, content_type_or_None)``.
+
+    Raises:
+        DownloadError: On any failure (network, HTTP status, size, etc.).
+    """
+    _validate_url(url)
+
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            resp = await client.get(url)
+
+            # Validate redirect target
+            if resp.url is not None and str(resp.url) != url:
+                _validate_url(str(resp.url))
+
+            if resp.status_code >= 400:
+                raise DownloadError(
+                    url,
+                    status_code=resp.status_code,
+                    status_text=resp.reason_phrase or "",
+                )
+
+            data = resp.content
+            if len(data) > max_bytes:
+                raise DownloadError(
+                    url,
+                    status_text=(
+                        f"Response exceeds maximum size "
+                        f"({len(data)} > {max_bytes} bytes)"
+                    ),
+                )
+
+            content_type = resp.headers.get("content-type")
+            # Strip charset/parameters: "image/png; charset=..." → "image/png"
+            if content_type:
+                content_type = content_type.split(";")[0].strip()
+
+            return data, content_type or None
+
+    except DownloadError:
+        raise
+    except Exception as exc:
+        raise DownloadError(url, cause=exc) from exc

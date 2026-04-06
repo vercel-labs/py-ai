@@ -1,15 +1,15 @@
 """Tests for the v3 protocol serialization and deserialization.
 
 Focus areas:
-- ``messages_to_v3_prompt``: the critical outgoing translation layer
-- ``tools_to_v3`` / ``build_request_body``: using real ``@tool``
-- ``parse_stream_part``: the critical incoming translation layer
-- ``parse_generate_result``: non-streaming response handling
+- ``_messages_to_prompt``: the critical outgoing translation layer
+- ``_build_request_body``: using real ``@tool``
+- ``_parse_stream_part``: the critical incoming translation layer
 - ``_parse_usage``: the two distinct wire formats
 """
 
 from __future__ import annotations
 
+import importlib
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -17,17 +17,20 @@ import pydantic
 import pytest
 
 import vercel_ai_sdk as ai
-from vercel_ai_sdk.models.ai_gateway import protocol
-from vercel_ai_sdk.models.core import llm
+from vercel_ai_sdk.models.core.helpers import streaming
 from vercel_ai_sdk.types import messages
 
+# The ai_gateway __init__.py re-exports `stream` as a function, which
+# shadows the module.  Use importlib to get the actual module.
+stream_mod = importlib.import_module("vercel_ai_sdk.models.ai_gateway.stream")
+
 # ---------------------------------------------------------------------------
-# messages_to_v3_prompt
+# _messages_to_prompt
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-class TestMessagesToV3Prompt:
+class TestMessagesToPrompt:
     async def test_system_message(self) -> None:
         msgs = [
             messages.Message(
@@ -35,7 +38,7 @@ class TestMessagesToV3Prompt:
                 parts=[messages.TextPart(text="You are helpful.")],
             )
         ]
-        result = await protocol.messages_to_v3_prompt(msgs)
+        result = await stream_mod._messages_to_prompt(msgs)
         assert result == [{"role": "system", "content": "You are helpful."}]
 
     async def test_user_message(self) -> None:
@@ -45,7 +48,7 @@ class TestMessagesToV3Prompt:
                 parts=[messages.TextPart(text="Hello")],
             )
         ]
-        result = await protocol.messages_to_v3_prompt(msgs)
+        result = await stream_mod._messages_to_prompt(msgs)
         assert result == [
             {
                 "role": "user",
@@ -63,7 +66,7 @@ class TestMessagesToV3Prompt:
                 ],
             )
         ]
-        result = await protocol.messages_to_v3_prompt(msgs)
+        result = await stream_mod._messages_to_prompt(msgs)
         content = result[0]["content"]
         assert content[0] == {"type": "reasoning", "text": "Let me think..."}
         assert content[1] == {"type": "text", "text": "42"}
@@ -85,7 +88,7 @@ class TestMessagesToV3Prompt:
                 ],
             )
         ]
-        result = await protocol.messages_to_v3_prompt(msgs)
+        result = await stream_mod._messages_to_prompt(msgs)
         assert len(result) == 2
 
         # Assistant message has the tool-call
@@ -114,13 +117,13 @@ class TestMessagesToV3Prompt:
                 ],
             )
         ]
-        result = await protocol.messages_to_v3_prompt(msgs)
+        result = await stream_mod._messages_to_prompt(msgs)
         tr = result[1]["content"][0]
         assert tr["output"]["type"] == "error-text"
         assert tr["output"]["value"] == "Connection timeout"
 
     async def test_user_message_with_image_url(self) -> None:
-        """FilePart with image URL → downloaded and converted to data: URL."""
+        """FilePart with image URL -> downloaded and converted to data: URL."""
         fake_jpeg = b"\xff\xd8\xff\xe0"
         msgs = [
             messages.Message(
@@ -134,11 +137,11 @@ class TestMessagesToV3Prompt:
             )
         ]
         with patch(
-            "vercel_ai_sdk.models.core.media.download.download",
+            "vercel_ai_sdk.models.core.helpers.media.download",
             new_callable=AsyncMock,
             return_value=(fake_jpeg, "image/jpeg"),
         ):
-            result = await protocol.messages_to_v3_prompt(msgs)
+            result = await stream_mod._messages_to_prompt(msgs)
         content = result[0]["content"]
         assert content[0] == {"type": "text", "text": "Look at this"}
         assert content[1]["type"] == "file"
@@ -146,7 +149,7 @@ class TestMessagesToV3Prompt:
         assert content[1]["data"].startswith("data:image/jpeg;base64,")
 
     async def test_user_message_with_file_bytes(self) -> None:
-        """FilePart with bytes → v3 file content part with data URL."""
+        """FilePart with bytes -> v3 file content part with data URL."""
         msgs = [
             messages.Message(
                 role="user",
@@ -157,7 +160,7 @@ class TestMessagesToV3Prompt:
                 ],
             )
         ]
-        result = await protocol.messages_to_v3_prompt(msgs)
+        result = await stream_mod._messages_to_prompt(msgs)
         part = result[0]["content"][0]
         assert part["type"] == "file"
         assert part["mediaType"] == "image/png"
@@ -172,7 +175,7 @@ class TestMessagesToV3Prompt:
                 parts=[messages.TextPart(text="Hello")],
             )
         ]
-        result = await protocol.messages_to_v3_prompt(msgs)
+        result = await stream_mod._messages_to_prompt(msgs)
         assert result == [
             {"role": "user", "content": [{"type": "text", "text": "Hello"}]}
         ]
@@ -192,13 +195,13 @@ class TestMessagesToV3Prompt:
                 ],
             )
         ]
-        result = await protocol.messages_to_v3_prompt(msgs)
+        result = await stream_mod._messages_to_prompt(msgs)
         assert len(result) == 1
         assert result[0]["role"] == "assistant"
 
 
 # ---------------------------------------------------------------------------
-# tools_to_v3 / build_request_body — using real @tool
+# _build_request_body — using real @tool
 # ---------------------------------------------------------------------------
 
 
@@ -212,14 +215,14 @@ async def get_weather(city: str, units: str = "celsius") -> str:
 class TestBuildRequestBody:
     async def test_with_real_tool(self) -> None:
         """Verify @tool-produced schema round-trips through
-        build_request_body → JSON → gateway wire format."""
+        _build_request_body -> JSON -> gateway wire format."""
         msgs = [
             messages.Message(
                 role="user",
                 parts=[messages.TextPart(text="What's the weather?")],
             )
         ]
-        body = await protocol.build_request_body(msgs, tools=[get_weather])
+        body = await stream_mod._build_request_body(msgs, tools=[get_weather])
 
         assert "tools" in body
         tool_def = body["tools"][0]
@@ -245,7 +248,7 @@ class TestBuildRequestBody:
                 parts=[messages.TextPart(text="Weather?")],
             )
         ]
-        body = await protocol.build_request_body(msgs, output_type=WeatherResult)
+        body = await stream_mod._build_request_body(msgs, output_type=WeatherResult)
 
         assert "responseFormat" in body
         rf = body["responseFormat"]
@@ -262,46 +265,46 @@ class TestBuildRequestBody:
             )
         ]
         opts = {"gateway": {"order": ["bedrock", "openai"]}}
-        body = await protocol.build_request_body(msgs, provider_options=opts)
+        body = await stream_mod._build_request_body(msgs, provider_options=opts)
         assert body["providerOptions"] == opts
 
 
 # ---------------------------------------------------------------------------
-# parse_stream_part — parametrized simple 1:1 mappings
+# _parse_stream_part — parametrized simple 1:1 mappings
 # ---------------------------------------------------------------------------
 
 _SIMPLE_STREAM_PARTS = [
     (
         {"type": "text-start", "id": "t1"},
-        llm.TextStart(block_id="t1"),
+        streaming.TextStart(block_id="t1"),
     ),
     (
         {"type": "text-end", "id": "t1"},
-        llm.TextEnd(block_id="t1"),
+        streaming.TextEnd(block_id="t1"),
     ),
     (
         {"type": "reasoning-start", "id": "r1"},
-        llm.ReasoningStart(block_id="r1"),
+        streaming.ReasoningStart(block_id="r1"),
     ),
     (
         {"type": "reasoning-delta", "id": "r1", "delta": "hmm"},
-        llm.ReasoningDelta(block_id="r1", delta="hmm"),
+        streaming.ReasoningDelta(block_id="r1", delta="hmm"),
     ),
     (
         {"type": "reasoning-end", "id": "r1"},
-        llm.ReasoningEnd(block_id="r1"),
+        streaming.ReasoningEnd(block_id="r1"),
     ),
     (
         {"type": "tool-input-start", "id": "tc-1", "toolName": "search"},
-        llm.ToolStart(tool_call_id="tc-1", tool_name="search"),
+        streaming.ToolStart(tool_call_id="tc-1", tool_name="search"),
     ),
     (
         {"type": "tool-input-delta", "id": "tc-1", "delta": '{"q"'},
-        llm.ToolArgsDelta(tool_call_id="tc-1", delta='{"q"'),
+        streaming.ToolArgsDelta(tool_call_id="tc-1", delta='{"q"'),
     ),
     (
         {"type": "tool-input-end", "id": "tc-1"},
-        llm.ToolEnd(tool_call_id="tc-1"),
+        streaming.ToolEnd(tool_call_id="tc-1"),
     ),
 ]
 
@@ -312,9 +315,9 @@ _SIMPLE_STREAM_PARTS = [
     ids=[w["type"] for w, _ in _SIMPLE_STREAM_PARTS],
 )
 def test_parse_stream_part_simple(
-    wire: dict[str, object], expected: llm.StreamEvent
+    wire: dict[str, object], expected: streaming.StreamEvent
 ) -> None:
-    events = protocol.parse_stream_part(wire)
+    events = stream_mod._parse_stream_part(wire)
     assert len(events) == 1
     assert events[0] == expected
 
@@ -323,16 +326,16 @@ def test_parse_stream_part_simple(
 class TestParseStreamPartComplex:
     async def test_text_delta_uses_textDelta_key(self) -> None:
         """The gateway sends ``textDelta`` (camelCase), not ``delta``."""
-        events = protocol.parse_stream_part(
+        events = stream_mod._parse_stream_part(
             {"type": "text-delta", "id": "t1", "textDelta": "Hello"}
         )
-        assert isinstance(events[0], llm.TextDelta)
+        assert isinstance(events[0], streaming.TextDelta)
         assert events[0].delta == "Hello"
 
     async def test_tool_call_expands_to_three_events(self) -> None:
         """A complete ``tool-call`` part must expand into
-        ToolStart → ToolArgsDelta → ToolEnd."""
-        events = protocol.parse_stream_part(
+        ToolStart -> ToolArgsDelta -> ToolEnd."""
+        events = stream_mod._parse_stream_part(
             {
                 "type": "tool-call",
                 "toolCallId": "tc-1",
@@ -341,14 +344,14 @@ class TestParseStreamPartComplex:
             }
         )
         assert len(events) == 3
-        assert isinstance(events[0], llm.ToolStart)
+        assert isinstance(events[0], streaming.ToolStart)
         assert events[0].tool_name == "get_weather"
-        assert isinstance(events[1], llm.ToolArgsDelta)
+        assert isinstance(events[1], streaming.ToolArgsDelta)
         assert json.loads(events[1].delta) == {"city": "SF"}
-        assert isinstance(events[2], llm.ToolEnd)
+        assert isinstance(events[2], streaming.ToolEnd)
 
     async def test_finish_flat_usage(self) -> None:
-        events = protocol.parse_stream_part(
+        events = stream_mod._parse_stream_part(
             {
                 "type": "finish",
                 "finishReason": "stop",
@@ -359,14 +362,14 @@ class TestParseStreamPartComplex:
             }
         )
         done = events[0]
-        assert isinstance(done, llm.MessageDone)
+        assert isinstance(done, streaming.MessageDone)
         assert done.finish_reason == "stop"
         assert done.usage is not None
         assert done.usage.input_tokens == 10
         assert done.usage.output_tokens == 20
 
     async def test_finish_v3_nested_usage(self) -> None:
-        events = protocol.parse_stream_part(
+        events = stream_mod._parse_stream_part(
             {
                 "type": "finish",
                 "finishReason": {
@@ -386,7 +389,7 @@ class TestParseStreamPartComplex:
             }
         )
         done = events[0]
-        assert isinstance(done, llm.MessageDone)
+        assert isinstance(done, streaming.MessageDone)
         assert done.finish_reason == "tool-calls"
         assert done.usage is not None
         assert done.usage.input_tokens == 100
@@ -396,7 +399,7 @@ class TestParseStreamPartComplex:
     async def test_file_part(self) -> None:
         """A ``file`` stream part (inline image from Gemini/GPT-5)
         must produce a FileEvent."""
-        events = protocol.parse_stream_part(
+        events = stream_mod._parse_stream_part(
             {
                 "type": "file",
                 "id": "f1",
@@ -405,82 +408,21 @@ class TestParseStreamPartComplex:
             }
         )
         assert len(events) == 1
-        assert isinstance(events[0], llm.FileEvent)
+        assert isinstance(events[0], streaming.FileEvent)
         assert events[0].block_id == "f1"
         assert events[0].media_type == "image/png"
         assert events[0].data == "iVBORw0KGgo="
 
     async def test_file_part_defaults(self) -> None:
         """A minimal ``file`` part uses sensible defaults."""
-        events = protocol.parse_stream_part({"type": "file", "data": "somedata"})
+        events = stream_mod._parse_stream_part({"type": "file", "data": "somedata"})
         assert len(events) == 1
-        assert isinstance(events[0], llm.FileEvent)
+        assert isinstance(events[0], streaming.FileEvent)
         assert events[0].media_type == "application/octet-stream"
 
     async def test_unknown_types_produce_no_events(self) -> None:
         for t in ("stream-start", "raw", "response-metadata", "banana"):
-            assert protocol.parse_stream_part({"type": t}) == []
-
-
-# ---------------------------------------------------------------------------
-# parse_generate_result
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-class TestParseGenerateResult:
-    async def test_text_content(self) -> None:
-        events = protocol.parse_generate_result(
-            {
-                "content": [{"type": "text", "text": "Hello!"}],
-                "finishReason": "stop",
-                "usage": {"prompt_tokens": 4, "completion_tokens": 10},
-            }
-        )
-        # TextStart + TextDelta + TextEnd + MessageDone
-        assert len(events) == 4
-        assert isinstance(events[1], llm.TextDelta)
-        assert events[1].delta == "Hello!"
-        assert isinstance(events[3], llm.MessageDone)
-
-    async def test_tool_call_content(self) -> None:
-        events = protocol.parse_generate_result(
-            {
-                "content": [
-                    {
-                        "type": "tool-call",
-                        "toolCallId": "tc-1",
-                        "toolName": "search",
-                        "input": {"query": "weather"},
-                    }
-                ],
-                "finishReason": "tool-calls",
-            }
-        )
-        assert isinstance(events[0], llm.ToolStart)
-        assert isinstance(events[3], llm.MessageDone)
-        assert events[3].finish_reason == "tool-calls"
-
-    async def test_file_content(self) -> None:
-        """A ``file`` part in non-streaming result produces a FileEvent."""
-        events = protocol.parse_generate_result(
-            {
-                "content": [
-                    {
-                        "type": "file",
-                        "id": "f1",
-                        "mediaType": "image/png",
-                        "data": "iVBORw0KGgo=",
-                    }
-                ],
-                "finishReason": "stop",
-                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
-            }
-        )
-        file_events = [e for e in events if isinstance(e, llm.FileEvent)]
-        assert len(file_events) == 1
-        assert file_events[0].media_type == "image/png"
-        assert isinstance(events[-1], llm.MessageDone)
+            assert stream_mod._parse_stream_part({"type": t}) == []
 
 
 # ---------------------------------------------------------------------------
@@ -491,12 +433,12 @@ class TestParseGenerateResult:
 @pytest.mark.asyncio
 class TestParseUsage:
     async def test_flat_format(self) -> None:
-        usage = protocol._parse_usage({"prompt_tokens": 10, "completion_tokens": 20})
+        usage = stream_mod._parse_usage({"prompt_tokens": 10, "completion_tokens": 20})
         assert usage.input_tokens == 10
         assert usage.output_tokens == 20
 
     async def test_v3_nested_format(self) -> None:
-        usage = protocol._parse_usage(
+        usage = stream_mod._parse_usage(
             {
                 "inputTokens": {
                     "total": 100,
@@ -513,6 +455,6 @@ class TestParseUsage:
         assert usage.reasoning_tokens == 10
 
     async def test_non_dict_returns_empty(self) -> None:
-        usage = protocol._parse_usage("not a dict")
+        usage = stream_mod._parse_usage("not a dict")
         assert usage.input_tokens == 0
         assert usage.output_tokens == 0

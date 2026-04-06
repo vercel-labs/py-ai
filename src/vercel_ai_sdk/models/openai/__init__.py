@@ -1,5 +1,7 @@
-"""OpenAI provider adapter."""
+"""OpenAI provider — adapter for the OpenAI chat completions API."""
 
-from .llm import OpenAIModel, _messages_to_openai
+from .adapter import stream
 
-__all__ = ["OpenAIModel", "_messages_to_openai"]
+__all__ = [
+    "stream",
+]

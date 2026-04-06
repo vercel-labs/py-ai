@@ -1,9 +1,10 @@
-"""Integration tests for ``GatewayImageModel``.
+"""Integration tests for the AI Gateway v3 image generation adapter.
 
-Every test exercises the real ``model.generate()`` method with an injected
-``httpx.MockTransport``, so the full production code path is covered:
+Every test exercises the real ``generate()`` function with a ``Client``
+wired to an ``httpx.MockTransport``, so the full production code path
+is covered:
 
-    model.generate()
+    generate(client, model, messages, ImageParams(...))
       → extract prompt/images from messages
       → httpx POST (mock) to /image-model
       → JSON response parsing
@@ -20,7 +21,13 @@ from typing import Any
 import httpx
 import pytest
 
-from vercel_ai_sdk.models.ai_gateway import GatewayImageModel, errors
+from vercel_ai_sdk.models.ai_gateway import errors
+from vercel_ai_sdk.models.ai_gateway.generate import (
+    ImageParams,
+    generate,
+)
+from vercel_ai_sdk.models.core import client as client_
+from vercel_ai_sdk.models.core import model as model_
 from vercel_ai_sdk.types import messages
 
 # 1x1 transparent PNG (minimal valid PNG for magic-byte detection)
@@ -31,24 +38,25 @@ _PNG_B64 = base64.b64encode(_PNG_HEADER).decode()
 _JPEG_HEADER = bytes([0xFF, 0xD8, 0xFF, 0xE0])
 _JPEG_B64 = base64.b64encode(_JPEG_HEADER).decode()
 
+_IMAGE_MODEL = model_.Model(
+    id="google/imagen-4.0-generate-001",
+    adapter="ai-gateway-v3",
+    provider="ai-gateway",
+    capabilities=("image",),
+)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _image_model(
-    handler: httpx.MockTransport,
-    *,
-    model: str = "google/imagen-4.0-generate-001",
-    api_key: str = "test-key",
-) -> GatewayImageModel:
-    return GatewayImageModel(
-        model=model,
-        api_key=api_key,
-        base_url="https://gw.test/v3/ai",
-        _transport=handler,
-    )
+def _client(
+    handler: httpx.MockTransport, *, api_key: str = "test-key"
+) -> client_.Client:
+    c = client_.Client(base_url="https://gw.test/v3/ai", api_key=api_key)
+    c._http = httpx.AsyncClient(transport=handler)
+    return c
 
 
 def _user(text: str) -> messages.Message:
@@ -66,7 +74,7 @@ def _user(text: str) -> messages.Message:
 class TestGenerate:
     @pytest.mark.asyncio
     async def test_basic_image_generation(self) -> None:
-        """Simple prompt → one PNG image back."""
+        """Simple prompt -> one PNG image back."""
 
         def handler(req: httpx.Request) -> httpx.Response:
             return httpx.Response(
@@ -74,8 +82,8 @@ class TestGenerate:
                 json={"images": [_PNG_B64]},
             )
 
-        model = _image_model(httpx.MockTransport(handler))
-        msg = await model.generate([_user("A sunset over Tokyo")])
+        client = _client(httpx.MockTransport(handler))
+        msg = await generate(client, _IMAGE_MODEL, [_user("A sunset over Tokyo")])
 
         assert msg.role == "assistant"
         assert len(msg.images) == 1
@@ -94,8 +102,13 @@ class TestGenerate:
                 json={"images": [_PNG_B64, _JPEG_B64, _PNG_B64]},
             )
 
-        model = _image_model(httpx.MockTransport(handler))
-        msg = await model.generate([_user("Three cats")], n=3)
+        client = _client(httpx.MockTransport(handler))
+        msg = await generate(
+            client,
+            _IMAGE_MODEL,
+            [_user("Three cats")],
+            params=ImageParams(n=3),
+        )
 
         assert len(msg.images) == 3
         assert msg.images[0].media_type == "image/png"
@@ -115,8 +128,8 @@ class TestGenerate:
                 },
             )
 
-        model = _image_model(httpx.MockTransport(handler))
-        msg = await model.generate([_user("a dog")])
+        client = _client(httpx.MockTransport(handler))
+        msg = await generate(client, _IMAGE_MODEL, [_user("a dog")])
 
         assert msg.usage is not None
         assert msg.usage.input_tokens == 50
@@ -137,12 +150,14 @@ class TestRequest:
             captured.update(dict(req.headers))
             return httpx.Response(200, json={"images": [_PNG_B64]})
 
-        model = _image_model(
-            httpx.MockTransport(handler),
-            model="openai/gpt-image-1",
-            api_key="sk-test",
+        model = model_.Model(
+            id="openai/gpt-image-1",
+            adapter="ai-gateway-v3",
+            provider="ai-gateway",
+            capabilities=("image",),
         )
-        await model.generate([_user("Hi")])
+        client = _client(httpx.MockTransport(handler), api_key="sk-test")
+        await generate(client, model, [_user("Hi")])
 
         assert captured["authorization"] == "Bearer sk-test"
         assert captured["ai-image-model-specification-version"] == "3"
@@ -157,14 +172,18 @@ class TestRequest:
             captured_body.update(json.loads(req.content))
             return httpx.Response(200, json={"images": [_PNG_B64]})
 
-        model = _image_model(httpx.MockTransport(handler))
-        await model.generate(
+        client = _client(httpx.MockTransport(handler))
+        await generate(
+            client,
+            _IMAGE_MODEL,
             [_user("landscape")],
-            n=2,
-            size="1024x1024",
-            aspect_ratio="16:9",
-            seed=42,
-            provider_options={"google": {"style": "vivid"}},
+            params=ImageParams(
+                n=2,
+                size="1024x1024",
+                aspect_ratio="16:9",
+                seed=42,
+                provider_options={"google": {"style": "vivid"}},
+            ),
         )
 
         assert captured_body["prompt"] == "landscape"
@@ -176,7 +195,7 @@ class TestRequest:
 
     @pytest.mark.asyncio
     async def test_input_images_forwarded(self) -> None:
-        """Input images from user messages → files in request body."""
+        """Input images from user messages -> files in request body."""
         captured_body: dict[str, Any] = {}
 
         def handler(req: httpx.Request) -> httpx.Response:
@@ -190,8 +209,8 @@ class TestRequest:
                 messages.FilePart(data=_PNG_B64, media_type="image/png"),
             ],
         )
-        model = _image_model(httpx.MockTransport(handler))
-        await model.generate([user_msg])
+        client = _client(httpx.MockTransport(handler))
+        await generate(client, _IMAGE_MODEL, [user_msg])
 
         assert captured_body["prompt"] == "Edit this"
         assert "files" in captured_body
@@ -207,8 +226,8 @@ class TestRequest:
             captured_url.append(str(req.url))
             return httpx.Response(200, json={"images": [_PNG_B64]})
 
-        model = _image_model(httpx.MockTransport(handler))
-        await model.generate([_user("test")])
+        client = _client(httpx.MockTransport(handler))
+        await generate(client, _IMAGE_MODEL, [_user("test")])
 
         assert captured_url[0] == "https://gw.test/v3/ai/image-model"
 
@@ -233,7 +252,11 @@ class TestErrors:
             )
 
         with pytest.raises(errors.GatewayAuthenticationError):
-            await _image_model(httpx.MockTransport(handler)).generate([_user("test")])
+            await generate(
+                _client(httpx.MockTransport(handler)),
+                _IMAGE_MODEL,
+                [_user("test")],
+            )
 
     @pytest.mark.asyncio
     async def test_429_rate_limit_error(self) -> None:
@@ -249,14 +272,22 @@ class TestErrors:
             )
 
         with pytest.raises(errors.GatewayRateLimitError):
-            await _image_model(httpx.MockTransport(handler)).generate([_user("test")])
+            await generate(
+                _client(httpx.MockTransport(handler)),
+                _IMAGE_MODEL,
+                [_user("test")],
+            )
 
     @pytest.mark.asyncio
     async def test_empty_images_returns_empty_message(self) -> None:
-        """Gateway returns empty images array → message with no parts."""
+        """Gateway returns empty images array -> message with no parts."""
 
         def handler(req: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json={"images": []})
 
-        msg = await _image_model(httpx.MockTransport(handler)).generate([_user("test")])
+        msg = await generate(
+            _client(httpx.MockTransport(handler)),
+            _IMAGE_MODEL,
+            [_user("test")],
+        )
         assert len(msg.images) == 0

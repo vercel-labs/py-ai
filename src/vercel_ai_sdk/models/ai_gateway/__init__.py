@@ -1,14 +1,14 @@
-"""Vercel AI Gateway provider — language, image, and video models."""
+"""AI Gateway provider — adapter for the Vercel AI Gateway v3 protocol."""
 
 from . import errors
-from .image import GatewayImageModel
-from .llm import GatewayModel
-from .video import GatewayEmbeddingModel, GatewayVideoModel
+from .generate import GenerateParams, ImageParams, VideoParams, generate
+from .stream import stream
 
 __all__ = [
-    "GatewayModel",
-    "GatewayImageModel",
-    "GatewayVideoModel",
-    "GatewayEmbeddingModel",
+    "GenerateParams",
+    "ImageParams",
+    "VideoParams",
     "errors",
+    "generate",
+    "stream",
 ]

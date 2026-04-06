@@ -13,26 +13,26 @@ IMAGE_URL = (
 )
 
 
-async def agent(llm: ai.LanguageModel, user_query: str) -> ai.StreamResult:
-    return await ai.stream_loop(
-        llm,
-        messages=[
+async def main() -> None:
+    model = ai.Model(
+        id="anthropic/claude-opus-4.6",
+        adapter="ai-gateway-v3",
+        provider="ai-gateway",
+    )
+
+    my_agent = ai.agent(model=model, tools=[])
+
+    async for msg in my_agent.run(
+        [
             ai.Message(
                 role="user",
                 parts=[
-                    ai.TextPart(text=user_query),
+                    ai.TextPart(text="What's in this image? Be concise."),
                     ai.FilePart.from_url(IMAGE_URL),
                 ],
             )
-        ],
-        tools=[],
-    )
-
-
-async def main() -> None:
-    llm = ai.ai_gateway.GatewayModel(model="anthropic/claude-opus-4.6")
-
-    async for msg in ai.run(agent, llm, "What's in this image? Be concise."):
+        ]
+    ):
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)
     print()

@@ -1,35 +1,31 @@
-from . import adapters, telemetry
+from . import adapters, models, telemetry
 from .adapters import ai_sdk_ui
 from .agents import (
+    Agent,
+    AgentRun,
     Checkpoint,
+    Context,
     Hook,
     HookInfo,
+    LoopFn,
     PendingHookInfo,
     RunResult,
     Runtime,
     StreamResult,
     Tool,
     ToolApproval,
+    ToolSource,
+    agent,
     execute_tool,
     get_checkpoint,
+    get_context,
     hook,
     mcp,
-    run,
     stream,
-    stream_loop,
     stream_step,
     tool,
 )
-from .models import (
-    ImageModel,
-    LanguageModel,
-    MediaModel,
-    MediaResult,
-    VideoModel,
-    ai_gateway,
-    anthropic,
-    openai,
-)
+from .models import Client, Model, ModelCost
 
 # Re-export core types
 from .types import (
@@ -66,35 +62,41 @@ __all__ = [
     "Usage",
     "make_messages",
     # Models (from models/)
-    "LanguageModel",
-    "MediaModel",
-    "MediaResult",
-    "ImageModel",
-    "VideoModel",
-    # Agents (from agents/)
+    "Model",
+    "ModelCost",
+    "Client",
+    "models",
+    # Agents — primary API
+    "Agent",
+    "AgentRun",
+    "agent",
+    "LoopFn",
+    # Agents — composition primitives
+    "stream_step",
+    "execute_tool",
+    "get_checkpoint",
+    "stream",
+    "StreamResult",
+    # Agents — tools
     "Tool",
+    "tool",
+    # Agents — hooks
+    "Hook",
+    "hook",
+    "ToolApproval",
+    # Agents — context
+    "Context",
+    "ToolSource",
+    "get_context",
+    # Agents — runtime (developer API)
     "Runtime",
     "RunResult",
     "HookInfo",
-    "StreamResult",
-    "Hook",
-    "ToolApproval",
+    # Agents — checkpoint
     "Checkpoint",
     "PendingHookInfo",
-    # Functions (from agents/)
-    "tool",
-    "stream",
-    "stream_step",
-    "stream_loop",
-    "execute_tool",
-    "get_checkpoint",
-    "run",
-    "hook",
     # Submodules
     "telemetry",
-    "ai_gateway",
-    "anthropic",
-    "openai",
     "mcp",
     "ai_sdk_ui",
     "adapters",

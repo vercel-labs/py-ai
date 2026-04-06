@@ -54,20 +54,39 @@ class Approval(pydantic.BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Sub-agent branches
+# Model
+# ---------------------------------------------------------------------------
+
+MODEL = ai.Model(
+    id="anthropic/claude-opus-4.6",
+    adapter="ai-gateway-v3",
+    provider="ai-gateway",
+)
+
+
+# ---------------------------------------------------------------------------
+# Sub-agent branches (implemented as custom loops on per-branch agents)
 # ---------------------------------------------------------------------------
 
 
-async def mothership_branch(llm: ai.LanguageModel, query: str) -> ai.StreamResult:
+mothership_agent = ai.agent(
+    model=MODEL,
+    system="You are assistant 1. Use contact_mothership when asked about the future.",
+    tools=[contact_mothership],
+)
+
+
+@mothership_agent.loop
+async def mothership_loop(
+    agent: ai.Agent, messages: list[ai.Message]
+) -> ai.StreamResult:
     """Agent that contacts the mothership, gated by an approval hook."""
-    messages = ai.make_messages(
-        system="You are assistant 1. Use contact_mothership when asked about the future.",
-        user=query,
-    )
-    tools = [contact_mothership]
+    local_messages = list(messages)
 
     while True:
-        result = await ai.stream_step(llm, messages, tools, label="mothership")
+        result = await ai.stream_step(
+            agent.model, local_messages, agent.tools, label="mothership"
+        )
 
         if not result.tool_calls:
             break
@@ -89,21 +108,29 @@ async def mothership_branch(llm: ai.LanguageModel, query: str) -> ai.StreamResul
                 await ai.execute_tool(tc, message=result.last_message)
 
         if result.last_message is not None:
-            messages.append(result.last_message)
+            local_messages.append(result.last_message)
 
     return result
 
 
-async def data_center_branch(llm: ai.LanguageModel, query: str) -> ai.StreamResult:
+data_center_agent = ai.agent(
+    model=MODEL,
+    system="You are assistant 2. Use contact_data_centers when asked about the future.",
+    tools=[contact_data_centers],
+)
+
+
+@data_center_agent.loop
+async def data_center_loop(
+    agent: ai.Agent, messages: list[ai.Message]
+) -> ai.StreamResult:
     """Agent that contacts data centers, gated by an approval hook."""
-    messages = ai.make_messages(
-        system="You are assistant 2. Use contact_data_centers when asked about the future.",
-        user=query,
-    )
-    tools = [contact_data_centers]
+    local_messages = list(messages)
 
     while True:
-        result = await ai.stream_step(llm, messages, tools, label="data_centers")
+        result = await ai.stream_step(
+            agent.model, local_messages, agent.tools, label="data_centers"
+        )
 
         if not result.tool_calls:
             break
@@ -125,34 +152,42 @@ async def data_center_branch(llm: ai.LanguageModel, query: str) -> ai.StreamResu
                 await ai.execute_tool(tc, message=result.last_message)
 
         if result.last_message is not None:
-            messages.append(result.last_message)
+            local_messages.append(result.last_message)
 
     return result
 
 
 # ---------------------------------------------------------------------------
-# Graph — fan-out, hooks, fan-in
+# Orchestrator — fan-out, hooks, fan-in
 # ---------------------------------------------------------------------------
 
 
-async def multiagent(llm: ai.LanguageModel, query: str) -> ai.StreamResult:
+orchestrator = ai.agent(model=MODEL)
+
+
+@orchestrator.loop
+async def multiagent_loop(
+    agent: ai.Agent, messages: list[ai.Message]
+) -> ai.StreamResult:
     """Run two gated agents in parallel, then summarise their results."""
+    query = messages[-1].text
+
+    # Fan out: run both sub-agent loops within this runtime
     r1, r2 = await asyncio.gather(
-        mothership_branch(llm, query),
-        data_center_branch(llm, query),
+        mothership_loop(mothership_agent, ai.make_messages(user=query)),
+        data_center_loop(data_center_agent, ai.make_messages(user=query)),
     )
 
     combined = (
         f"Mothership: {r1.messages[-1].text}\nData centers: {r2.messages[-1].text}"
     )
 
-    return await ai.stream_loop(
-        llm,
-        messages=ai.make_messages(
+    return await ai.stream_step(
+        agent.model,
+        ai.make_messages(
             system="You are assistant 3. Summarise the results from the other assistants.",
             user=combined,
         ),
-        tools=[],
         label="summary",
     )
 
@@ -180,9 +215,7 @@ async def ws_endpoint(websocket: fastapi.WebSocket) -> None:
     await websocket.accept()
     print("Client connected")
 
-    llm = ai.ai_gateway.GatewayModel(model="anthropic/claude-opus-4.6")
-
-    result = ai.run(multiagent, llm, "When will the robots take over?")
+    result = orchestrator.run(ai.make_messages(user="When will the robots take over?"))
 
     # Background task: read hook resolutions from the client.
     async def read_resolutions() -> None:

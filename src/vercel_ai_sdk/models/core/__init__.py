@@ -1,18 +1,13 @@
-"""Core model abstractions — LanguageModel, ImageModel, VideoModel."""
+"""Core types for models."""
 
-from . import media
-from .image import ImageModel
-from .llm import LanguageModel, StreamEvent, StreamHandler
-from .media.base import MediaModel, MediaResult
-from .video import VideoModel
+from .client import Client
+from .model import Model, ModelCost
+from .proto import GenerateFn, StreamFn
 
 __all__ = [
-    "LanguageModel",
-    "StreamEvent",
-    "StreamHandler",
-    "MediaModel",
-    "MediaResult",
-    "ImageModel",
-    "VideoModel",
-    "media",
+    "Client",
+    "GenerateFn",
+    "Model",
+    "ModelCost",
+    "StreamFn",
 ]

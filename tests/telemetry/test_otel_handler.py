@@ -12,7 +12,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 import vercel_ai_sdk as ai
 from vercel_ai_sdk.telemetry.otel import OtelHandler
 
-from ..conftest import MockLLM, text_msg, tool_msg
+from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_msg
 
 
 @pytest.fixture
@@ -35,11 +35,10 @@ async def double(x: int) -> int:
 @pytest.mark.asyncio
 async def test_text_only_spans(spans: InMemorySpanExporter) -> None:
     """Text-only run produces ai.run > ai.stream span hierarchy."""
+    my_agent = ai.agent(model=MOCK_MODEL, tools=[])
 
-    async def root(llm: ai.LanguageModel) -> ai.StreamResult:
-        return await ai.stream_loop(llm, messages=ai.make_messages(user="Hi"), tools=[])
-
-    result = ai.run(root, MockLLM([[text_msg("Hello!")]]))
+    mock_llm([[text_msg("Hello!")]])
+    result = my_agent.run(ai.make_messages(user="Hi"))
     [m async for m in result]
 
     finished = spans.get_finished_spans()
@@ -51,8 +50,11 @@ async def test_text_only_spans(spans: InMemorySpanExporter) -> None:
     stream_span = next(s for s in finished if s.name == "ai.stream")
 
     # ai.stream is a child of ai.run
-    assert stream_span.parent is not None
-    assert stream_span.parent.span_id == run_span.context.span_id
+    stream_parent = stream_span.parent
+    assert stream_parent is not None
+    run_ctx = run_span.context
+    assert run_ctx is not None
+    assert stream_parent.span_id == run_ctx.span_id
 
     # run_id attribute is set
     assert run_span.attributes is not None
@@ -62,19 +64,15 @@ async def test_text_only_spans(spans: InMemorySpanExporter) -> None:
 @pytest.mark.asyncio
 async def test_tool_call_spans(spans: InMemorySpanExporter) -> None:
     """Tool-calling run produces ai.tool spans with correct attributes."""
+    my_agent = ai.agent(model=MOCK_MODEL, tools=[double])
 
-    async def root(llm: ai.LanguageModel) -> ai.StreamResult:
-        return await ai.stream_loop(
-            llm, messages=ai.make_messages(user="Double 5"), tools=[double]
-        )
-
-    llm = MockLLM(
+    mock_llm(
         [
             [tool_msg(tc_id="tc-1", name="double", args='{"x": 5}')],
             [text_msg("10")],
         ]
     )
-    result = ai.run(root, llm)
+    result = my_agent.run(ai.make_messages(user="Double 5"))
     [m async for m in result]
 
     finished = spans.get_finished_spans()
@@ -89,5 +87,8 @@ async def test_tool_call_spans(spans: InMemorySpanExporter) -> None:
 
     # ai.tool is a child of ai.run (tools execute between steps)
     run_span = next(s for s in finished if s.name == "ai.run")
-    assert tool_span.parent is not None
-    assert tool_span.parent.span_id == run_span.context.span_id
+    tool_parent = tool_span.parent
+    assert tool_parent is not None
+    run_ctx = run_span.context
+    assert run_ctx is not None
+    assert tool_parent.span_id == run_ctx.span_id
