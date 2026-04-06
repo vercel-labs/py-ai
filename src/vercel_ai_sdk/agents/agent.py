@@ -32,22 +32,20 @@ import pydantic
 from .. import models
 from ..types import messages as messages_
 from . import checkpoint as checkpoint_
-from . import context as context_
-from . import runtime as runtime_
-from . import streams as streams_
+from . import context, runtime, streams
 from . import tools as tools_
 
 # ── Types ─────────────────────────────────────────────────────────
 
 LoopFn = Callable[
-    ["Agent", list[messages_.Message]], Awaitable[streams_.StreamResult | None]
+    ["Agent", list[messages_.Message]], Awaitable[streams.StreamResult | None]
 ]
 
 
 # ── Composition primitives ────────────────────────────────────────
 
 
-@streams_.stream
+@streams.stream
 async def stream_step(
     model: models.Model,
     messages: list[messages_.Message],
@@ -66,8 +64,7 @@ async def stream_step(
     async for msg in models.stream(
         model, messages, tools=tools, output_type=output_type, **kwargs
     ):
-        msg.label = label
-        yield msg
+        yield msg.model_copy(update={"label": label}) if label is not None else msg
 
 
 # ── AgentRun ──────────────────────────────────────────────────────
@@ -92,26 +89,26 @@ class AgentRun:
         print(result.text)
     """
 
-    def __init__(self, inner: runtime_.RunResult) -> None:
+    def __init__(self, inner: runtime.RunResult) -> None:
         self._inner = inner
 
     async def __aiter__(self) -> AsyncGenerator[messages_.Message]:
         async for msg in self._inner:
             yield msg
 
-    async def collect(self) -> streams_.StreamResult:
+    async def collect(self) -> streams.StreamResult:
         """Drain the stream and return a :class:`StreamResult`."""
         msgs: list[messages_.Message] = []
         async for msg in self._inner:
             msgs.append(msg)
-        return streams_.StreamResult(messages=msgs)
+        return streams.StreamResult(messages=msgs)
 
     @property
     def checkpoint(self) -> checkpoint_.Checkpoint:
         return self._inner.checkpoint
 
     @property
-    def pending_hooks(self) -> dict[str, runtime_.HookInfo]:
+    def pending_hooks(self) -> dict[str, runtime.HookInfo]:
         return self._inner.pending_hooks
 
 
@@ -183,7 +180,7 @@ class Agent:
 
     async def _default_loop(
         self, messages: list[messages_.Message]
-    ) -> streams_.StreamResult:
+    ) -> streams.StreamResult:
         """Built-in loop: stream LLM, execute tools, repeat."""
         local_messages = list(messages)
 
@@ -194,15 +191,19 @@ class Agent:
                 return result
 
             last_msg = result.last_message
-            if last_msg is not None:
-                local_messages.append(last_msg)
+            if last_msg is None:
+                return result
 
-            await asyncio.gather(
+            updated_parts = await asyncio.gather(
                 *(
-                    runtime_.execute_tool(tc, message=last_msg)
+                    runtime.execute_tool(tc, message=last_msg)
                     for tc in result.tool_calls
                 )
             )
+            updated_msg = last_msg
+            for updated_tc in updated_parts:
+                updated_msg = updated_msg.replace(updated_tc)
+            local_messages.append(updated_msg)
 
     def run(
         self,
@@ -230,15 +231,15 @@ class Agent:
             )
         full_messages.extend(messages)
 
-        ctx = context_.Context(tools=self.tools)
+        ctx = context.Context(tools=self.tools)
 
-        # Build the graph function that runtime_.run() expects
-        async def _graph() -> streams_.StreamResult | None:
+        # Build the graph function that runtime.run() expects
+        async def _graph() -> streams.StreamResult | None:
             if self._custom_loop:
                 return await self._custom_loop(self, full_messages)
             return await self._default_loop(full_messages)
 
-        inner = runtime_.run(
+        inner = runtime.run(
             _graph,
             checkpoint=checkpoint,
             context=ctx,

@@ -2,8 +2,8 @@
 
 import asyncio
 
+import vercel_ai_sdk as ai
 from vercel_ai_sdk import models as m
-from vercel_ai_sdk.types import messages as messages_
 
 model = m.Model(
     id="anthropic/claude-sonnet-4",
@@ -11,12 +11,7 @@ model = m.Model(
     provider="ai-gateway",
 )
 
-messages = [
-    messages_.Message(
-        role="user",
-        parts=[messages_.TextPart(text="What is 2 + 2?")],
-    ),
-]
+messages = [ai.user_message("What is 2 + 2?")]
 
 
 async def main() -> None:

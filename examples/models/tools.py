@@ -2,8 +2,8 @@
 
 import asyncio
 
+import vercel_ai_sdk as ai
 from vercel_ai_sdk import models as m
-from vercel_ai_sdk.types import messages as messages_
 from vercel_ai_sdk.types import tools as tools_
 
 model = m.Model(
@@ -26,12 +26,7 @@ get_weather = tools_.ToolSchema(
     return_type=str,
 )
 
-messages = [
-    messages_.Message(
-        role="user",
-        parts=[messages_.TextPart(text="What's the weather in Tokyo?")],
-    ),
-]
+messages = [ai.user_message("What's the weather in Tokyo?")]
 
 
 async def main() -> None:

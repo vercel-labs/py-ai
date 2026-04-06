@@ -4,8 +4,8 @@ import asyncio
 import base64
 import pathlib
 
+import vercel_ai_sdk as ai
 from vercel_ai_sdk import models as m
-from vercel_ai_sdk.types import messages as messages_
 
 model = m.Model(
     id="google/veo-3.0-generate-001",
@@ -15,18 +15,11 @@ model = m.Model(
 )
 
 messages = [
-    messages_.Message(
-        role="user",
-        parts=[
-            messages_.TextPart(
-                text=(
-                    "An anime girl with long pink hair and a flowing white "
-                    "dress stands on a hilltop at golden hour. A warm breeze "
-                    "lifts her hair as she releases a paper lantern into the "
-                    "sunset sky. Soft cel-shaded anime art style, warm palette."
-                )
-            ),
-        ],
+    ai.user_message(
+        "An anime girl with long pink hair and a flowing white "
+        "dress stands on a hilltop at golden hour. A warm breeze "
+        "lifts her hair as she releases a paper lantern into the "
+        "sunset sky. Soft cel-shaded anime art style, warm palette."
     ),
 ]
 

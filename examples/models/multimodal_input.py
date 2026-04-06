@@ -3,8 +3,8 @@
 import asyncio
 import pathlib
 
+import vercel_ai_sdk as ai
 from vercel_ai_sdk import models as m
-from vercel_ai_sdk.types import messages as messages_
 
 model = m.Model(
     id="anthropic/claude-sonnet-4",
@@ -17,12 +17,9 @@ image_path = pathlib.Path("sample_image.jpg")
 image_data = image_path.read_bytes()
 
 messages = [
-    messages_.Message(
-        role="user",
-        parts=[
-            messages_.TextPart(text="Describe this image in detail."),
-            messages_.FilePart(data=image_data, media_type="image/jpeg"),
-        ],
+    ai.user_message(
+        "Describe this image in detail.",
+        ai.file_part(image_data, media_type="image/jpeg"),
     ),
 ]
 

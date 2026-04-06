@@ -3,9 +3,9 @@
 import asyncio
 import os
 
+import vercel_ai_sdk as ai
 from vercel_ai_sdk import models as m
 from vercel_ai_sdk.models import ai_gateway as ai_gateway_v3
-from vercel_ai_sdk.types import messages as messages_
 
 model = m.Model(
     id="anthropic/claude-sonnet-4",
@@ -18,12 +18,7 @@ client = m.Client(
     api_key=os.environ["AI_GATEWAY_API_KEY"],
 )
 
-messages = [
-    messages_.Message(
-        role="user",
-        parts=[messages_.TextPart(text="Say hello in three languages.")],
-    ),
-]
+messages = [ai.user_message("Say hello in three languages.")]
 
 
 async def main() -> None:

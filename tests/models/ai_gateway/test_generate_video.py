@@ -130,7 +130,7 @@ class TestGenerate:
         client = _client(httpx.MockTransport(handler))
 
         with patch(
-            "vercel_ai_sdk.models.core.helpers.media.download",
+            "vercel_ai_sdk.models.core.helpers.files.download",
             new_callable=AsyncMock,
             return_value=(_MP4_HEADER, "video/mp4"),
         ) as mock_dl:

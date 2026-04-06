@@ -12,12 +12,12 @@ from typing import Any
 import httpx
 import pydantic
 
+from ...types import media
 from ...types import messages as messages_
 from ..core import client as client_
 from ..core import model as model_
-from ..core.helpers import media as media_
-from . import _common
-from . import errors as errors_
+from ..core.helpers import files
+from . import _common, errors
 
 # ---------------------------------------------------------------------------
 # Parameter types
@@ -90,7 +90,7 @@ async def _generate_image(
 
     response = await client.http.post(url, json=body, headers=headers)
     if response.status_code >= 400:
-        raise errors_.create_gateway_error(
+        raise errors.create_gateway_error(
             response_body=response.text,
             status_code=response.status_code,
             api_key_provided=bool(client.api_key),
@@ -106,12 +106,12 @@ async def _generate_image(
             output_tokens=usage_data.get("outputTokens") or 0,
         )
 
-    files: list[messages_.Part] = []
+    parts: list[messages_.Part] = []
     for img_b64 in raw_images:
-        media_type = media_.detect_image_media_type(img_b64) or "image/png"
-        files.append(messages_.FilePart(data=img_b64, media_type=media_type))
+        media_type = media.detect_image_media_type(img_b64) or "image/png"
+        parts.append(messages_.FilePart(data=img_b64, media_type=media_type))
 
-    return messages_.Message(role="assistant", parts=files, usage=usage)
+    return messages_.Message(role="assistant", parts=parts, usage=usage)
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +149,7 @@ async def _generate_video(
     ) as response:
         if response.status_code >= 400:
             await response.aread()
-            raise errors_.create_gateway_error(
+            raise errors.create_gateway_error(
                 response_body=response.text,
                 status_code=response.status_code,
                 api_key_provided=bool(client.api_key),
@@ -162,34 +162,34 @@ async def _generate_video(
             break
 
     if not event_data:
-        raise errors_.GatewayResponseError(
+        raise errors.GatewayResponseError(
             "SSE stream ended without any data events",
         )
 
     if event_data.get("type") == "error":
-        raise errors_.GatewayInvalidRequestError(
+        raise errors.GatewayInvalidRequestError(
             message=event_data.get("message", "unknown error"),
             status_code=event_data.get("statusCode", 400),
         )
 
     raw_videos: list[dict[str, Any]] = event_data.get("videos", [])
-    files: list[messages_.Part] = []
+    parts: list[messages_.Part] = []
     for video_data in raw_videos:
         vtype = video_data.get("type", "base64")
         media_type = video_data.get("mediaType", "video/mp4")
 
         if vtype == "url":
-            downloaded_bytes, content_type = await media_.download(video_data["url"])
+            downloaded_bytes, content_type = await files.download(video_data["url"])
             if content_type:
                 media_type = content_type
-            files.append(
+            parts.append(
                 messages_.FilePart(data=downloaded_bytes, media_type=media_type)
             )
         else:
             raw_data = video_data.get("data", "")
-            files.append(messages_.FilePart(data=raw_data, media_type=media_type))
+            parts.append(messages_.FilePart(data=raw_data, media_type=media_type))
 
-    return messages_.Message(role="assistant", parts=files)
+    return messages_.Message(role="assistant", parts=parts)
 
 
 # ---------------------------------------------------------------------------

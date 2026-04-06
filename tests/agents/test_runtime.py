@@ -187,12 +187,12 @@ async def test_execute_tool_injects_runtime() -> None:
     assert isinstance(received_rt, Runtime)
 
 
-# -- execute_tool: result updates ToolPart in message ----------------------
+# -- execute_tool: returns updated ToolPart --------------------------------
 
 
 @pytest.mark.asyncio
-async def test_execute_tool_updates_message() -> None:
-    """After execute_tool, the ToolPart in the message has status=result."""
+async def test_execute_tool_returns_updated_part() -> None:
+    """execute_tool returns an updated ToolPart; the original is unchanged."""
     my_agent = ai.agent(model=MOCK_MODEL, tools=[double])
 
     @my_agent.loop
@@ -200,12 +200,14 @@ async def test_execute_tool_updates_message() -> None:
         result = await ai.stream_step(agent.model, msgs, agent.tools)
         if result.tool_calls:
             msg = result.last_message
-            for tc in result.tool_calls:
-                await ai.execute_tool(tc, message=msg)
-            # Verify the tool part was mutated
             assert msg is not None
-            assert msg.tool_calls[0].status == "result"
-            assert msg.tool_calls[0].result == 10
+            for tc in result.tool_calls:
+                updated_tc = await ai.execute_tool(tc, message=msg)
+                # Returned part has the result
+                assert updated_tc.status == "result"
+                assert updated_tc.result == 10
+            # Original message is unchanged (immutable)
+            assert msg.tool_calls[0].status == "pending"
 
     call = [tool_msg(tc_id="tc-1", name="double", args='{"x": 5}')]
     mock_llm([call])

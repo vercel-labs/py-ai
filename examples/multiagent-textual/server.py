@@ -91,6 +91,9 @@ async def mothership_loop(
         if not result.tool_calls:
             break
 
+        last_msg = result.last_message
+        assert last_msg is not None
+
         for tc in result.tool_calls:
             if tc.tool_name == "contact_mothership":
                 # TODO: mypy doesn't support class decorators that change the
@@ -101,14 +104,14 @@ async def mothership_loop(
                     metadata={"branch": "mothership", "tool": tc.tool_name},
                 )
                 if approval.granted:
-                    await ai.execute_tool(tc, message=result.last_message)
+                    updated_tc = await ai.execute_tool(tc, message=last_msg)
                 else:
-                    tc.set_error(f"Denied: {approval.reason}")
+                    updated_tc = tc.with_error(f"Denied: {approval.reason}")
             else:
-                await ai.execute_tool(tc, message=result.last_message)
+                updated_tc = await ai.execute_tool(tc, message=last_msg)
+            last_msg = last_msg.replace(updated_tc)
 
-        if result.last_message is not None:
-            local_messages.append(result.last_message)
+        local_messages.append(last_msg)
 
     return result
 
@@ -135,6 +138,9 @@ async def data_center_loop(
         if not result.tool_calls:
             break
 
+        last_msg = result.last_message
+        assert last_msg is not None
+
         for tc in result.tool_calls:
             if tc.tool_name == "contact_data_centers":
                 # TODO: mypy doesn't support class decorators that change the
@@ -145,14 +151,14 @@ async def data_center_loop(
                     metadata={"branch": "data_centers", "tool": tc.tool_name},
                 )
                 if approval.granted:
-                    await ai.execute_tool(tc, message=result.last_message)
+                    updated_tc = await ai.execute_tool(tc, message=last_msg)
                 else:
-                    tc.set_error(f"Access denied: {approval.reason}")
+                    updated_tc = tc.with_error(f"Access denied: {approval.reason}")
             else:
-                await ai.execute_tool(tc, message=result.last_message)
+                updated_tc = await ai.execute_tool(tc, message=last_msg)
+            last_msg = last_msg.replace(updated_tc)
 
-        if result.last_message is not None:
-            local_messages.append(result.last_message)
+        local_messages.append(last_msg)
 
     return result
 
@@ -174,8 +180,8 @@ async def multiagent_loop(
 
     # Fan out: run both sub-agent loops within this runtime
     r1, r2 = await asyncio.gather(
-        mothership_loop(mothership_agent, ai.make_messages(user=query)),
-        data_center_loop(data_center_agent, ai.make_messages(user=query)),
+        mothership_loop(mothership_agent, [ai.user_message(query)]),
+        data_center_loop(data_center_agent, [ai.user_message(query)]),
     )
 
     combined = (
@@ -184,10 +190,12 @@ async def multiagent_loop(
 
     return await ai.stream_step(
         agent.model,
-        ai.make_messages(
-            system="You are assistant 3. Summarise the results from the other assistants.",
-            user=combined,
-        ),
+        [
+            ai.system_message(
+                "You are assistant 3. Summarise the results from the other assistants."
+            ),
+            ai.user_message(combined),
+        ],
         label="summary",
     )
 
@@ -215,7 +223,7 @@ async def ws_endpoint(websocket: fastapi.WebSocket) -> None:
     await websocket.accept()
     print("Client connected")
 
-    result = orchestrator.run(ai.make_messages(user="When will the robots take over?"))
+    result = orchestrator.run([ai.user_message("When will the robots take over?")])
 
     # Background task: read hook resolutions from the client.
     async def read_resolutions() -> None:

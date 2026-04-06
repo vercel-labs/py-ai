@@ -16,6 +16,7 @@ from .messages import (
     ToolDelta,
     ToolPart,
     Usage,
+    generate_id,
     make_messages,
 )
 from .tools import ToolLike, ToolSchema
@@ -34,5 +35,6 @@ __all__ = [
     "ToolLike",
     "ToolSchema",
     "Usage",
+    "generate_id",
     "make_messages",
 ]

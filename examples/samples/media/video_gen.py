@@ -23,16 +23,16 @@ async def main() -> None:
     # Generate a short anime-style video clip
     print("Generating video (this may take a minute or two)...")
     msg = await model.generate(
-        ai.make_messages(
-            user=(
+        [
+            ai.user_message(
                 "An anime girl with long pink hair and a flowing white "
                 "dress stands on a hilltop at golden hour. A warm breeze "
                 "lifts her hair as she releases a paper lantern into the "
                 "sunset sky. The camera slowly pulls back to reveal dozens "
                 "of lanterns rising over a countryside village below. "
                 "Soft cel-shaded anime art style, warm palette."
-            ),
-        ),
+            )
+        ],
         aspect_ratio="16:9",
         duration=8,
     )

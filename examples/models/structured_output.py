@@ -4,8 +4,8 @@ import asyncio
 
 import pydantic
 
+import vercel_ai_sdk as ai
 from vercel_ai_sdk import models as m
-from vercel_ai_sdk.types import messages as messages_
 
 model = m.Model(
     id="anthropic/claude-sonnet-4",
@@ -21,12 +21,7 @@ class Recipe(pydantic.BaseModel):
     prep_time_minutes: int
 
 
-messages = [
-    messages_.Message(
-        role="user",
-        parts=[messages_.TextPart(text="Give me a simple pancake recipe.")],
-    ),
-]
+messages = [ai.user_message("Give me a simple pancake recipe.")]
 
 
 async def main() -> None:

@@ -13,12 +13,12 @@ from typing import Any
 import anthropic
 import pydantic
 
+from ...types import media
 from ...types import messages as messages_
 from ...types import tools as tools_
 from ..core import client as client_
 from ..core import model as model_
-from ..core.helpers import media as media_
-from ..core.helpers import streaming as streaming_
+from ..core.helpers import streaming
 
 # ---------------------------------------------------------------------------
 # Message / tool conversion — internal types → Anthropic wire format
@@ -53,7 +53,7 @@ def _file_part_to_anthropic(
 
     if mt.startswith("image/"):
         media_type = "image/jpeg" if mt == "image/*" else mt
-        if isinstance(part.data, str) and media_.is_url(part.data):
+        if isinstance(part.data, str) and media.is_url(part.data):
             return {
                 "type": "image",
                 "source": {"type": "url", "url": part.data},
@@ -63,12 +63,12 @@ def _file_part_to_anthropic(
             "source": {
                 "type": "base64",
                 "media_type": media_type,
-                "data": media_.data_to_base64(part.data),
+                "data": media.data_to_base64(part.data),
             },
         }
 
     if mt == "application/pdf":
-        if isinstance(part.data, str) and media_.is_url(part.data):
+        if isinstance(part.data, str) and media.is_url(part.data):
             return {
                 "type": "document",
                 "source": {"type": "url", "url": part.data},
@@ -78,14 +78,14 @@ def _file_part_to_anthropic(
             "source": {
                 "type": "base64",
                 "media_type": "application/pdf",
-                "data": media_.data_to_base64(part.data),
+                "data": media.data_to_base64(part.data),
             },
         }
 
     if mt == "text/plain":
         if isinstance(part.data, bytes):
             text_data = part.data.decode("utf-8")
-        elif media_.is_url(part.data):
+        elif media.is_url(part.data):
             return {
                 "type": "document",
                 "source": {"type": "url", "url": part.data},
@@ -284,7 +284,7 @@ async def stream(
     if output_type is not None:
         api_kwargs["output_format"] = output_type
 
-    handler = streaming_.StreamHandler()
+    handler = streaming.StreamHandler()
 
     block_types: dict[int, str] = {}
     tool_ids: dict[int, str] = {}
@@ -304,16 +304,16 @@ async def stream(
                         match block.type:
                             case "text":
                                 yield handler.handle_event(
-                                    streaming_.TextStart(block_id=str(idx))
+                                    streaming.TextStart(block_id=str(idx))
                                 )
                             case "thinking":
                                 yield handler.handle_event(
-                                    streaming_.ReasoningStart(block_id=str(idx))
+                                    streaming.ReasoningStart(block_id=str(idx))
                                 )
                             case "tool_use":
                                 tool_ids[idx] = block.id
                                 yield handler.handle_event(
-                                    streaming_.ToolStart(
+                                    streaming.ToolStart(
                                         tool_call_id=block.id,
                                         tool_name=block.name,
                                     )
@@ -326,14 +326,14 @@ async def stream(
                         match delta.type:
                             case "text_delta":
                                 yield handler.handle_event(
-                                    streaming_.TextDelta(
+                                    streaming.TextDelta(
                                         block_id=str(idx),
                                         delta=delta.text,
                                     )
                                 )
                             case "thinking_delta":
                                 yield handler.handle_event(
-                                    streaming_.ReasoningDelta(
+                                    streaming.ReasoningDelta(
                                         block_id=str(idx),
                                         delta=delta.thinking,
                                     )
@@ -346,7 +346,7 @@ async def stream(
                                 tool_id = tool_ids.get(idx)
                                 if tool_id:
                                     yield handler.handle_event(
-                                        streaming_.ToolArgsDelta(
+                                        streaming.ToolArgsDelta(
                                             tool_call_id=tool_id,
                                             delta=delta.partial_json,
                                         )
@@ -357,11 +357,11 @@ async def stream(
                         match block_types.get(idx):
                             case "text":
                                 yield handler.handle_event(
-                                    streaming_.TextEnd(block_id=str(idx))
+                                    streaming.TextEnd(block_id=str(idx))
                                 )
                             case "thinking":
                                 yield handler.handle_event(
-                                    streaming_.ReasoningEnd(
+                                    streaming.ReasoningEnd(
                                         block_id=str(idx),
                                         signature=signature_buffer.get(idx),
                                     )
@@ -370,7 +370,7 @@ async def stream(
                                 tool_id = tool_ids.get(idx)
                                 if tool_id:
                                     yield handler.handle_event(
-                                        streaming_.ToolEnd(tool_call_id=tool_id)
+                                        streaming.ToolEnd(tool_call_id=tool_id)
                                     )
 
             snapshot = sdk_stream.current_message_snapshot
@@ -384,6 +384,6 @@ async def stream(
                 ),
                 raw=sdk_usage.model_dump(exclude_none=True) or None,
             )
-            yield handler.handle_event(streaming_.MessageDone(usage=usage))
+            yield handler.handle_event(streaming.MessageDone(usage=usage))
     finally:
         await sdk_client.close()

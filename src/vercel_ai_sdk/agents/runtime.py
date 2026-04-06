@@ -10,14 +10,11 @@ from typing import Any, get_type_hints
 
 import pydantic
 
-from ..telemetry import events as telemetry_
+from ..telemetry import events as telemetry
 from ..types import messages as messages_
 from . import checkpoint as checkpoint_
 from . import context as context_
-from . import hooks as hooks_
-from . import mcp
-from . import streams as streams_
-from . import tools as tools_
+from . import hooks, mcp, streams, tools
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +57,7 @@ class EventLog:
     def step_index(self) -> int:
         return self._step_index
 
-    def try_replay_step(self) -> streams_.StreamResult | None:
+    def try_replay_step(self) -> streams.StreamResult | None:
         if self._step_index < len(self._checkpoint.steps):
             event = self._checkpoint.steps[self._step_index]
             self._step_index += 1
@@ -68,7 +65,7 @@ class EventLog:
             return event.to_stream_result()
         return None
 
-    def record_step(self, result: streams_.StreamResult) -> None:
+    def record_step(self, result: streams.StreamResult) -> None:
         event = checkpoint_.StepEvent(
             index=self._step_index,
             messages=list(result.messages),
@@ -156,7 +153,7 @@ class LoopExecutor:
 
     def __init__(self) -> None:
         self._step_queue: asyncio.Queue[
-            tuple[streams_.Stream, asyncio.Future[streams_.StreamResult]]
+            tuple[streams.Stream, asyncio.Future[streams.StreamResult]]
             | HookSuspension
             | LoopExecutor._Sentinel
         ] = asyncio.Queue()
@@ -172,7 +169,7 @@ class LoopExecutor:
     # ── Producers (called by graph code) ──────────────────────
 
     async def put_step(
-        self, step_fn: streams_.Stream, future: asyncio.Future[streams_.StreamResult]
+        self, step_fn: streams.Stream, future: asyncio.Future[streams.StreamResult]
     ) -> None:
         await self._step_queue.put((step_fn, future))
 
@@ -190,7 +187,7 @@ class LoopExecutor:
     async def next(
         self, timeout: float = 0.1
     ) -> (
-        tuple[streams_.Stream, asyncio.Future[streams_.StreamResult]]
+        tuple[streams.Stream, asyncio.Future[streams.StreamResult]]
         | HookSuspension
         | None
     ):
@@ -286,12 +283,12 @@ def _find_runtime_param(fn: Callable[..., Any]) -> str | None:
 async def execute_tool(
     tool_call: messages_.ToolPart,
     message: messages_.Message | None = None,
-) -> Any:
+) -> messages_.ToolPart:
     """Execute a single tool call with replay support.
 
     Looks up the tool by name — first from the active Context (if any),
-    then from the global registry.  Executes it and updates the ToolPart
-    (and parent Message) with the result.  Emits the updated message to
+    then from the global registry.  Returns an updated (immutable)
+    ToolPart with the result filled in.  Emits the updated message to
     the LoopExecutor queue so the UI sees the transition from
     status="pending" to status="result" (or "error").
 
@@ -300,63 +297,61 @@ async def execute_tool(
     """
     rt = _runtime.get(None)
 
-    # Replay: return cached result if available
+    # Replay: return updated part from cache
     if rt:
         cached = rt.log.try_replay_tool(tool_call.tool_call_id)
         if cached is not None:
             if cached.status == "error":
-                tool_call.set_error(cached.result)
-            else:
-                tool_call.set_result(cached.result)
-            return cached.result
+                return tool_call.with_error(cached.result)
+            return tool_call.with_result(cached.result)
 
-    telemetry_.handle(
-        telemetry_.ToolCallStartEvent(
+    telemetry.handle(
+        telemetry.ToolCallStartEvent(
             tool_name=tool_call.tool_name,
             tool_call_id=tool_call.tool_call_id,
             args=tool_call.tool_args,
         )
     )
-    t0 = telemetry_.time_ms()
+    t0 = telemetry.time_ms()
 
     # Fresh execution — resolve from Context first, then global registry
-    tool: tools_.Tool[..., Any] | None = None
+    tool: tools.Tool[..., Any] | None = None
     ctx = context_._context.get(None)
     if ctx is not None:
         tool = ctx.get_tool(tool_call.tool_name)
     if tool is None:
-        tool = tools_.get_tool(tool_call.tool_name)
+        tool = tools.get_tool(tool_call.tool_name)
     if tool is None:
         raise ValueError(f"Tool not found in registry: {tool_call.tool_name}")
 
     error_str: str | None = None
     try:
         result = await tool.validate_and_call(tool_call.tool_args, rt)
-        tool_call.set_result(result)
+        updated = tool_call.with_result(result)
     except (json.JSONDecodeError, pydantic.ValidationError) as exc:
         result = f"{type(exc).__name__}: {exc}"
         error_str = result
-        tool_call.set_error(result)
+        updated = tool_call.with_error(result)
 
-    telemetry_.handle(
-        telemetry_.ToolCallFinishEvent(
+    telemetry.handle(
+        telemetry.ToolCallFinishEvent(
             tool_name=tool_call.tool_name,
             tool_call_id=tool_call.tool_call_id,
             result=result,
             error=error_str,
-            duration_ms=telemetry_.time_ms() - t0,
+            duration_ms=telemetry.time_ms() - t0,
         )
     )
 
     # Record for checkpoint
     if rt:
-        rt.log.record_tool(tool_call.tool_call_id, result, status=tool_call.status)
+        rt.log.record_tool(tool_call.tool_call_id, result, status=updated.status)
 
     # Emit updated message so UI sees status change
     if rt and message:
-        await rt.executor.put_message(message.model_copy(deep=True))
+        await rt.executor.put_message(message.replace(updated))
 
-    return result
+    return updated
 
 
 # ── RunResult ─────────────────────────────────────────────────────
@@ -450,7 +445,7 @@ def run(
     if checkpoint and checkpoint.pending_hooks:
         pending_labels = [ph.label for ph in checkpoint.pending_hooks]
         has_resolution = any(
-            label in hooks_._pending_resolutions for label in pending_labels
+            label in hooks._pending_resolutions for label in pending_labels
         )
         if not has_resolution:
             logger.info(
@@ -474,9 +469,9 @@ def run(
         ctx = context or context_.Context()
         token_context = context_._context.set(ctx)
 
-        token_run_id = telemetry_.start_run()
+        token_run_id = telemetry.start_run()
 
-        telemetry_.handle(telemetry_.RunStartEvent())
+        telemetry.handle(telemetry.RunStartEvent())
 
         mcp_pool: dict[str, mcp.client._Connection] = {}
         mcp_token = mcp.client._pool.set(mcp_pool)
@@ -542,8 +537,8 @@ def run(
                     # ── Regular step ───────────────────────────
                     step_fn, future = item
 
-                    telemetry_.handle(
-                        telemetry_.StepStartEvent(
+                    telemetry.handle(
+                        telemetry.StepStartEvent(
                             step_index=rt.log.step_index,
                         )
                     )
@@ -554,18 +549,17 @@ def run(
                     result_messages: list[messages_.Message] = []
 
                     async for msg in step_fn():
-                        msg_copy = msg.model_copy(deep=True)
-                        yield msg_copy
+                        yield msg
                         result_messages.append(msg)
 
                         for tool_msg in rt.executor.drain_messages():
                             yield tool_msg
 
-                    step_result = streams_.StreamResult(messages=result_messages)
+                    step_result = streams.StreamResult(messages=result_messages)
                     future.set_result(step_result)
 
-                    telemetry_.handle(
-                        telemetry_.StepFinishEvent(
+                    telemetry.handle(
+                        telemetry.StepFinishEvent(
                             step_index=rt.log.step_index,
                             result=step_result,
                         )
@@ -589,15 +583,15 @@ def run(
             raise
 
         finally:
-            telemetry_.handle(
-                telemetry_.RunFinishEvent(
+            telemetry.handle(
+                telemetry.RunFinishEvent(
                     usage=total_usage,
                     error=run_error,
                 )
             )
-            telemetry_.end_run(token_run_id)
+            telemetry.end_run(token_run_id)
 
-            hooks_._cleanup_run(rt.executor._hook_labels)
+            hooks._cleanup_run(rt.executor._hook_labels)
 
             if mcp_token is not None:
                 await mcp.client.close_connections()

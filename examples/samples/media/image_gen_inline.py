@@ -39,7 +39,7 @@ async def main() -> None:
         tools=[],
     )
 
-    async for msg in my_agent.run(ai.make_messages(user=prompt)):
+    async for msg in my_agent.run([ai.user_message(prompt)]):
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)
 
