@@ -66,8 +66,7 @@ async def stream_step(
     async for msg in models.stream(
         model, messages, tools=tools, output_type=output_type, **kwargs
     ):
-        msg.label = label
-        yield msg
+        yield msg.model_copy(update={"label": label}) if label is not None else msg
 
 
 # ── AgentRun ──────────────────────────────────────────────────────
@@ -194,15 +193,19 @@ class Agent:
                 return result
 
             last_msg = result.last_message
-            if last_msg is not None:
-                local_messages.append(last_msg)
+            if last_msg is None:
+                return result
 
-            await asyncio.gather(
+            updated_parts = await asyncio.gather(
                 *(
                     runtime_.execute_tool(tc, message=last_msg)
                     for tc in result.tool_calls
                 )
             )
+            updated_msg = last_msg
+            for updated_tc in updated_parts:
+                updated_msg = updated_msg.replace(updated_tc)
+            local_messages.append(updated_msg)
 
     def run(
         self,

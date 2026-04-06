@@ -492,7 +492,7 @@ def to_messages(
             )
 
         # The UI sends one assistant message per conversation turn, but a
-        # single turn may span multiple stream_loop iterations (e.g.
+        # single turn may span multiple default-loop iterations (e.g.
         # [text, tool(done), text, tool(done), text]).  LLM APIs expect
         # one message per iteration, so split at completed-tool boundaries.
         if ui_msg.role == "assistant":
@@ -525,7 +525,7 @@ def _split_assistant_parts(
 ) -> list[messages_.Message]:
     """Split assistant parts at completed-tool → non-tool boundaries.
 
-    Returns one ``Message`` per ``stream_loop`` iteration so that LLM
+    Returns one ``Message`` per default-loop iteration so that LLM
     adapters receive correctly-shaped single-iteration messages.
     """
     messages: list[messages_.Message] = []

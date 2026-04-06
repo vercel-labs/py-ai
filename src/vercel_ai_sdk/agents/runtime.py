@@ -286,12 +286,12 @@ def _find_runtime_param(fn: Callable[..., Any]) -> str | None:
 async def execute_tool(
     tool_call: messages_.ToolPart,
     message: messages_.Message | None = None,
-) -> Any:
+) -> messages_.ToolPart:
     """Execute a single tool call with replay support.
 
     Looks up the tool by name — first from the active Context (if any),
-    then from the global registry.  Executes it and updates the ToolPart
-    (and parent Message) with the result.  Emits the updated message to
+    then from the global registry.  Returns an updated (immutable)
+    ToolPart with the result filled in.  Emits the updated message to
     the LoopExecutor queue so the UI sees the transition from
     status="pending" to status="result" (or "error").
 
@@ -300,15 +300,13 @@ async def execute_tool(
     """
     rt = _runtime.get(None)
 
-    # Replay: return cached result if available
+    # Replay: return updated part from cache
     if rt:
         cached = rt.log.try_replay_tool(tool_call.tool_call_id)
         if cached is not None:
             if cached.status == "error":
-                tool_call.set_error(cached.result)
-            else:
-                tool_call.set_result(cached.result)
-            return cached.result
+                return tool_call.with_error(cached.result)
+            return tool_call.with_result(cached.result)
 
     telemetry_.handle(
         telemetry_.ToolCallStartEvent(
@@ -332,11 +330,11 @@ async def execute_tool(
     error_str: str | None = None
     try:
         result = await tool.validate_and_call(tool_call.tool_args, rt)
-        tool_call.set_result(result)
+        updated = tool_call.with_result(result)
     except (json.JSONDecodeError, pydantic.ValidationError) as exc:
         result = f"{type(exc).__name__}: {exc}"
         error_str = result
-        tool_call.set_error(result)
+        updated = tool_call.with_error(result)
 
     telemetry_.handle(
         telemetry_.ToolCallFinishEvent(
@@ -350,13 +348,13 @@ async def execute_tool(
 
     # Record for checkpoint
     if rt:
-        rt.log.record_tool(tool_call.tool_call_id, result, status=tool_call.status)
+        rt.log.record_tool(tool_call.tool_call_id, result, status=updated.status)
 
     # Emit updated message so UI sees status change
     if rt and message:
-        await rt.executor.put_message(message.model_copy(deep=True))
+        await rt.executor.put_message(message.replace(updated))
 
-    return result
+    return updated
 
 
 # ── RunResult ─────────────────────────────────────────────────────
@@ -554,8 +552,7 @@ def run(
                     result_messages: list[messages_.Message] = []
 
                     async for msg in step_fn():
-                        msg_copy = msg.model_copy(deep=True)
-                        yield msg_copy
+                        yield msg
                         result_messages.append(msg)
 
                         for tool_msg in rt.executor.drain_messages():

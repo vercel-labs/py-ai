@@ -27,11 +27,12 @@ TOOLS: list[ai.Tool[..., Any]] = [talk_to_mothership]
 
 async def _execute_with_approval(
     tc: ai.ToolPart, message: ai.Message | None = None
-) -> None:
+) -> ai.ToolPart:
     """Execute a tool call only after the user grants approval.
 
     Creates a ToolApproval hook that suspends execution until the
     frontend responds with an approve/reject decision.
+    Returns the updated (immutable) ToolPart with the result.
     """
     approval = await ai.ToolApproval.create(  # type: ignore[attr-defined]
         f"approve_{tc.tool_call_id}",
@@ -39,9 +40,8 @@ async def _execute_with_approval(
     )
 
     if approval.granted:
-        await ai.execute_tool(tc, message=message)
-    else:
-        tc.set_error("Tool call was denied by the user.")
+        return await ai.execute_tool(tc, message=message)
+    return tc.with_error("Tool call was denied by the user.")
 
 
 chat_agent = ai.agent(
@@ -73,8 +73,11 @@ async def graph(
 
         last_msg = result.last_message
         assert last_msg is not None
-        local_messages.append(last_msg)
 
-        await asyncio.gather(
+        updated_parts = await asyncio.gather(
             *(_execute_with_approval(tc, message=last_msg) for tc in result.tool_calls)
         )
+        updated_msg = last_msg
+        for updated_tc in updated_parts:
+            updated_msg = updated_msg.replace(updated_tc)
+        local_messages.append(updated_msg)

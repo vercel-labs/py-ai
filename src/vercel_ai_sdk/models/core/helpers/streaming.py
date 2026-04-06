@@ -192,6 +192,7 @@ class StreamHandler:
             is_active = bid == self._active_reasoning_id
             parts.append(
                 messages_.ReasoningPart(
+                    id=bid,
                     text=text,
                     signature=sig,
                     state="streaming" if is_active else "done",
@@ -204,6 +205,7 @@ class StreamHandler:
             is_active = bid == self._active_text_id
             parts.append(
                 messages_.TextPart(
+                    id=bid,
                     text=text,
                     state="streaming" if is_active else "done",
                     delta=text_delta if is_active else None,
@@ -215,6 +217,7 @@ class StreamHandler:
             is_active = tcid in self._active_tool_ids
             parts.append(
                 messages_.ToolPart(
+                    id=tcid,
                     tool_call_id=tcid,
                     tool_name=name,
                     tool_args=args,
@@ -224,8 +227,8 @@ class StreamHandler:
             )
 
         # File parts (inline images/videos from LLMs like Gemini, GPT-5)
-        for _bid, (media_type, data) in self._files.items():
-            parts.append(messages_.FilePart(data=data, media_type=media_type))
+        for bid, (media_type, data) in self._files.items():
+            parts.append(messages_.FilePart(id=bid, data=data, media_type=media_type))
 
         return messages_.Message(
             id=self.message_id,
@@ -259,6 +262,5 @@ async def events_to_messages(
             data=data,
             output_type_name=f"{output_type.__module__}.{output_type.__qualname__}",
         )
-        msg = msg.model_copy()
-        msg.parts = [*msg.parts, part]
+        msg = msg.model_copy(update={"parts": [*msg.parts, part]})
         yield msg

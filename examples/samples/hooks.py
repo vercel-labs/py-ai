@@ -44,6 +44,9 @@ async def main() -> None:
             if not result.tool_calls:
                 break
 
+            last_msg = result.last_message
+            assert last_msg is not None
+
             for tc in result.tool_calls:
                 if tc.tool_name == "contact_mothership":
                     # Blocks until resolved (long-running) or cancelled (serverless)
@@ -55,14 +58,14 @@ async def main() -> None:
                         metadata={"tool": tc.tool_name},
                     )
                     if approval.granted:
-                        await ai.execute_tool(tc, message=result.last_message)
+                        updated_tc = await ai.execute_tool(tc, message=last_msg)
                     else:
-                        tc.set_error(f"Rejected: {approval.reason}")
+                        updated_tc = tc.with_error(f"Rejected: {approval.reason}")
                 else:
-                    await ai.execute_tool(tc, message=result.last_message)
+                    updated_tc = await ai.execute_tool(tc, message=last_msg)
+                last_msg = last_msg.replace(updated_tc)
 
-            if result.last_message is not None:
-                local_messages.append(result.last_message)
+            local_messages.append(last_msg)
 
         return result
 

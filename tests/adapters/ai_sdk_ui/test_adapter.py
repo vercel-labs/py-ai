@@ -654,15 +654,14 @@ async def test_runtime_tool_approval_same_step() -> None:
         last_msg = result.last_message
         assert last_msg is not None
 
-        async def approve_and_execute(tc: ai.ToolPart) -> None:
+        async def approve_and_execute(tc: ai.ToolPart) -> ai.ToolPart:
             approval = await ai.ToolApproval.create(  # type: ignore[attr-defined]
                 f"approve_{tc.tool_call_id}",
                 metadata={"tool_name": tc.tool_name},
             )
             if approval.granted:
-                await ai.execute_tool(tc, message=last_msg)
-            else:
-                tc.set_error("denied")
+                return await ai.execute_tool(tc, message=last_msg)
+            return tc.with_error("denied")
 
         await asyncio.gather(*(approve_and_execute(tc) for tc in result.tool_calls))
 

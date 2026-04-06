@@ -1,5 +1,5 @@
-"""Message model: properties, ToolPart.set_result/set_error, make_messages,
-StructuredOutputPart, FilePart."""
+"""Message model: properties, immutability, part IDs, ToolPart.with_result/with_error,
+Message.replace, make_messages, StructuredOutputPart, FilePart."""
 
 import pydantic
 import pytest
@@ -193,25 +193,127 @@ def test_get_hook_part_missing() -> None:
     assert m.get_hook_part("h-nope") is None
 
 
-# -- ToolPart.set_result / set_error ---------------------------------------
+# -- Immutability ----------------------------------------------------------
 
 
-def test_set_result() -> None:
+def test_frozen_rejects_field_mutation() -> None:
+    """Frozen models reject direct attribute assignment."""
+    tp = ToolPart(tool_call_id="tc1", tool_name="t", tool_args="{}")
+    with pytest.raises(pydantic.ValidationError):
+        tp.status = "result"  # type: ignore[misc]
+
+    m = Message(id="m1", role="assistant", parts=[TextPart(text="hi")])
+    with pytest.raises(pydantic.ValidationError):
+        m.label = "test"  # type: ignore[misc]
+
+
+# -- ToolPart.with_result / with_error ------------------------------------
+
+
+def test_with_result() -> None:
     tp = ToolPart(tool_call_id="tc1", tool_name="t", tool_args="{}")
     assert tp.status == "pending"
-    tp.set_result({"answer": 42})
-    # mypy narrows status to Literal["pending"] from the constructor default and
-    # can't track that set_result() mutates it to "result"
-    assert tp.status == "result"  # type: ignore[comparison-overlap]
-    assert tp.result == {"answer": 42}
-
-
-def test_set_error() -> None:
-    tp = ToolPart(tool_call_id="tc1", tool_name="t", tool_args="{}")
+    updated = tp.with_result({"answer": 42})
+    assert updated.status == "result"
+    assert updated.result == {"answer": 42}
+    assert updated.id == tp.id  # id preserved
+    # Original unchanged
     assert tp.status == "pending"
-    tp.set_error("Something went wrong")
-    assert tp.status == "error"  # type: ignore[comparison-overlap]
-    assert tp.result == "Something went wrong"
+    assert tp.result is None
+
+
+def test_with_error() -> None:
+    tp = ToolPart(tool_call_id="tc1", tool_name="t", tool_args="{}")
+    updated = tp.with_error("Something went wrong")
+    assert updated.status == "error"
+    assert updated.result == "Something went wrong"
+    assert updated.id == tp.id  # id preserved
+    # Original unchanged
+    assert tp.status == "pending"
+
+
+def test_with_result_rejects_non_pending() -> None:
+    """with_result / with_error reject non-pending tool calls."""
+    tp = ToolPart(
+        tool_call_id="tc1", tool_name="t", tool_args="{}", status="result", result=42
+    )
+    with pytest.raises(ValueError, match="already has status"):
+        tp.with_result("new result")
+    with pytest.raises(ValueError, match="already has status"):
+        tp.with_error("oops")
+
+
+# -- Part ids --------------------------------------------------------------
+
+
+def test_parts_have_auto_generated_ids() -> None:
+    """All parts get an auto-generated id."""
+    text = TextPart(text="hi")
+    tool = ToolPart(tool_call_id="tc1", tool_name="t", tool_args="{}")
+    reasoning = ReasoningPart(text="thinking")
+    assert text.id  # non-empty
+    assert tool.id
+    assert reasoning.id
+    # All different
+    assert len({text.id, tool.id, reasoning.id}) == 3
+
+
+def test_part_id_explicit() -> None:
+    """Parts accept an explicit id."""
+    tp = TextPart(id="my-id", text="hi")
+    assert tp.id == "my-id"
+
+
+# -- Message.replace -------------------------------------------------------
+
+
+def test_replace() -> None:
+    tp = ToolPart(id="p1", tool_call_id="tc1", tool_name="t", tool_args="{}")
+    m = Message(
+        id="m1",
+        role="assistant",
+        parts=[TextPart(id="p0", text="hi"), tp],
+    )
+    updated_tp = tp.with_result({"answer": 42})
+    updated_m = m.replace(updated_tp)
+    tc = updated_m.get_tool_part("tc1")
+    assert tc is not None
+    assert tc.status == "result"
+    assert tc.result == {"answer": 42}
+    # Original unchanged
+    assert m.get_tool_part("tc1") is not None
+    assert m.get_tool_part("tc1").status == "pending"  # type: ignore[union-attr]
+
+
+def test_replace_missing_id() -> None:
+    m = Message(id="m1", role="assistant", parts=[TextPart(id="p0", text="hi")])
+    orphan = TextPart(id="no-such-id", text="x")
+    with pytest.raises(ValueError, match="in message"):
+        m.replace(orphan)
+
+
+def test_replace_two_arg() -> None:
+    """replace(old, new) matches by identity, ignores id."""
+    old_text = TextPart(id="p0", text="hello")
+    m = Message(id="m1", role="assistant", parts=[old_text])
+    # new part has a different id — doesn't matter, old is matched by identity
+    new_text = TextPart(id="different", text="world")
+    updated = m.replace(old_text, new_text)
+    part = updated.parts[0]
+    assert isinstance(part, TextPart)
+    assert part.text == "world"
+    assert part.id == "different"
+    # Original unchanged
+    orig = m.parts[0]
+    assert isinstance(orig, TextPart)
+    assert orig.text == "hello"
+
+
+def test_replace_two_arg_missing() -> None:
+    m = Message(id="m1", role="assistant", parts=[TextPart(id="p0", text="hi")])
+    stranger = TextPart(id="p0", text="hi")  # same content, different object
+    with pytest.raises(ValueError, match="not found in message"):
+        m.replace(stranger, TextPart(text="new"))
 
 
 # -- make_messages ---------------------------------------------------------

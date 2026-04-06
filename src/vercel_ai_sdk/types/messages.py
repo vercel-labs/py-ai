@@ -2,15 +2,23 @@ from __future__ import annotations
 
 import importlib
 import uuid
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, overload
 
 import pydantic
+
+
+def _gen_id() -> str:
+    return uuid.uuid4().hex[:12]
+
 
 # Streaming state for parts
 PartState = Literal["streaming", "done"]
 
 
 class TextPart(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(frozen=True)
+
+    id: str = pydantic.Field(default_factory=_gen_id)
     text: str
     type: Literal["text"] = "text"
     # Streaming state
@@ -19,6 +27,9 @@ class TextPart(pydantic.BaseModel):
 
 
 class ToolPart(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(frozen=True)
+
+    id: str = pydantic.Field(default_factory=_gen_id)
     tool_call_id: str
     tool_name: str
     tool_args: str
@@ -29,18 +40,27 @@ class ToolPart(pydantic.BaseModel):
     state: PartState | None = None
     args_delta: str | None = None  # Delta for tool_args
 
-    def set_result(self, result: Any) -> None:
-        """Set the tool result and mark as completed."""
-        self.status = "result"
-        self.result = result
+    def with_result(self, result: Any) -> ToolPart:
+        """Return a copy with status='result' and the given result."""
+        if self.status != "pending":
+            raise ValueError(
+                f"Tool call '{self.tool_call_id}' already has status '{self.status}'"
+            )
+        return self.model_copy(update={"status": "result", "result": result})
 
-    def set_error(self, message: str) -> None:
-        """Set a tool error and mark as failed."""
-        self.status = "error"
-        self.result = message
+    def with_error(self, message: str) -> ToolPart:
+        """Return a copy with status='error' and the error message."""
+        if self.status != "pending":
+            raise ValueError(
+                f"Tool call '{self.tool_call_id}' already has status '{self.status}'"
+            )
+        return self.model_copy(update={"status": "error", "result": message})
 
 
 class ReasoningPart(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(frozen=True)
+
+    id: str = pydantic.Field(default_factory=_gen_id)
     text: str
     type: Literal["reasoning"] = "reasoning"
     # Anthropic's thinking blocks include a signature for cache/verification.
@@ -54,6 +74,9 @@ class ReasoningPart(pydantic.BaseModel):
 class HookPart(pydantic.BaseModel):
     """Part representing a hook suspension point in the agent's turn."""
 
+    model_config = pydantic.ConfigDict(frozen=True)
+
+    id: str = pydantic.Field(default_factory=_gen_id)
     hook_id: str
     hook_type: str
     status: Literal[
@@ -94,6 +117,9 @@ class StructuredOutputPart(pydantic.BaseModel):
     Pydantic model can be lazily rehydrated via the ``value`` property.
     """
 
+    model_config = pydantic.ConfigDict(frozen=True)
+
+    id: str = pydantic.Field(default_factory=_gen_id)
     data: dict[str, Any]
     output_type_name: str
     type: Literal["structured_output"] = "structured_output"
@@ -123,6 +149,9 @@ class FilePart(pydantic.BaseModel):
       to JSON for providers that need it).
     """
 
+    model_config = pydantic.ConfigDict(frozen=True)
+
+    id: str = pydantic.Field(default_factory=_gen_id)
     data: str | bytes
     media_type: str  # IANA media type, e.g. "image/png", "audio/wav"
     filename: str | None = None
@@ -184,6 +213,8 @@ class Usage(pydantic.BaseModel):
     can distinguish "not reported" from "zero tokens used".
     """
 
+    model_config = pydantic.ConfigDict(frozen=True)
+
     input_tokens: int = 0
     output_tokens: int = 0
 
@@ -226,22 +257,64 @@ class Usage(pydantic.BaseModel):
         )
 
 
-def _gen_id() -> str:
-    return uuid.uuid4().hex[:12]
-
 
 class ToolDelta(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(frozen=True)
+
     tool_call_id: str
     tool_name: str
     args_delta: str
 
 
 class Message(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(frozen=True)
+
     role: Literal["user", "assistant", "system"]
     parts: list[Part]
     id: str = pydantic.Field(default_factory=_gen_id)
     label: str | None = None
     usage: Usage | None = None
+
+    @overload
+    def replace(self, new: Part, /) -> Message: ...
+    @overload
+    def replace(self, old: Part, new: Part, /) -> Message: ...
+    def replace(self, *args: Part) -> Message:
+        """Return a copy with a part replaced.
+
+        Single arg: ``msg.replace(updated_part)`` — matches by ``id``.
+        Two args: ``msg.replace(old, new)`` — matches by identity.
+
+        Raises ValueError if the target part is not found.
+        """
+        if len(args) == 1:
+            (new,) = args
+            match_id: str | None = new.id
+            match_ref = None
+        elif len(args) == 2:
+            old, new = args
+            match_id = None
+            match_ref = old
+        else:
+            raise TypeError(
+                f"replace() takes 1 or 2 arguments ({len(args)} given)"
+            )
+        found = False
+        new_parts: list[Part] = []
+        for p in self.parts:
+            if not found and (
+                (match_id is not None and p.id == match_id)
+                or (match_ref is not None and p is match_ref)
+            ):
+                found = True
+                new_parts.append(new)
+            else:
+                new_parts.append(p)
+        if not found:
+            if match_id is not None:
+                raise ValueError(f"No part with id '{match_id}' in message")
+            raise ValueError("Part not found in message")
+        return self.model_copy(update={"parts": new_parts})
 
     @property
     def output(self) -> Any:

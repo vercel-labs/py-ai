@@ -155,7 +155,7 @@ async def get_stdio_tools(
         tool_prefix: Optional prefix to add to all tool names.
 
     Returns:
-        List of Tool objects that can be passed to stream_loop.
+        List of Tool objects that can be passed to an agent or custom loop.
 
     Example:
         tools = await ai.mcp.get_stdio_tools(
@@ -201,7 +201,7 @@ async def get_http_tools(
         tool_prefix: Optional prefix to add to all tool names.
 
     Returns:
-        List of Tool objects that can be passed to stream_loop.
+        List of Tool objects that can be passed to an agent or custom loop.
 
     Example:
         tools = await ai.mcp.get_http_tools(
