@@ -50,8 +50,11 @@ async def test_text_only_spans(spans: InMemorySpanExporter) -> None:
     stream_span = next(s for s in finished if s.name == "ai.stream")
 
     # ai.stream is a child of ai.run
-    assert stream_span.parent is not None
-    assert stream_span.parent.span_id == run_span.context.span_id
+    stream_parent = stream_span.parent
+    assert stream_parent is not None
+    run_ctx = run_span.context
+    assert run_ctx is not None
+    assert stream_parent.span_id == run_ctx.span_id
 
     # run_id attribute is set
     assert run_span.attributes is not None
@@ -84,5 +87,8 @@ async def test_tool_call_spans(spans: InMemorySpanExporter) -> None:
 
     # ai.tool is a child of ai.run (tools execute between steps)
     run_span = next(s for s in finished if s.name == "ai.run")
-    assert tool_span.parent is not None
-    assert tool_span.parent.span_id == run_span.context.span_id
+    tool_parent = tool_span.parent
+    assert tool_parent is not None
+    run_ctx = run_span.context
+    assert run_ctx is not None
+    assert tool_parent.span_id == run_ctx.span_id

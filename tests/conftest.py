@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Sequence
-from typing import Any
+from typing import Any, Literal
 
 import pydantic
 
@@ -106,13 +106,14 @@ def mock_llm(responses: list[list[messages_.Message]]) -> MockAdapter:
 
 
 def text_msg(
-    text: str, *, id: str = "msg-1", state: str = "done", delta: str | None = None
+    text: str,
+    *,
+    id: str = "msg-1",
+    state: messages_.PartState | None = "done",
+    delta: str | None = None,
 ) -> messages_.Message:
-    return messages_.Message(
-        id=id,
-        role="assistant",
-        parts=[messages_.TextPart(text=text, state=state, delta=delta)],
-    )
+    part: messages_.Part = messages_.TextPart(text=text, state=state, delta=delta)
+    return messages_.Message(id=id, role="assistant", parts=[part])
 
 
 def tool_msg(
@@ -121,20 +122,15 @@ def tool_msg(
     tc_id: str = "tc-1",
     name: str = "test_tool",
     args: str = "{}",
-    status: str = "pending",
+    status: Literal["pending", "result", "error"] = "pending",
     result: dict[str, object] | None = None,
 ) -> messages_.Message:
-    return messages_.Message(
-        id=id,
-        role="assistant",
-        parts=[
-            messages_.ToolPart(
-                tool_call_id=tc_id,
-                tool_name=name,
-                tool_args=args,
-                status=status,
-                result=result,
-                state="done",
-            )
-        ],
+    part: messages_.Part = messages_.ToolPart(
+        tool_call_id=tc_id,
+        tool_name=name,
+        tool_args=args,
+        status=status,
+        result=result,
+        state="done",
     )
+    return messages_.Message(id=id, role="assistant", parts=[part])

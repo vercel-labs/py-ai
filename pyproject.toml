@@ -1,6 +1,6 @@
 [project]
 name = "vercel-ai-sdk"
-version = "0.0.1.dev8"
+version = "0.0.1.dev9"
 description = "The AI Toolkit for Python"
 readme = "README.md"
 authors = [
@@ -30,6 +30,7 @@ dev = [
     "mypy>=1.11",
     "ruff>=0.8",
     "opentelemetry-sdk>=1.0",
+    "pyright>=1.1.408",
 ]
 
 [tool.mypy]

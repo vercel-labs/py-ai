@@ -33,10 +33,12 @@ class ImageParams(pydantic.BaseModel):
 
     n: int = 1
     size: str | None = None
-    aspect_ratio: str | None = pydantic.Field(None, alias="aspectRatio")
+    aspect_ratio: str | None = pydantic.Field(
+        default=None, serialization_alias="aspectRatio"
+    )
     seed: int | None = None
     provider_options: dict[str, Any] = pydantic.Field(
-        default_factory=dict, alias="providerOptions"
+        default_factory=dict, serialization_alias="providerOptions"
     )
 
 
@@ -46,13 +48,15 @@ class VideoParams(pydantic.BaseModel):
     model_config = _PARAMS_CONFIG
 
     n: int = 1
-    aspect_ratio: str | None = pydantic.Field(None, alias="aspectRatio")
+    aspect_ratio: str | None = pydantic.Field(
+        default=None, serialization_alias="aspectRatio"
+    )
     resolution: str | None = None
     duration: int | None = None
     fps: int | None = None
     seed: int | None = None
     provider_options: dict[str, Any] = pydantic.Field(
-        default_factory=dict, alias="providerOptions"
+        default_factory=dict, serialization_alias="providerOptions"
     )
 
 
@@ -102,7 +106,7 @@ async def _generate_image(
             output_tokens=usage_data.get("outputTokens") or 0,
         )
 
-    files: list[messages_.FilePart] = []
+    files: list[messages_.Part] = []
     for img_b64 in raw_images:
         media_type = media_.detect_image_media_type(img_b64) or "image/png"
         files.append(messages_.FilePart(data=img_b64, media_type=media_type))
@@ -169,7 +173,7 @@ async def _generate_video(
         )
 
     raw_videos: list[dict[str, Any]] = event_data.get("videos", [])
-    files: list[messages_.FilePart] = []
+    files: list[messages_.Part] = []
     for video_data in raw_videos:
         vtype = video_data.get("type", "base64")
         media_type = video_data.get("mediaType", "video/mp4")
