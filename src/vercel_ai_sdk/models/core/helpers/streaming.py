@@ -97,7 +97,7 @@ class StreamHandler:
     This is the normalization layer between LLM adapters and the rest of the system.
     """
 
-    message_id: str = dataclasses.field(default_factory=messages_._gen_id)
+    message_id: str = dataclasses.field(default_factory=messages_.generate_id)
 
     # Accumulators
     _text_blocks: dict[str, str] = dataclasses.field(default_factory=dict)

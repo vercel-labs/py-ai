@@ -14,8 +14,7 @@ import mcp.client.stdio
 import mcp.client.streamable_http
 import mcp.types
 
-from .. import context as context_
-from .. import tools as tools_
+from .. import context, tools
 
 __all__ = [
     "get_stdio_tools",
@@ -140,7 +139,7 @@ async def get_stdio_tools(
     env: dict[str, str] | None = None,
     cwd: str | None = None,
     tool_prefix: str | None = None,
-) -> list[tools_.Tool[..., Any]]:
+) -> list[tools.Tool[..., Any]]:
     """
     Get tools from an MCP server running as a subprocess.
 
@@ -188,7 +187,7 @@ async def get_http_tools(
     *,
     headers: dict[str, str] | None = None,
     tool_prefix: str | None = None,
-) -> list[tools_.Tool[..., Any]]:
+) -> list[tools.Tool[..., Any]]:
     """
     Get tools from an MCP server over HTTP (Streamable HTTP transport).
 
@@ -231,13 +230,13 @@ def _mcp_tool_to_native(
     connection_key: str,
     transport_factory: Callable[[], contextlib.AbstractAsyncContextManager[Any]],
     tool_prefix: str | None,
-) -> tools_.Tool[..., Any]:
+) -> tools.Tool[..., Any]:
     """Convert an MCP tool to a native Tool."""
     name = mcp_tool.name
     if tool_prefix:
         name = f"{tool_prefix}_{name}"
 
-    schema = tools_.ToolSchema(
+    schema = tools.ToolSchema(
         name=name,
         description=mcp_tool.description or "",
         param_schema=mcp_tool.inputSchema,
@@ -246,29 +245,29 @@ def _mcp_tool_to_native(
 
     # Determine source provenance from connection key
     if connection_key.startswith("http:"):
-        source = context_.ToolSource(
+        source = context.ToolSource(
             kind="mcp_http",
             uri=connection_key.removeprefix("http:"),
         )
     elif connection_key.startswith("stdio:"):
-        source = context_.ToolSource(
+        source = context.ToolSource(
             kind="mcp_stdio",
             server_command=connection_key.removeprefix("stdio:"),
         )
     else:
-        source = context_.ToolSource(kind="mcp")
+        source = context.ToolSource(kind="mcp")
 
-    t = tools_.Tool(
+    t = tools.Tool(
         fn=_make_tool_fn(connection_key, mcp_tool.name, transport_factory),
         schema=schema,
         source=source,
     )
 
     # Register on active Context if available, else fall back to global
-    ctx = context_._context.get(None)
+    ctx = context._context.get(None)
     if ctx is not None:
         ctx.register_tool(t)
-    tools_._tool_registry[name] = t
+    tools._tool_registry[name] = t
     return t
 
 

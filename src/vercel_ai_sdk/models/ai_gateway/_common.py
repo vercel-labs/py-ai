@@ -20,10 +20,10 @@ from typing import Any
 
 import httpx
 
+from ...types import media
 from ...types import messages as messages_
 from ..core import client as client_
 from ..core import model as model_
-from ..core.helpers import media as media_
 
 _PROTOCOL_VERSION = "0.0.1"
 
@@ -64,7 +64,7 @@ def extract_input_files(messages: list[messages_.Message]) -> list[messages_.Fil
 def file_part_to_wire(part: messages_.FilePart) -> dict[str, Any]:
     """Convert a :class:`FilePart` to the gateway wire format for input files."""
     data = part.data
-    if isinstance(data, str) and media_.is_url(data):
+    if isinstance(data, str) and media.is_url(data):
         return {"type": "url", "url": data}
     if isinstance(data, bytes):
         b64 = base64.b64encode(data).decode("ascii")

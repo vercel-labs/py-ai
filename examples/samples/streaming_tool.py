@@ -34,9 +34,7 @@ async def main() -> None:
         tools=[talk_to_mothership],
     )
 
-    async for msg in my_agent.run(
-        [ai.user_message("When will the robots take over?")]
-    ):
+    async for msg in my_agent.run([ai.user_message("When will the robots take over?")]):
         if msg.label == "tool_progress":
             print(f"  [{msg.text}]")
         elif msg.text_delta:

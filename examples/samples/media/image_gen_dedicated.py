@@ -23,12 +23,14 @@ async def main() -> None:
 
     # Generate two images of an anime girl character
     msg = await model.generate(
-        [ai.user_message(
-            "Anime girl with twin tails and cat ears, wearing a "
-            "sailor school uniform, striking a victory pose in front "
-            "of a futuristic Tokyo skyline at night, neon lights "
-            "reflecting in her eyes, digital art style"
-        )],
+        [
+            ai.user_message(
+                "Anime girl with twin tails and cat ears, wearing a "
+                "sailor school uniform, striking a victory pose in front "
+                "of a futuristic Tokyo skyline at night, neon lights "
+                "reflecting in her eyes, digital art style"
+            )
+        ],
         n=2,
         aspect_ratio="16:9",
     )

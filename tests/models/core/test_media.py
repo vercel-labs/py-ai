@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import base64
 
-from vercel_ai_sdk.models.core.helpers.media import (
+from vercel_ai_sdk.types.media import (
     data_to_base64,
     data_to_data_url,
     detect_audio_media_type,

@@ -12,12 +12,12 @@ from typing import Any
 import openai
 import pydantic
 
+from ...types import media
 from ...types import messages as messages_
 from ...types import tools as tools_
 from ..core import client as client_
 from ..core import model as model_
-from ..core.helpers import media as media_
-from ..core.helpers import streaming as streaming_
+from ..core.helpers import files, streaming
 
 # ---------------------------------------------------------------------------
 # Message / tool conversion — internal types → OpenAI wire format
@@ -57,25 +57,25 @@ async def _file_part_to_openai(
 
     if mt.startswith("image/"):
         media_type = "image/jpeg" if mt == "image/*" else mt
-        url = media_.data_to_data_url(data, media_type)
+        url = media.data_to_data_url(data, media_type)
         return {"type": "image_url", "image_url": {"url": url}}
 
     if mt.startswith("audio/"):
-        if isinstance(data, str) and media_.is_downloadable_url(data):
-            downloaded, _ = await media_.download(data)
+        if isinstance(data, str) and media.is_downloadable_url(data):
+            downloaded, _ = await files.download(data)
             data = downloaded
         fmt = mt.split("/", 1)[1] if "/" in mt else mt
-        b64 = media_.data_to_base64(data)
+        b64 = media.data_to_base64(data)
         return {
             "type": "input_audio",
             "input_audio": {"data": b64, "format": fmt},
         }
 
     if mt == "application/pdf":
-        if isinstance(data, str) and media_.is_downloadable_url(data):
-            downloaded, _ = await media_.download(data)
+        if isinstance(data, str) and media.is_downloadable_url(data):
+            downloaded, _ = await files.download(data)
             data = downloaded
-        data_url = media_.data_to_data_url(data, mt)
+        data_url = media.data_to_data_url(data, mt)
         filename = part.filename or "document.pdf"
         return {
             "type": "file",
@@ -85,7 +85,7 @@ async def _file_part_to_openai(
     if mt.startswith("text/"):
         if isinstance(data, bytes):
             text_content = data.decode("utf-8")
-        elif media_.is_url(data):
+        elif media.is_url(data):
             text_content = data
         else:
             import base64 as _b64
@@ -253,7 +253,7 @@ async def stream(
             reasoning_config["effort"] = reasoning_effort
         api_kwargs["extra_body"] = {"reasoning": reasoning_config}
 
-    handler = streaming_.StreamHandler()
+    handler = streaming.StreamHandler()
 
     try:
         sdk_stream = await sdk_client.chat.completions.create(**api_kwargs)
@@ -308,10 +308,10 @@ async def stream(
                 if not reasoning_started:
                     reasoning_started = True
                     yield handler.handle_event(
-                        streaming_.ReasoningStart(block_id="reasoning")
+                        streaming.ReasoningStart(block_id="reasoning")
                     )
                 yield handler.handle_event(
-                    streaming_.ReasoningDelta(
+                    streaming.ReasoningDelta(
                         block_id="reasoning", delta=reasoning_value
                     )
                 )
@@ -319,15 +319,15 @@ async def stream(
             if delta.content:
                 if reasoning_started:
                     yield handler.handle_event(
-                        streaming_.ReasoningEnd(block_id="reasoning")
+                        streaming.ReasoningEnd(block_id="reasoning")
                     )
                     reasoning_started = False
 
                 if not text_started:
                     text_started = True
-                    yield handler.handle_event(streaming_.TextStart(block_id="text"))
+                    yield handler.handle_event(streaming.TextStart(block_id="text"))
                 yield handler.handle_event(
-                    streaming_.TextDelta(block_id="text", delta=delta.content)
+                    streaming.TextDelta(block_id="text", delta=delta.content)
                 )
 
             if delta.tool_calls:
@@ -351,7 +351,7 @@ async def stream(
                             if not tc_state[idx]["started"] and tid:
                                 tc_state[idx]["started"] = True
                                 yield handler.handle_event(
-                                    streaming_.ToolStart(
+                                    streaming.ToolStart(
                                         tool_call_id=tid,
                                         tool_name=tname,
                                     )
@@ -359,7 +359,7 @@ async def stream(
 
                             if tid:
                                 yield handler.handle_event(
-                                    streaming_.ToolArgsDelta(
+                                    streaming.ToolArgsDelta(
                                         tool_call_id=tid,
                                         delta=tc.function.arguments,
                                     )
@@ -369,18 +369,18 @@ async def stream(
                 finish_reason = choice.finish_reason
                 if reasoning_started:
                     yield handler.handle_event(
-                        streaming_.ReasoningEnd(block_id="reasoning")
+                        streaming.ReasoningEnd(block_id="reasoning")
                     )
                 if text_started:
-                    yield handler.handle_event(streaming_.TextEnd(block_id="text"))
+                    yield handler.handle_event(streaming.TextEnd(block_id="text"))
                 for tc in tc_state.values():
                     if tc["started"] and tc["id"]:
                         yield handler.handle_event(
-                            streaming_.ToolEnd(tool_call_id=tc["id"])
+                            streaming.ToolEnd(tool_call_id=tc["id"])
                         )
 
         yield handler.handle_event(
-            streaming_.MessageDone(finish_reason=finish_reason, usage=usage)
+            streaming.MessageDone(finish_reason=finish_reason, usage=usage)
         )
     finally:
         await sdk_client.close()

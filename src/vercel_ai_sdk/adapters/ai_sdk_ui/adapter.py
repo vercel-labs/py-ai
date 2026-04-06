@@ -7,7 +7,6 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
-import uuid
 from collections.abc import AsyncGenerator, AsyncIterable
 from typing import Any, Literal
 
@@ -26,11 +25,6 @@ def _to_camel_case(snake_str: str) -> str:
     """Convert snake_case to camelCase."""
     components = snake_str.split("_")
     return components[0] + "".join(x.title() for x in components[1:])
-
-
-def _generate_id(prefix: str = "id") -> str:
-    """Generate a unique ID with prefix."""
-    return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
 def serialize_part(part: protocol.UIMessageStreamPart) -> str:
@@ -188,7 +182,7 @@ async def to_ui_message_stream(
         # Handle reasoning streaming (deltas) - reasoning comes before text
         if delta := msg.reasoning_delta:
             if not state.reasoning_id:
-                state.reasoning_id = _generate_id("reasoning")
+                state.reasoning_id = messages_.generate_id("reasoning")
                 yield protocol.ReasoningStartPart(id=state.reasoning_id)
             yield protocol.ReasoningDeltaPart(id=state.reasoning_id, delta=delta)
 
@@ -200,7 +194,7 @@ async def to_ui_message_stream(
                 state.reasoning_id = None
 
             if not state.text_id:
-                state.text_id = _generate_id("text")
+                state.text_id = messages_.generate_id("text")
                 yield protocol.TextStartPart(id=state.text_id)
             yield protocol.TextDeltaPart(id=state.text_id, delta=delta)
 
@@ -253,7 +247,7 @@ async def to_ui_message_stream(
                         and not has_new_pending_tools
                         and not has_new_tool_results
                     ):
-                        text_id = _generate_id("text")
+                        text_id = messages_.generate_id("text")
                         yield protocol.TextStartPart(id=text_id)
                         yield protocol.TextEndPart(id=text_id)
                     case messages_.ToolPart(

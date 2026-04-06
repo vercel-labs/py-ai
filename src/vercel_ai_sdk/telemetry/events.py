@@ -29,7 +29,7 @@ import time
 import uuid
 from typing import Any, Protocol, runtime_checkable
 
-from ..agents import streams as streams_
+from ..agents import streams
 from ..types import messages as messages_
 
 # ── Protocol ───────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ class StepFinishEvent(TelemetryEvent):
     """Emitted when a ``@stream``-decorated step finishes."""
 
     step_index: int
-    result: streams_.StreamResult
+    result: streams.StreamResult
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

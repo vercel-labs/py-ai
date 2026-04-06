@@ -9,15 +9,11 @@ AI SDK v6 uses a `parts` array instead of legacy `content` string.
 
 from __future__ import annotations
 
-import uuid
 from typing import Any, Literal, cast
 
 import pydantic
 
-
-def _generate_id(prefix: str = "id") -> str:
-    """Generate a unique ID with prefix."""
-    return f"{prefix}_{uuid.uuid4().hex[:12]}"
+from ...types import messages as messages_
 
 
 class UITextPart(pydantic.BaseModel):
@@ -211,7 +207,7 @@ class UIMessage(pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(populate_by_name=True)
 
-    id: str = pydantic.Field(default_factory=lambda: _generate_id("msg"))
+    id: str = pydantic.Field(default_factory=lambda: messages_.generate_id("msg"))
     role: Literal["user", "assistant", "system"]
     parts: list[UIMessagePart] = pydantic.Field(default_factory=list)
 

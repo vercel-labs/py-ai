@@ -20,8 +20,12 @@ from .messages import (
 )
 
 _PART_TYPES = (
-    TextPart, ToolPart, ReasoningPart, HookPart,
-    StructuredOutputPart, FilePart,
+    TextPart,
+    ToolPart,
+    ReasoningPart,
+    HookPart,
+    StructuredOutputPart,
+    FilePart,
 )
 
 # A value that can appear as message content: bare strings become TextPart.
@@ -36,9 +40,7 @@ def _coerce_parts(args: tuple[PartLike, ...]) -> list[Part]:
         elif isinstance(arg, _PART_TYPES):
             parts.append(arg)
         else:
-            raise TypeError(
-                f"Expected str or Part, got {type(arg).__name__}"
-            )
+            raise TypeError(f"Expected str or Part, got {type(arg).__name__}")
     return parts
 
 

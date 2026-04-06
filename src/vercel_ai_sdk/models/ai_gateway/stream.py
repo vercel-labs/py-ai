@@ -12,14 +12,13 @@ from typing import Any
 import httpx
 import pydantic
 
+from ...types import media
 from ...types import messages as messages_
 from ...types import tools as tools_
 from ..core import client as client_
 from ..core import model as model_
-from ..core.helpers import media as media_
-from ..core.helpers import streaming as streaming_
-from . import _common
-from . import errors as errors_
+from ..core.helpers import files, streaming
+from . import _common, errors
 
 # ---------------------------------------------------------------------------
 # Request building — Message list → v3 prompt
@@ -29,14 +28,14 @@ from . import errors as errors_
 async def _file_part_to_v3(part: messages_.FilePart) -> dict[str, Any]:
     """Convert a :class:`FilePart` to a v3 ``file`` content part."""
     data = part.data
-    if isinstance(data, str) and media_.is_downloadable_url(data):
-        downloaded, _ = await media_.download(data)
+    if isinstance(data, str) and media.is_downloadable_url(data):
+        downloaded, _ = await files.download(data)
         data = downloaded
 
     entry: dict[str, Any] = {
         "type": "file",
         "mediaType": part.media_type,
-        "data": media_.data_to_data_url(data, part.media_type),
+        "data": media.data_to_data_url(data, part.media_type),
     }
     if part.filename is not None:
         entry["filename"] = part.filename
@@ -160,16 +159,16 @@ async def _build_request_body(
 # ---------------------------------------------------------------------------
 
 
-def _expand_tool_call(data: dict[str, Any]) -> list[streaming_.StreamEvent]:
+def _expand_tool_call(data: dict[str, Any]) -> list[streaming.StreamEvent]:
     """Expand a complete ``tool-call`` part into Start + ArgsDelta + End."""
     tc_id = data.get("toolCallId", "")
     tool_name = data.get("toolName", "")
     tool_input = data.get("input", "")
     args_str = tool_input if isinstance(tool_input, str) else json.dumps(tool_input)
     return [
-        streaming_.ToolStart(tool_call_id=tc_id, tool_name=tool_name),
-        streaming_.ToolArgsDelta(tool_call_id=tc_id, delta=args_str),
-        streaming_.ToolEnd(tool_call_id=tc_id),
+        streaming.ToolStart(tool_call_id=tc_id, tool_name=tool_name),
+        streaming.ToolArgsDelta(tool_call_id=tc_id, delta=args_str),
+        streaming.ToolEnd(tool_call_id=tc_id),
     ]
 
 
@@ -200,40 +199,40 @@ def _parse_usage(data: Any) -> messages_.Usage:
     )
 
 
-def _parse_stream_part(data: dict[str, Any]) -> list[streaming_.StreamEvent]:
+def _parse_stream_part(data: dict[str, Any]) -> list[streaming.StreamEvent]:
     """Convert a ``LanguageModelV3StreamPart`` to internal events."""
     match data.get("type", ""):
         case "text-start":
-            return [streaming_.TextStart(block_id=data.get("id", "text"))]
+            return [streaming.TextStart(block_id=data.get("id", "text"))]
 
         case "text-delta":
             return [
-                streaming_.TextDelta(
+                streaming.TextDelta(
                     block_id=data.get("id", "text"),
                     delta=data.get("textDelta", data.get("delta", "")),
                 )
             ]
 
         case "text-end":
-            return [streaming_.TextEnd(block_id=data.get("id", "text"))]
+            return [streaming.TextEnd(block_id=data.get("id", "text"))]
 
         case "reasoning-start":
-            return [streaming_.ReasoningStart(block_id=data.get("id", "reasoning"))]
+            return [streaming.ReasoningStart(block_id=data.get("id", "reasoning"))]
 
         case "reasoning-delta":
             return [
-                streaming_.ReasoningDelta(
+                streaming.ReasoningDelta(
                     block_id=data.get("id", "reasoning"),
                     delta=data.get("delta", ""),
                 )
             ]
 
         case "reasoning-end":
-            return [streaming_.ReasoningEnd(block_id=data.get("id", "reasoning"))]
+            return [streaming.ReasoningEnd(block_id=data.get("id", "reasoning"))]
 
         case "tool-input-start":
             return [
-                streaming_.ToolStart(
+                streaming.ToolStart(
                     tool_call_id=data.get("id", ""),
                     tool_name=data.get("toolName", ""),
                 )
@@ -241,21 +240,21 @@ def _parse_stream_part(data: dict[str, Any]) -> list[streaming_.StreamEvent]:
 
         case "tool-input-delta":
             return [
-                streaming_.ToolArgsDelta(
+                streaming.ToolArgsDelta(
                     tool_call_id=data.get("id", ""),
                     delta=data.get("delta", ""),
                 )
             ]
 
         case "tool-input-end":
-            return [streaming_.ToolEnd(tool_call_id=data.get("id", ""))]
+            return [streaming.ToolEnd(tool_call_id=data.get("id", ""))]
 
         case "tool-call":
             return _expand_tool_call(data)
 
         case "file":
             return [
-                streaming_.FileEvent(
+                streaming.FileEvent(
                     block_id=data.get("id", f"file-{len(data)}"),
                     media_type=data.get("mediaType", "application/octet-stream"),
                     data=data.get("data", ""),
@@ -272,7 +271,7 @@ def _parse_stream_part(data: dict[str, Any]) -> list[streaming_.StreamEvent]:
                     finish_reason = s
                 case _:
                     finish_reason = "stop"
-            return [streaming_.MessageDone(finish_reason=finish_reason, usage=usage)]
+            return [streaming.MessageDone(finish_reason=finish_reason, usage=usage)]
 
         case _:
             return []
@@ -306,7 +305,7 @@ async def stream(
     )
     url = f"{client.base_url.rstrip('/')}/language-model"
 
-    handler = streaming_.StreamHandler()
+    handler = streaming.StreamHandler()
 
     try:
         async with client.http.stream(
@@ -317,7 +316,7 @@ async def stream(
         ) as response:
             if response.status_code >= 400:
                 await response.aread()
-                raise errors_.create_gateway_error(
+                raise errors.create_gateway_error(
                     response_body=response.text,
                     status_code=response.status_code,
                     api_key_provided=bool(client.api_key),
@@ -327,12 +326,12 @@ async def stream(
                 for event in _parse_stream_part(data):
                     msg = handler.handle_event(event)
                     yield msg
-    except errors_.GatewayError:
+    except errors.GatewayError:
         raise
     except httpx.TimeoutException as exc:
-        raise errors_.GatewayTimeoutError(cause=exc) from exc
+        raise errors.GatewayTimeoutError(cause=exc) from exc
     except Exception as exc:
-        raise errors_.GatewayResponseError(
+        raise errors.GatewayResponseError(
             message=f"Unexpected error during streaming: {exc}",
             cause=exc,
         ) from exc

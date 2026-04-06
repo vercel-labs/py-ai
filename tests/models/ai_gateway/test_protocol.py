@@ -137,7 +137,7 @@ class TestMessagesToPrompt:
             )
         ]
         with patch(
-            "vercel_ai_sdk.models.core.helpers.media.download",
+            "vercel_ai_sdk.models.core.helpers.files.download",
             new_callable=AsyncMock,
             return_value=(fake_jpeg, "image/jpeg"),
         ):

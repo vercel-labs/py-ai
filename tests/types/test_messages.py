@@ -134,7 +134,7 @@ def test_tool_deltas() -> None:
     assert deltas[0].args_delta == '"te'
 
 
-# -- tool_calls / get_tool_part -------------------------------------------
+# -- tool_calls ------------------------------------------------------------
 
 
 def test_tool_calls() -> None:
@@ -149,22 +149,6 @@ def test_tool_calls() -> None:
     )
     assert len(m.tool_calls) == 2
     assert m.tool_calls[0].tool_call_id == "tc1"
-
-
-def test_get_tool_part_found() -> None:
-    m = Message(
-        id="m1",
-        role="assistant",
-        parts=[ToolPart(tool_call_id="tc1", tool_name="t", tool_args="{}")],
-    )
-    tp = m.get_tool_part("tc1")
-    assert tp is not None
-    assert tp.tool_name == "t"
-
-
-def test_get_tool_part_missing() -> None:
-    m = Message(id="m1", role="assistant", parts=[TextPart(text="no tools")])
-    assert m.get_tool_part("tc-nope") is None
 
 
 # -- get_hook_part ---------------------------------------------------------
@@ -276,13 +260,12 @@ def test_replace() -> None:
     )
     updated_tp = tp.with_result({"answer": 42})
     updated_m = m.replace(updated_tp)
-    tc = updated_m.get_tool_part("tc1")
-    assert tc is not None
+    tc = next(p for p in updated_m.parts if isinstance(p, ToolPart))
     assert tc.status == "result"
     assert tc.result == {"answer": 42}
     # Original unchanged
-    assert m.get_tool_part("tc1") is not None
-    assert m.get_tool_part("tc1").status == "pending"  # type: ignore[union-attr]
+    orig_tc = next(p for p in m.parts if isinstance(p, ToolPart))
+    assert orig_tc.status == "pending"
 
 
 def test_replace_missing_id() -> None:

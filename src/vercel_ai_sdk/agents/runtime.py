@@ -10,14 +10,11 @@ from typing import Any, get_type_hints
 
 import pydantic
 
-from ..telemetry import events as telemetry_
+from ..telemetry import events as telemetry
 from ..types import messages as messages_
 from . import checkpoint as checkpoint_
 from . import context as context_
-from . import hooks as hooks_
-from . import mcp
-from . import streams as streams_
-from . import tools as tools_
+from . import hooks, mcp, streams, tools
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +57,7 @@ class EventLog:
     def step_index(self) -> int:
         return self._step_index
 
-    def try_replay_step(self) -> streams_.StreamResult | None:
+    def try_replay_step(self) -> streams.StreamResult | None:
         if self._step_index < len(self._checkpoint.steps):
             event = self._checkpoint.steps[self._step_index]
             self._step_index += 1
@@ -68,7 +65,7 @@ class EventLog:
             return event.to_stream_result()
         return None
 
-    def record_step(self, result: streams_.StreamResult) -> None:
+    def record_step(self, result: streams.StreamResult) -> None:
         event = checkpoint_.StepEvent(
             index=self._step_index,
             messages=list(result.messages),
@@ -156,7 +153,7 @@ class LoopExecutor:
 
     def __init__(self) -> None:
         self._step_queue: asyncio.Queue[
-            tuple[streams_.Stream, asyncio.Future[streams_.StreamResult]]
+            tuple[streams.Stream, asyncio.Future[streams.StreamResult]]
             | HookSuspension
             | LoopExecutor._Sentinel
         ] = asyncio.Queue()
@@ -172,7 +169,7 @@ class LoopExecutor:
     # ── Producers (called by graph code) ──────────────────────
 
     async def put_step(
-        self, step_fn: streams_.Stream, future: asyncio.Future[streams_.StreamResult]
+        self, step_fn: streams.Stream, future: asyncio.Future[streams.StreamResult]
     ) -> None:
         await self._step_queue.put((step_fn, future))
 
@@ -190,7 +187,7 @@ class LoopExecutor:
     async def next(
         self, timeout: float = 0.1
     ) -> (
-        tuple[streams_.Stream, asyncio.Future[streams_.StreamResult]]
+        tuple[streams.Stream, asyncio.Future[streams.StreamResult]]
         | HookSuspension
         | None
     ):
@@ -308,22 +305,22 @@ async def execute_tool(
                 return tool_call.with_error(cached.result)
             return tool_call.with_result(cached.result)
 
-    telemetry_.handle(
-        telemetry_.ToolCallStartEvent(
+    telemetry.handle(
+        telemetry.ToolCallStartEvent(
             tool_name=tool_call.tool_name,
             tool_call_id=tool_call.tool_call_id,
             args=tool_call.tool_args,
         )
     )
-    t0 = telemetry_.time_ms()
+    t0 = telemetry.time_ms()
 
     # Fresh execution — resolve from Context first, then global registry
-    tool: tools_.Tool[..., Any] | None = None
+    tool: tools.Tool[..., Any] | None = None
     ctx = context_._context.get(None)
     if ctx is not None:
         tool = ctx.get_tool(tool_call.tool_name)
     if tool is None:
-        tool = tools_.get_tool(tool_call.tool_name)
+        tool = tools.get_tool(tool_call.tool_name)
     if tool is None:
         raise ValueError(f"Tool not found in registry: {tool_call.tool_name}")
 
@@ -336,13 +333,13 @@ async def execute_tool(
         error_str = result
         updated = tool_call.with_error(result)
 
-    telemetry_.handle(
-        telemetry_.ToolCallFinishEvent(
+    telemetry.handle(
+        telemetry.ToolCallFinishEvent(
             tool_name=tool_call.tool_name,
             tool_call_id=tool_call.tool_call_id,
             result=result,
             error=error_str,
-            duration_ms=telemetry_.time_ms() - t0,
+            duration_ms=telemetry.time_ms() - t0,
         )
     )
 
@@ -448,7 +445,7 @@ def run(
     if checkpoint and checkpoint.pending_hooks:
         pending_labels = [ph.label for ph in checkpoint.pending_hooks]
         has_resolution = any(
-            label in hooks_._pending_resolutions for label in pending_labels
+            label in hooks._pending_resolutions for label in pending_labels
         )
         if not has_resolution:
             logger.info(
@@ -472,9 +469,9 @@ def run(
         ctx = context or context_.Context()
         token_context = context_._context.set(ctx)
 
-        token_run_id = telemetry_.start_run()
+        token_run_id = telemetry.start_run()
 
-        telemetry_.handle(telemetry_.RunStartEvent())
+        telemetry.handle(telemetry.RunStartEvent())
 
         mcp_pool: dict[str, mcp.client._Connection] = {}
         mcp_token = mcp.client._pool.set(mcp_pool)
@@ -540,8 +537,8 @@ def run(
                     # ── Regular step ───────────────────────────
                     step_fn, future = item
 
-                    telemetry_.handle(
-                        telemetry_.StepStartEvent(
+                    telemetry.handle(
+                        telemetry.StepStartEvent(
                             step_index=rt.log.step_index,
                         )
                     )
@@ -558,11 +555,11 @@ def run(
                         for tool_msg in rt.executor.drain_messages():
                             yield tool_msg
 
-                    step_result = streams_.StreamResult(messages=result_messages)
+                    step_result = streams.StreamResult(messages=result_messages)
                     future.set_result(step_result)
 
-                    telemetry_.handle(
-                        telemetry_.StepFinishEvent(
+                    telemetry.handle(
+                        telemetry.StepFinishEvent(
                             step_index=rt.log.step_index,
                             result=step_result,
                         )
@@ -586,15 +583,15 @@ def run(
             raise
 
         finally:
-            telemetry_.handle(
-                telemetry_.RunFinishEvent(
+            telemetry.handle(
+                telemetry.RunFinishEvent(
                     usage=total_usage,
                     error=run_error,
                 )
             )
-            telemetry_.end_run(token_run_id)
+            telemetry.end_run(token_run_id)
 
-            hooks_._cleanup_run(rt.executor._hook_labels)
+            hooks._cleanup_run(rt.executor._hook_labels)
 
             if mcp_token is not None:
                 await mcp.client.close_connections()

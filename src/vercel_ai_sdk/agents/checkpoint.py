@@ -5,7 +5,7 @@ from typing import Any
 import pydantic
 
 from ..types import messages as messages_
-from . import streams as streams_
+from . import streams
 
 
 class StepEvent(pydantic.BaseModel):
@@ -14,8 +14,8 @@ class StepEvent(pydantic.BaseModel):
     index: int
     messages: list[messages_.Message]
 
-    def to_stream_result(self) -> streams_.StreamResult:
-        return streams_.StreamResult(messages=list(self.messages))
+    def to_stream_result(self) -> streams.StreamResult:
+        return streams.StreamResult(messages=list(self.messages))
 
 
 class ToolEvent(pydantic.BaseModel):

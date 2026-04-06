@@ -7,8 +7,10 @@ from typing import Annotated, Any, Literal, overload
 import pydantic
 
 
-def _gen_id() -> str:
-    return uuid.uuid4().hex[:12]
+def generate_id(prefix: str | None = None) -> str:
+    """Generate a short random ID for messages and parts."""
+    raw = uuid.uuid4().hex[:12]
+    return f"{prefix}_{raw}" if prefix else raw
 
 
 # Streaming state for parts
@@ -18,7 +20,7 @@ PartState = Literal["streaming", "done"]
 class TextPart(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(frozen=True)
 
-    id: str = pydantic.Field(default_factory=_gen_id)
+    id: str = pydantic.Field(default_factory=generate_id)
     text: str
     type: Literal["text"] = "text"
     # Streaming state
@@ -29,7 +31,7 @@ class TextPart(pydantic.BaseModel):
 class ToolPart(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(frozen=True)
 
-    id: str = pydantic.Field(default_factory=_gen_id)
+    id: str = pydantic.Field(default_factory=generate_id)
     tool_call_id: str
     tool_name: str
     tool_args: str
@@ -60,7 +62,7 @@ class ToolPart(pydantic.BaseModel):
 class ReasoningPart(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(frozen=True)
 
-    id: str = pydantic.Field(default_factory=_gen_id)
+    id: str = pydantic.Field(default_factory=generate_id)
     text: str
     type: Literal["reasoning"] = "reasoning"
     # Anthropic's thinking blocks include a signature for cache/verification.
@@ -76,7 +78,7 @@ class HookPart(pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(frozen=True)
 
-    id: str = pydantic.Field(default_factory=_gen_id)
+    id: str = pydantic.Field(default_factory=generate_id)
     hook_id: str
     hook_type: str
     status: Literal[
@@ -119,7 +121,7 @@ class StructuredOutputPart(pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(frozen=True)
 
-    id: str = pydantic.Field(default_factory=_gen_id)
+    id: str = pydantic.Field(default_factory=generate_id)
     data: dict[str, Any]
     output_type_name: str
     type: Literal["structured_output"] = "structured_output"
@@ -151,7 +153,7 @@ class FilePart(pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(frozen=True)
 
-    id: str = pydantic.Field(default_factory=_gen_id)
+    id: str = pydantic.Field(default_factory=generate_id)
     data: str | bytes
     media_type: str  # IANA media type, e.g. "image/png", "audio/wav"
     filename: str | None = None
@@ -167,7 +169,7 @@ class FilePart(pydantic.BaseModel):
         ``media_type`` is provided.
         """
         if media_type is None:
-            from ..models.core.helpers import media as media_helpers
+            from . import media as media_helpers
 
             media_type = media_helpers.infer_media_type(url)
         return cls(data=url, media_type=media_type)
@@ -187,7 +189,7 @@ class FilePart(pydantic.BaseModel):
         detection fails.
         """
         if media_type is None:
-            from ..models.core.helpers import media as media_helpers
+            from . import media as media_helpers
 
             media_type = media_helpers.detect_image_media_type(
                 data
@@ -257,7 +259,6 @@ class Usage(pydantic.BaseModel):
         )
 
 
-
 class ToolDelta(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(frozen=True)
 
@@ -271,7 +272,7 @@ class Message(pydantic.BaseModel):
 
     role: Literal["user", "assistant", "system"]
     parts: list[Part]
-    id: str = pydantic.Field(default_factory=_gen_id)
+    id: str = pydantic.Field(default_factory=generate_id)
     label: str | None = None
     usage: Usage | None = None
 
@@ -296,9 +297,7 @@ class Message(pydantic.BaseModel):
             match_id = None
             match_ref = old
         else:
-            raise TypeError(
-                f"replace() takes 1 or 2 arguments ({len(args)} given)"
-            )
+            raise TypeError(f"replace() takes 1 or 2 arguments ({len(args)} given)")
         found = False
         new_parts: list[Part] = []
         for p in self.parts:
@@ -407,12 +406,6 @@ class Message(pydantic.BaseModel):
     def tool_calls(self) -> list[ToolPart]:
         # TODO properly validate args?
         return [part for part in self.parts if isinstance(part, ToolPart)]
-
-    def get_tool_part(self, tool_call_id: str) -> ToolPart | None:
-        for part in self.parts:
-            if isinstance(part, ToolPart) and part.tool_call_id == tool_call_id:
-                return part
-        return None
 
     def get_hook_part(self, hook_id: str | None = None) -> HookPart | None:
         """Find a HookPart by hook_id, or return the first HookPart if no id given."""

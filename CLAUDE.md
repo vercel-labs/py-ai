@@ -4,7 +4,10 @@
 
 1. use `uv` to manage the project; `uv add` and `uv remove` to manage dependencies, `uv run` to run
 2. after making changes run lint and typecheck: `uv run ruff check --fix src tests` and `uv run mypy src tests`
-3. import by module (except `typing`) to improve readability via namespacing
+3. imports:
+   - import by module, using the shortest unambiguous relative path. `from ..core import helpers`, `from . import streaming`
+   - UNLESS it's `typing` — then `from typing import Foo` (there are too many of them).
+   - if the module name shadows a local variable in the same file, add a trailing underscore to the import: `from ..types import messages as messages_`. do not add trailing underscores preemptively — only when there is an actual collision.
 4. treat `stream_step` and `stream_loop` as user code. they are convenience functions that could be reimplemented by the user, they *must* stay clean.
 
 ## design principles
