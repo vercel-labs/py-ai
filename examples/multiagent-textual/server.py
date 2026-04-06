@@ -180,8 +180,8 @@ async def multiagent_loop(
 
     # Fan out: run both sub-agent loops within this runtime
     r1, r2 = await asyncio.gather(
-        mothership_loop(mothership_agent, ai.make_messages(user=query)),
-        data_center_loop(data_center_agent, ai.make_messages(user=query)),
+        mothership_loop(mothership_agent, [ai.user_message(query)]),
+        data_center_loop(data_center_agent, [ai.user_message(query)]),
     )
 
     combined = (
@@ -190,10 +190,12 @@ async def multiagent_loop(
 
     return await ai.stream_step(
         agent.model,
-        ai.make_messages(
-            system="You are assistant 3. Summarise the results from the other assistants.",
-            user=combined,
-        ),
+        [
+            ai.system_message(
+                "You are assistant 3. Summarise the results from the other assistants."
+            ),
+            ai.user_message(combined),
+        ],
         label="summary",
     )
 
@@ -221,7 +223,7 @@ async def ws_endpoint(websocket: fastapi.WebSocket) -> None:
     await websocket.accept()
     print("Client connected")
 
-    result = orchestrator.run(ai.make_messages(user="When will the robots take over?"))
+    result = orchestrator.run([ai.user_message("When will the robots take over?")])
 
     # Background task: read hook resolutions from the client.
     async def read_resolutions() -> None:

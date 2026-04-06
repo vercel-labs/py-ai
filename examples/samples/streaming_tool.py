@@ -35,7 +35,7 @@ async def main() -> None:
     )
 
     async for msg in my_agent.run(
-        ai.make_messages(user="When will the robots take over?")
+        [ai.user_message("When will the robots take over?")]
     ):
         if msg.label == "tool_progress":
             print(f"  [{msg.text}]")

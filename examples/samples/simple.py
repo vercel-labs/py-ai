@@ -22,7 +22,7 @@ async def main() -> None:
     )
 
     async for msg in my_agent.run(
-        ai.make_messages(user="When will the robots take over?")
+        [ai.user_message("When will the robots take over?")]
     ):
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)

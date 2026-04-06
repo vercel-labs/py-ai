@@ -4,8 +4,8 @@ import asyncio
 import base64
 import pathlib
 
+import vercel_ai_sdk as ai
 from vercel_ai_sdk import models as m
-from vercel_ai_sdk.types import messages as messages_
 
 model = m.Model(
     id="google/imagen-4.0-generate-001",
@@ -15,18 +15,11 @@ model = m.Model(
 )
 
 messages = [
-    messages_.Message(
-        role="user",
-        parts=[
-            messages_.TextPart(
-                text=(
-                    "Anime girl with twin tails and cat ears, wearing a "
-                    "sailor school uniform, striking a victory pose in front "
-                    "of a futuristic Tokyo skyline at night, neon lights "
-                    "reflecting in her eyes, digital art style"
-                )
-            ),
-        ],
+    ai.user_message(
+        "Anime girl with twin tails and cat ears, wearing a "
+        "sailor school uniform, striking a victory pose in front "
+        "of a futuristic Tokyo skyline at night, neon lights "
+        "reflecting in her eyes, digital art style"
     ),
 ]
 

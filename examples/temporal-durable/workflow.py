@@ -96,10 +96,10 @@ async def agent(llm: Any, user_query: str) -> ai.StreamResult:
     are no longer part of the public API. This example needs a custom
     models adapter to work with the new Agent API.
     """
-    messages = ai.make_messages(
-        system="Answer questions using the weather and population tools.",
-        user=user_query,
-    )
+    messages = [
+        ai.system_message("Answer questions using the weather and population tools."),
+        ai.user_message(user_query),
+    ]
 
     # Manually implement the loop since we can't use Agent with LanguageModel
     tools = [get_weather, get_population]

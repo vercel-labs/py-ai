@@ -3,8 +3,8 @@
 import asyncio
 import os
 
+import vercel_ai_sdk as ai
 from vercel_ai_sdk import models as m
-from vercel_ai_sdk.types import messages as messages_
 
 model = m.Model(
     id="anthropic/claude-sonnet-4",
@@ -19,12 +19,7 @@ client = m.Client(
     headers={"X-Custom-Header": "example"},
 )
 
-messages = [
-    messages_.Message(
-        role="user",
-        parts=[messages_.TextPart(text="Hello!")],
-    ),
-]
+messages = [ai.user_message("Hello!")]
 
 
 async def main() -> None:

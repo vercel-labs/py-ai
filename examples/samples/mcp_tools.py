@@ -29,7 +29,7 @@ async def main() -> None:
     )
 
     async for msg in my_agent.run(
-        ai.make_messages(user="How do I create middleware in Next.js?")
+        [ai.user_message("How do I create middleware in Next.js?")]
     ):
         rich.print(msg)
 

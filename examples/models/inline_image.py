@@ -9,8 +9,8 @@ import asyncio
 import base64
 import pathlib
 
+import vercel_ai_sdk as ai
 from vercel_ai_sdk import models as m
-from vercel_ai_sdk.types import messages as messages_
 
 # This is a language model that can also output images inline.
 model = m.Model(
@@ -21,33 +21,19 @@ model = m.Model(
 )
 
 messages = [
-    messages_.Message(
-        role="system",
-        parts=[
-            messages_.TextPart(
-                text=(
-                    "You are an anime art assistant. When asked to draw or create "
-                    "an image, generate it in a soft pastel anime style."
-                )
-            ),
-        ],
+    ai.system_message(
+        "You are an anime art assistant. When asked to draw or create "
+        "an image, generate it in a soft pastel anime style."
     ),
-    messages_.Message(
-        role="user",
-        parts=[
-            messages_.TextPart(
-                text=(
-                    "Draw an anime girl with long silver hair and violet eyes, "
-                    "sitting in a field of cherry blossoms at sunset."
-                )
-            ),
-        ],
+    ai.user_message(
+        "Draw an anime girl with long silver hair and violet eyes, "
+        "sitting in a field of cherry blossoms at sunset."
     ),
 ]
 
 
 async def main() -> None:
-    last_msg: messages_.Message | None = None
+    last_msg: ai.Message | None = None
 
     # Stream — text deltas arrive as usual, images arrive as FileParts
     async for msg in m.stream(model, messages):

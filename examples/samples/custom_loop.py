@@ -74,9 +74,9 @@ async def main() -> None:
             )
 
     async for msg in my_agent.run(
-        ai.make_messages(
-            user="What's the weather and population of New York and Los Angeles?"
-        )
+        [ai.user_message(
+            "What's the weather and population of New York and Los Angeles?"
+        )]
     ):
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)

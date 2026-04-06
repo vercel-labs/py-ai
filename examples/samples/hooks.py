@@ -70,7 +70,7 @@ async def main() -> None:
         return result
 
     async for msg in my_agent.run(
-        ai.make_messages(user="When will the robots take over?")
+        [ai.user_message("When will the robots take over?")]
     ):
         # Hook parts arrive as pending, waiting for resolution
         if (hook := msg.get_hook_part()) and hook.status == "pending":

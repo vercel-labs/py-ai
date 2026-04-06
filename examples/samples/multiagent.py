@@ -45,13 +45,13 @@ async def main() -> None:
         result1, result2 = await asyncio.gather(
             ai.stream_step(
                 agent1.model,
-                ai.make_messages(system=agent1.system, user=user_query),
+                [ai.system_message(agent1.system), ai.user_message(user_query)],
                 agent1.tools,
                 label="a1",
             ),
             ai.stream_step(
                 agent2.model,
-                ai.make_messages(system=agent2.system, user=user_query),
+                [ai.system_message(agent2.system), ai.user_message(user_query)],
                 agent2.tools,
                 label="a2",
             ),
@@ -61,14 +61,14 @@ async def main() -> None:
 
         return await ai.stream_step(
             agent.model,
-            ai.make_messages(
-                system="Summarize the results from the other assistants.",
-                user=combined,
-            ),
+            [
+                ai.system_message("Summarize the results from the other assistants."),
+                ai.user_message(combined),
+            ],
             label="summary",
         )
 
-    async for msg in orchestrator.run(ai.make_messages(user="Process the number 5")):
+    async for msg in orchestrator.run([ai.user_message("Process the number 5")]):
         if msg.text_delta:
             prefix = f"[{msg.label}] " if msg.label else ""
             print(f"{prefix}{msg.text_delta}", end="", flush=True)

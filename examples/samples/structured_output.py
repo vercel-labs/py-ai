@@ -16,10 +16,12 @@ class WeatherForecast(pydantic.BaseModel):
 async def main() -> None:
     llm = ai.ai_gateway.GatewayModel(model="anthropic/claude-opus-4.6")
 
-    messages = ai.make_messages(
-        system="You are a weather assistant. Respond with realistic weather data.",
-        user="What's the weather like in San Francisco right now?",
-    )
+    messages = [
+        ai.system_message(
+            "You are a weather assistant. Respond with realistic weather data."
+        ),
+        ai.user_message("What's the weather like in San Francisco right now?"),
+    ]
 
     # Streaming: watch the JSON arrive incrementally, get validated output at the end
     print("--- Streaming ---")
