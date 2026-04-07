@@ -115,7 +115,44 @@ def _auto_client(model: Model) -> Client:
 # ---------------------------------------------------------------------------
 
 
-async def stream(
+class StreamResult:
+    """Wrapper around a message stream. Async-iterable; collects the final result.
+
+    Properties like ``.text`` and ``.tool_calls`` delegate to the final
+    ``Message`` snapshot and are available after iteration completes.
+    """
+
+    def __init__(self, gen: AsyncGenerator[messages_.Message]) -> None:
+        self._gen = gen
+        self._final: messages_.Message | None = None
+
+    def __aiter__(self) -> AsyncGenerator[messages_.Message]:
+        return self._iterate()
+
+    async def _iterate(self) -> AsyncGenerator[messages_.Message]:
+        async for msg in self._gen:
+            self._final = msg
+            yield msg
+
+    @property
+    def text(self) -> str:
+        return self._final.text if self._final else ""
+
+    @property
+    def tool_calls(self) -> list[messages_.ToolPart]:
+        return self._final.tool_calls if self._final else []
+
+    @property
+    def usage(self) -> messages_.Usage | None:
+        return self._final.usage if self._final else None
+
+    @property
+    def output(self) -> Any:
+        """Parsed structured output from the final message, if available."""
+        return self._final.output if self._final else None
+
+
+def stream(
     model: Model,
     messages: list[messages_.Message],
     *,
@@ -123,12 +160,12 @@ async def stream(
     output_type: type[pydantic.BaseModel] | None = None,
     client: Client | None = None,
     **kwargs: Any,
-) -> AsyncGenerator[messages_.Message]:
+) -> StreamResult:
     """Stream an LLM response.
 
-    Resolves the adapter function from ``model.adapter``, auto-creates a
-    :class:`Client` from env vars if none is provided, and yields
-    ``Message`` snapshots.
+    Returns a :class:`StreamResult` that is async-iterable and collects
+    the final ``Message``.  After iteration, access ``.text``,
+    ``.tool_calls``, ``.usage``, etc.
     """
     _ensure_adapters()
     c = client or _auto_client(model)
@@ -139,10 +176,9 @@ async def stream(
             f"No stream adapter registered for adapter={model.adapter!r}. "
             f"Registered: {registered}"
         )
-    async for msg in adapter_fn(
-        c, model, messages, tools=tools, output_type=output_type, **kwargs
-    ):
-        yield msg
+    return StreamResult(
+        adapter_fn(c, model, messages, tools=tools, output_type=output_type, **kwargs)
+    )
 
 
 async def generate(
@@ -197,6 +233,7 @@ __all__ = [
     "Model",
     "ModelCost",
     "StreamFn",
+    "StreamResult",
     "VideoParams",
     # Public API
     "buffer",
