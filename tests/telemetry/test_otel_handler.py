@@ -12,7 +12,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 import vercel_ai_sdk as ai
 from vercel_ai_sdk.telemetry.otel import OtelHandler
 
-from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_msg
+from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_call_msg
 
 
 @pytest.fixture
@@ -68,7 +68,7 @@ async def test_tool_call_spans(spans: InMemorySpanExporter) -> None:
 
     mock_llm(
         [
-            [tool_msg(tc_id="tc-1", name="double", args='{"x": 5}')],
+            [tool_call_msg(tc_id="tc-1", name="double", args='{"x": 5}')],
             [text_msg("10")],
         ]
     )

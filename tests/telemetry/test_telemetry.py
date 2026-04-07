@@ -17,7 +17,7 @@ from vercel_ai_sdk.telemetry.events import (
     ToolCallStartEvent,
 )
 
-from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_msg
+from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_call_msg
 
 # ── Recording handler ────────────────────────────────────────────
 
@@ -81,7 +81,7 @@ async def test_tool_call_events(handler: RecordingHandler) -> None:
 
     mock_llm(
         [
-            [tool_msg(tc_id="tc-1", name="double", args='{"x": 5}')],
+            [tool_call_msg(tc_id="tc-1", name="double", args='{"x": 5}')],
             [text_msg("10")],
         ]
     )

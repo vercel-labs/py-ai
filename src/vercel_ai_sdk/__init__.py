@@ -37,12 +37,22 @@ from .types import (
     ReasoningPart,
     StructuredOutputPart,
     TextPart,
+    ToolCallPart,
     ToolDelta,
     ToolLike,
-    ToolPart,
+    ToolResultPart,
     ToolSchema,
     Usage,
     make_messages,
+)
+from .types.builders import (
+    assistant_message,
+    file_part,
+    system_message,
+    thinking,
+    tool_message,
+    tool_result,
+    user_message,
 )
 
 __all__ = [
@@ -51,7 +61,8 @@ __all__ = [
     "Part",
     "PartState",
     "TextPart",
-    "ToolPart",
+    "ToolCallPart",
+    "ToolResultPart",
     "ToolDelta",
     "ReasoningPart",
     "FilePart",
@@ -61,6 +72,14 @@ __all__ = [
     "ToolSchema",
     "Usage",
     "make_messages",
+    # Builders (from types/builders)
+    "user_message",
+    "assistant_message",
+    "system_message",
+    "tool_message",
+    "tool_result",
+    "file_part",
+    "thinking",
     # Models (from models/)
     "Model",
     "ModelCost",

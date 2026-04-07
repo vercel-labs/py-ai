@@ -139,7 +139,7 @@ class StreamResult:
         return self._final.text if self._final else ""
 
     @property
-    def tool_calls(self) -> list[messages_.ToolPart]:
+    def tool_calls(self) -> list[messages_.ToolCallPart]:
         return self._final.tool_calls if self._final else []
 
     @property

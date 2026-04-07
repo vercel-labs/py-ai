@@ -18,7 +18,7 @@ from vercel_ai_sdk.types.messages import (
     FilePart,
     ReasoningPart,
     TextPart,
-    ToolPart,
+    ToolCallPart,
     Usage,
 )
 
@@ -81,7 +81,7 @@ def test_tool_lifecycle() -> None:
     h.handle_event(ToolStart(tool_call_id="tc1", tool_name="get_weather"))
     m = h.handle_event(ToolArgsDelta(tool_call_id="tc1", delta='{"ci'))
     part = m.parts[0]
-    assert isinstance(part, ToolPart)
+    assert isinstance(part, ToolCallPart)
     assert part.tool_name == "get_weather"
     assert part.tool_args == '{"ci'
     assert part.state == "streaming"
@@ -89,12 +89,12 @@ def test_tool_lifecycle() -> None:
 
     m = h.handle_event(ToolArgsDelta(tool_call_id="tc1", delta='ty":"London"}'))
     part = m.parts[0]
-    assert isinstance(part, ToolPart)
+    assert isinstance(part, ToolCallPart)
     assert part.tool_args == '{"city":"London"}'
 
     m = h.handle_event(ToolEnd(tool_call_id="tc1"))
     part = m.parts[0]
-    assert isinstance(part, ToolPart)
+    assert isinstance(part, ToolCallPart)
     assert part.state == "done"
     assert part.args_delta is None
 
@@ -120,11 +120,11 @@ def test_reasoning_then_text_then_tool() -> None:
     assert len(m.parts) == 3
     assert isinstance(m.parts[0], ReasoningPart)
     assert isinstance(m.parts[1], TextPart)
-    assert isinstance(m.parts[2], ToolPart)
+    assert isinstance(m.parts[2], ToolCallPart)
     assert all(
         p.state == "done"
         for p in m.parts
-        if isinstance(p, (TextPart, ToolPart, ReasoningPart))
+        if isinstance(p, (TextPart, ToolCallPart, ReasoningPart))
     )
 
 
@@ -136,7 +136,7 @@ def test_multiple_tool_calls() -> None:
 
     m = h.handle_event(ToolArgsDelta(tool_call_id="tc1", delta='{"path":"a.py"}'))
     # Both tools should be in parts
-    tool_parts = [p for p in m.parts if isinstance(p, ToolPart)]
+    tool_parts = [p for p in m.parts if isinstance(p, ToolCallPart)]
     assert len(tool_parts) == 2
     # tc1 has args, tc2 is empty
     assert tool_parts[0].tool_args == '{"path":"a.py"}'
@@ -148,7 +148,7 @@ def test_multiple_tool_calls() -> None:
     assert all(
         p.state == "done"
         for p in m.parts
-        if isinstance(p, (TextPart, ToolPart, ReasoningPart))
+        if isinstance(p, (TextPart, ToolCallPart, ReasoningPart))
     )
 
 

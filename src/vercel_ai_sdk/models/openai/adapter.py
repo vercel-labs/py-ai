@@ -111,7 +111,6 @@ async def _messages_to_openai(
                 content = ""
                 reasoning = ""
                 tool_calls: list[dict[str, Any]] = []
-                tool_results: list[dict[str, Any]] = []
 
                 for part in msg.parts:
                     match part:
@@ -119,7 +118,7 @@ async def _messages_to_openai(
                             reasoning += text
                         case messages_.TextPart(text=text):
                             content += text
-                        case messages_.ToolPart():
+                        case messages_.ToolCallPart():
                             tool_calls.append(
                                 {
                                     "id": part.tool_call_id,
@@ -130,16 +129,6 @@ async def _messages_to_openai(
                                     },
                                 }
                             )
-                            if part.status in ("result", "error"):
-                                tool_results.append(
-                                    {
-                                        "role": "tool",
-                                        "tool_call_id": part.tool_call_id,
-                                        "content": str(part.result)
-                                        if part.result is not None
-                                        else "",
-                                    }
-                                )
 
                 entry: dict[str, Any] = {"role": "assistant"}
                 if content:
@@ -149,7 +138,19 @@ async def _messages_to_openai(
                 if tool_calls:
                     entry["tool_calls"] = tool_calls
                 result.append(entry)
-                result.extend(tool_results)
+
+            case "tool":
+                for part in msg.parts:
+                    if isinstance(part, messages_.ToolResultPart):
+                        result.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": part.tool_call_id,
+                                "content": str(part.result)
+                                if part.result is not None
+                                else "",
+                            }
+                        )
 
             case "system":
                 content_text = "".join(

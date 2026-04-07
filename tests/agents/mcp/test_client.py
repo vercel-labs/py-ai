@@ -10,7 +10,7 @@ import vercel_ai_sdk as ai
 from vercel_ai_sdk.agents.mcp.client import _mcp_tool_to_native
 from vercel_ai_sdk.agents.tools import _tool_registry, get_tool
 
-from ...conftest import MOCK_MODEL, mock_llm, text_msg, tool_msg
+from ...conftest import MOCK_MODEL, mock_llm, text_msg, tool_call_msg
 
 
 def _fake_mcp_tool(
@@ -86,7 +86,9 @@ async def test_mcp_tool_executes_through_agent() -> None:
 
     my_agent = ai.agent(model=MOCK_MODEL, tools=[native])
 
-    call1 = [tool_msg(tc_id="tc-mcp-1", name="mcp_e2e_echo", args='{"text": "hello"}')]
+    call1 = [
+        tool_call_msg(tc_id="tc-mcp-1", name="mcp_e2e_echo", args='{"text": "hello"}')
+    ]
     call2 = [text_msg("Done.", id="msg-2")]
     llm = mock_llm([call1, call2])
 
@@ -98,11 +100,9 @@ async def test_mcp_tool_executes_through_agent() -> None:
     assert call_log[0] == {"text": "hello"}
 
     # Tool result is visible in messages
-    tool_results = [
-        m for m in msgs if m.tool_calls and m.tool_calls[0].status == "result"
-    ]
+    tool_results = [m for m in msgs if m.role == "tool" and m.tool_results]
     assert len(tool_results) >= 1
-    assert tool_results[0].tool_calls[0].result == "echoed: hello"
+    assert tool_results[0].tool_results[0].result == "echoed: hello"
 
     # LLM was called twice (tool call + final text)
     assert llm.call_count == 2

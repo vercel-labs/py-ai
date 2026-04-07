@@ -11,6 +11,7 @@ from typing import Any, Protocol, get_type_hints
 import pydantic
 
 from .. import models, types
+from ..types import builders
 from . import runtime
 
 
@@ -41,13 +42,13 @@ class Tool[**P, R]:
 
         # Generator tool (e.g. agent-as-a-tool): drain the async
         # generator, pipe each yielded message to the runtime for
-        # real-time streaming, and collect all messages as the result.
+        # real-time streaming, and return the final text as the result.
         rt = runtime.get_runtime()
-        messages: list[types.Message] = []
+        last: types.Message | None = None
         async for message in self._fn(**kwargs):
             await rt.put_message(message)
-            messages.append(message)
-        return messages
+            last = message
+        return last.text if last else ""
 
     @property
     def name(self) -> str:
@@ -93,12 +94,12 @@ def tool[**P, R](fn: Callable[P, Awaitable[R]]) -> Tool[P, R]:
 
 
 class ToolCall:
-    """
-    Intermediate object that context resolves tool parts to.
-    Binds together ToolPart and Tool, allows users to inspect it.
+    """Callable that binds a :class:`ToolCallPart` to its :class:`Tool`.
+
+    Calling it executes the tool and returns a :class:`ToolResultPart`.
     """
 
-    def __init__(self, part: types.ToolPart, tool: Tool[..., Any]) -> None:
+    def __init__(self, part: types.ToolCallPart, tool: Tool[..., Any]) -> None:
         self._part = part
         self._tool = tool
 
@@ -114,23 +115,35 @@ class ToolCall:
     def args(self) -> str:
         return self._part.tool_args
 
-    async def __call__(self) -> types.Message:
-        """Execute the tool and return a message with the resolved part."""
-        result = await self._tool(self._part.tool_args)
-        updated = self._part.with_result(result)
-        return types.Message(role="assistant", parts=[updated])
+    async def __call__(self) -> types.ToolResultPart:
+        """Execute the tool and return a :class:`ToolResultPart`."""
+        try:
+            result = await self._tool(self._part.tool_args)
+        except Exception as exc:
+            return types.ToolResultPart(
+                tool_call_id=self._part.tool_call_id,
+                tool_name=self._part.tool_name,
+                result=str(exc),
+                is_error=True,
+            )
+        return types.ToolResultPart(
+            tool_call_id=self._part.tool_call_id,
+            tool_name=self._part.tool_name,
+            result=result,
+        )
 
 
 class Context(pydantic.BaseModel):
     """Everything that goes into the LLM."""
 
+    model: models.Model
     messages: list[types.Message]
     tools: list[Tool[..., Any]]
 
     model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
 
-    def resolve(self, tool_parts: list[types.ToolPart]) -> list[ToolCall]:
-        """Resolve ToolParts into callable ToolCall objects."""
+    def resolve(self, tool_parts: list[types.ToolCallPart]) -> list[ToolCall]:
+        """Resolve ToolCallParts into callable ToolCall objects."""
         tools_by_name = {t.name: t for t in self.tools}
         return [
             ToolCall(part=tp, tool=tools_by_name[tp.tool_name]) for tp in tool_parts
@@ -143,19 +156,42 @@ class LoopFn(Protocol):
 
 async def _default_loop(context: Context) -> AsyncGenerator[types.Message]:
     while True:
-        stream = models.stream(context.model, context.messages)
+        stream = models.stream(context.model, context.messages, tools=context.tools)
         async for message in stream:
             yield message
 
-        tool_calls = context.resolve(stream.message.tool_calls)
+        tool_calls = context.resolve(stream.tool_calls)
         if not tool_calls:
             break
 
+        # Execute tool calls in parallel.
         async with asyncio.TaskGroup() as tg:
             tasks = [tg.create_task(tc()) for tc in tool_calls]
 
-        for task in tasks:
-            yield task.result
+        # Yield a tool-result message — history auto-collects it.
+        yield builders.tool_message(*(t.result() for t in tasks))
+
+
+async def _collect_messages(
+    source: AsyncGenerator[types.Message],
+    messages: list[types.Message],
+) -> AsyncGenerator[types.Message]:
+    """Intercept yielded messages and collect done ones into *messages*.
+
+    This runs on the **producer** side (same coroutine as the loop function),
+    so ``messages`` is always up-to-date by the time the loop reads it for
+    the next model call — avoiding the race that would occur if collection
+    happened on the consumer side of the runtime queue.
+    """
+    async for message in source:
+        if message.is_done:
+            for i, existing in enumerate(messages):
+                if existing.id == message.id:
+                    messages[i] = message
+                    break
+            else:
+                messages.append(message)
+        yield message
 
 
 class Agent:
@@ -178,15 +214,15 @@ class Agent:
         self, model: models.Model, messages: list[types.Message]
     ) -> AsyncGenerator[types.Message]:
         """Run the agent loop, yielding messages to the consumer."""
-        context = Context(messages=messages, tools=self._tools)
+        context = Context(model=model, messages=list(messages), tools=self._tools)
 
-        async for message in runtime.run(self._loop_fn(context)):
+        source = _collect_messages(self._loop_fn(context), context.messages)
+        async for message in runtime.run(source):
             yield message
 
 
 def agent(
     *,
-    model: models.Model,
     tools: list[Tool[..., Any]] | None = None,
     system: str | None = None,
 ) -> Agent:

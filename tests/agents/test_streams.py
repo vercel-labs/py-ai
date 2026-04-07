@@ -40,10 +40,10 @@ def test_stream_result_tool_calls() -> None:
         id="m1",
         role="assistant",
         parts=[
-            messages.ToolPart(
+            messages.ToolCallPart(
                 tool_call_id="tc1", tool_name="t", tool_args="{}", state="done"
             ),
-            messages.ToolPart(
+            messages.ToolCallPart(
                 tool_call_id="tc2", tool_name="u", tool_args="{}", state="done"
             ),
         ],

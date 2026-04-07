@@ -18,7 +18,7 @@ class StreamResult:
         return self.messages[-1] if self.messages else None
 
     @property
-    def tool_calls(self) -> list[messages_.ToolPart]:
+    def tool_calls(self) -> list[messages_.ToolCallPart]:
         """Get tool calls from the last message."""
         if self.last_message:
             return self.last_message.tool_calls

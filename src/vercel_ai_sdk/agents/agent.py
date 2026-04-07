@@ -194,16 +194,18 @@ class Agent:
             if last_msg is None:
                 return result
 
-            updated_parts = await asyncio.gather(
+            result_parts = await asyncio.gather(
                 *(
                     runtime.execute_tool(tc, message=last_msg)
                     for tc in result.tool_calls
                 )
             )
-            updated_msg = last_msg
-            for updated_tc in updated_parts:
-                updated_msg = updated_msg.replace(updated_tc)
-            local_messages.append(updated_msg)
+            # Append the assistant message (with tool calls) and a
+            # separate tool-result message to the local history.
+            local_messages.append(last_msg)
+            local_messages.append(
+                messages_.Message(role="tool", parts=list(result_parts))
+            )
 
     def run(
         self,

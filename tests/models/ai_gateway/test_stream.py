@@ -339,16 +339,20 @@ class TestRequest:
                 text=_sse({"type": "finish", "finishReason": "stop", "usage": {}}),
             )
 
-        tool_part = messages.ToolPart(
+        tool_call = messages.ToolCallPart(
             tool_call_id="tc-1",
             tool_name="search",
             tool_args='{"q": "weather"}',
-            status="result",
+        )
+        tool_result = messages.ToolResultPart(
+            tool_call_id="tc-1",
+            tool_name="search",
             result={"temp": 72},
         )
         conversation = [
             _user("What's the weather?"),
-            messages.Message(role="assistant", parts=[tool_part]),
+            messages.Message(role="assistant", parts=[tool_call]),
+            messages.Message(role="tool", parts=[tool_result]),
             _user("Thanks, and tomorrow?"),
         ]
 

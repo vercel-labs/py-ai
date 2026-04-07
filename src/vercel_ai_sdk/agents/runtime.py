@@ -281,29 +281,30 @@ def _find_runtime_param(fn: Callable[..., Any]) -> str | None:
 
 
 async def execute_tool(
-    tool_call: messages_.ToolPart,
+    tool_call: messages_.ToolCallPart,
     message: messages_.Message | None = None,
-) -> messages_.ToolPart:
+) -> messages_.ToolResultPart:
     """Execute a single tool call with replay support.
 
     Looks up the tool by name — first from the active Context (if any),
-    then from the global registry.  Returns an updated (immutable)
-    ToolPart with the result filled in.  Emits the updated message to
-    the LoopExecutor queue so the UI sees the transition from
-    status="pending" to status="result" (or "error").
+    then from the global registry.  Returns a :class:`ToolResultPart`
+    with the result.
 
     If a checkpoint exists with a cached result for this tool_call_id,
     returns the cached result without re-executing.
     """
     rt = _runtime.get(None)
 
-    # Replay: return updated part from cache
+    # Replay: return result part from cache
     if rt:
         cached = rt.log.try_replay_tool(tool_call.tool_call_id)
         if cached is not None:
-            if cached.status == "error":
-                return tool_call.with_error(cached.result)
-            return tool_call.with_result(cached.result)
+            return messages_.ToolResultPart(
+                tool_call_id=tool_call.tool_call_id,
+                tool_name=tool_call.tool_name,
+                result=cached.result,
+                is_error=cached.status == "error",
+            )
 
     telemetry.handle(
         telemetry.ToolCallStartEvent(
@@ -325,13 +326,20 @@ async def execute_tool(
         raise ValueError(f"Tool not found in registry: {tool_call.tool_name}")
 
     error_str: str | None = None
+    is_error = False
     try:
         result = await tool.validate_and_call(tool_call.tool_args, rt)
-        updated = tool_call.with_result(result)
     except (json.JSONDecodeError, pydantic.ValidationError) as exc:
         result = f"{type(exc).__name__}: {exc}"
         error_str = result
-        updated = tool_call.with_error(result)
+        is_error = True
+
+    result_part = messages_.ToolResultPart(
+        tool_call_id=tool_call.tool_call_id,
+        tool_name=tool_call.tool_name,
+        result=result,
+        is_error=is_error,
+    )
 
     telemetry.handle(
         telemetry.ToolCallFinishEvent(
@@ -344,14 +352,19 @@ async def execute_tool(
     )
 
     # Record for checkpoint
+    status = "error" if is_error else "result"
     if rt:
-        rt.log.record_tool(tool_call.tool_call_id, result, status=updated.status)
+        rt.log.record_tool(tool_call.tool_call_id, result, status=status)
 
-    # Emit updated message so UI sees status change
+    # Emit tool result message so UI sees the result
     if rt and message:
-        await rt.executor.put_message(message.replace(updated))
+        tool_msg = messages_.Message(
+            role="tool",
+            parts=[result_part],
+        )
+        await rt.executor.put_message(tool_msg)
 
-    return updated
+    return result_part
 
 
 # ── RunResult ─────────────────────────────────────────────────────

@@ -8,7 +8,7 @@ import vercel_ai_sdk as ai
 from vercel_ai_sdk.agents.runtime import Runtime
 from vercel_ai_sdk.types import messages
 
-from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_msg
+from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_call_msg
 
 # -- Tool definitions for tests --------------------------------------------
 
@@ -48,7 +48,7 @@ async def test_agent_tool_then_text() -> None:
     """Agent default loop calls tool, feeds result back, gets final text."""
     my_agent = ai.agent(model=MOCK_MODEL, tools=[double])
 
-    call1 = [tool_msg(tc_id="tc-1", name="double", args='{"x": 5}')]
+    call1 = [tool_call_msg(tc_id="tc-1", name="double", args='{"x": 5}')]
     call2 = [text_msg("The answer is 10.")]
     llm = mock_llm([call1, call2])
 
@@ -56,11 +56,9 @@ async def test_agent_tool_then_text() -> None:
     msgs = [m async for m in result]
     assert llm.call_count == 2
     # Tool should have been executed: 5 * 2 = 10
-    tool_results = [
-        m for m in msgs if m.tool_calls and m.tool_calls[0].status == "result"
-    ]
+    tool_results = [m for m in msgs if m.role == "tool" and m.tool_results]
     assert len(tool_results) >= 1
-    assert tool_results[0].tool_calls[0].result == 10
+    assert tool_results[0].tool_results[0].result == 10
 
 
 # -- Agent default loop: multiple tool calls in one message ----------------
@@ -75,18 +73,16 @@ async def test_agent_parallel_tools() -> None:
         id="msg-1",
         role="assistant",
         parts=[
-            messages.ToolPart(
+            messages.ToolCallPart(
                 tool_call_id="tc-1",
                 tool_name="double",
                 tool_args='{"x": 3}',
-                status="pending",
                 state="done",
             ),
-            messages.ToolPart(
+            messages.ToolCallPart(
                 tool_call_id="tc-2",
                 tool_name="double",
                 tool_args='{"x": 7}',
-                status="pending",
                 state="done",
             ),
         ],
@@ -98,11 +94,7 @@ async def test_agent_parallel_tools() -> None:
     msgs = [m async for m in result]
     assert llm.call_count == 2
     # Both tools should have results
-    tool_result_msgs = [
-        m
-        for m in msgs
-        if m.tool_calls and any(tc.status == "result" for tc in m.tool_calls)
-    ]
+    tool_result_msgs = [m for m in msgs if m.role == "tool" and m.tool_results]
     assert len(tool_result_msgs) >= 1
 
 
@@ -115,9 +107,9 @@ async def test_agent_multi_turn() -> None:
     my_agent = ai.agent(model=MOCK_MODEL, tools=[double, concat])
 
     turn1 = [
-        tool_msg(tc_id="tc-1", name="concat", args='{"a": "hello", "b": " world"}')
+        tool_call_msg(tc_id="tc-1", name="concat", args='{"a": "hello", "b": " world"}')
     ]
-    turn2 = [tool_msg(tc_id="tc-2", name="double", args='{"x": 3}', id="msg-2")]
+    turn2 = [tool_call_msg(tc_id="tc-2", name="double", args='{"x": 3}', id="msg-2")]
     turn3 = [text_msg("Done: hello world, 6", id="msg-3")]
     llm = mock_llm([turn1, turn2, turn3])
 
@@ -135,7 +127,7 @@ async def test_execute_tool_missing_raises() -> None:
 
     Wrapped in ExceptionGroup by TaskGroup.
     """
-    tc = messages.ToolPart(
+    tc = messages.ToolCallPart(
         tool_call_id="tc-1", tool_name="nonexistent_tool_zzz", tool_args="{}"
     )
     my_agent = ai.agent(model=MOCK_MODEL, tools=[])
@@ -179,7 +171,7 @@ async def test_execute_tool_injects_runtime() -> None:
                 )
             )
 
-    call = [tool_msg(tc_id="tc-1", name="introspect", args='{"query": "test"}')]
+    call = [tool_call_msg(tc_id="tc-1", name="introspect", args='{"query": "test"}')]
     mock_llm([call])
     result = my_agent.run(ai.make_messages(user="go"))
     [m async for m in result]
@@ -191,8 +183,8 @@ async def test_execute_tool_injects_runtime() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_tool_returns_updated_part() -> None:
-    """execute_tool returns an updated ToolPart; the original is unchanged."""
+async def test_execute_tool_returns_result_part() -> None:
+    """execute_tool returns a ToolResultPart; the original ToolCallPart is unchanged."""
     my_agent = ai.agent(model=MOCK_MODEL, tools=[double])
 
     @my_agent.loop
@@ -202,14 +194,14 @@ async def test_execute_tool_returns_updated_part() -> None:
             msg = result.last_message
             assert msg is not None
             for tc in result.tool_calls:
-                updated_tc = await ai.execute_tool(tc, message=msg)
-                # Returned part has the result
-                assert updated_tc.status == "result"
-                assert updated_tc.result == 10
-            # Original message is unchanged (immutable)
-            assert msg.tool_calls[0].status == "pending"
+                result_part = await ai.execute_tool(tc, message=msg)
+                # Returned part is a ToolResultPart with the result
+                assert not result_part.is_error
+                assert result_part.result == 10
+            # Original message's tool calls are unchanged (immutable)
+            assert msg.tool_calls[0].tool_name == "double"
 
-    call = [tool_msg(tc_id="tc-1", name="double", args='{"x": 5}')]
+    call = [tool_call_msg(tc_id="tc-1", name="double", args='{"x": 5}')]
     mock_llm([call])
     result = my_agent.run(ai.make_messages(user="go"))
     [m async for m in result]
@@ -223,7 +215,7 @@ async def test_agent_checkpoint_records_tools() -> None:
     """Agent default loop's tool executions are recorded in the checkpoint."""
     my_agent = ai.agent(model=MOCK_MODEL, tools=[double])
 
-    call1 = [tool_msg(tc_id="tc-1", name="double", args='{"x": 4}')]
+    call1 = [tool_call_msg(tc_id="tc-1", name="double", args='{"x": 4}')]
     call2 = [text_msg("8", id="msg-2")]
     mock_llm([call1, call2])
 

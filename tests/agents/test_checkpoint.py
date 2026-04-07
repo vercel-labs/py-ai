@@ -9,7 +9,7 @@ import pytest
 import vercel_ai_sdk as ai
 from vercel_ai_sdk.agents.checkpoint import Checkpoint, HookEvent, StepEvent, ToolEvent
 
-from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_msg
+from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_call_msg
 
 
 @ai.hook
@@ -66,7 +66,7 @@ async def test_tool_replay_skips_execution() -> None:
             )
         return result
 
-    mock_llm([[tool_msg(tc_id="tc-1", name="counting_tool", args='{"x": 5}')]])
+    mock_llm([[tool_call_msg(tc_id="tc-1", name="counting_tool", args='{"x": 5}')]])
     result1 = my_agent.run(ai.make_messages(system="t", user="go"))
     [msg async for msg in result1]
     assert execution_count == 1
