@@ -21,12 +21,24 @@ class Runtime:
         self._message_queue: asyncio.Queue[types.Message | Runtime._Sentinel] = (
             asyncio.Queue()
         )
+        self._hook_labels: set[str] = set()
 
     async def put_message(self, message: types.Message) -> None:
         await self._message_queue.put(message)
 
     async def signal_done(self) -> None:
         await self._message_queue.put(self._SENTINEL)
+
+    def track_hook_label(self, label: str) -> None:
+        """Register a hook label for cleanup when the run ends."""
+        self._hook_labels.add(label)
+
+    def cleanup_hooks(self) -> None:
+        """Remove all hook registry entries for this run."""
+        from . import hooks as hooks_
+
+        hooks_.cleanup_run(self._hook_labels)
+        self._hook_labels.clear()
 
 
 _runtime: contextvars.ContextVar[Runtime] = contextvars.ContextVar("runtime")
@@ -67,4 +79,5 @@ async def run(
                 yield item
 
     finally:
+        runtime.cleanup_hooks()
         _runtime.reset(token)

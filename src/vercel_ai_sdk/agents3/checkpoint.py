@@ -30,8 +30,25 @@ class ToolEvent(pydantic.BaseModel):
     status: str = "result"  # "result" | "error"
 
 
+class HookEvent(pydantic.BaseModel):
+    """A resolved hook."""
+
+    label: str
+    resolution: dict[str, Any]
+
+
+class PendingHookInfo(pydantic.BaseModel):
+    """A hook that was suspended but not resolved when the run ended."""
+
+    label: str
+    payload_type: str  # fully qualified name of the pydantic model
+    metadata: dict[str, Any] = {}
+
+
 class Checkpoint(pydantic.BaseModel):
     """Serializable snapshot of all completed work in an agent run."""
 
     steps: list[StepEvent] = []
     tools: list[ToolEvent] = []
+    hooks: list[HookEvent] = []
+    pending_hooks: list[PendingHookInfo] = []

@@ -282,7 +282,7 @@ class ToolDelta(pydantic.BaseModel):
 class Message(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(frozen=True)
 
-    role: Literal["user", "assistant", "system", "tool"]
+    role: Literal["user", "assistant", "system", "tool", "signal"]
     parts: list[Part]
     id: str = pydantic.Field(default_factory=generate_id)
     label: str | None = None

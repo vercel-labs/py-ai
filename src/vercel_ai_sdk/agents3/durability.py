@@ -87,6 +87,14 @@ class DurabilityProvider(Protocol):
         """
         ...
 
+    def get_hook_resolution(self, label: str) -> dict[str, Any] | None:
+        """Return a cached hook resolution, or ``None`` if not cached."""
+        ...
+
+    def record_hook(self, label: str, resolution: dict[str, Any]) -> None:
+        """Record a hook resolution for checkpoint."""
+        ...
+
     def checkpoint(self) -> checkpoint_.Checkpoint:
         """Return a snapshot of all completed work."""
         ...
@@ -195,10 +203,14 @@ class EventLogProvider:
         self._tool_cache: dict[str, checkpoint_.ToolEvent] = {
             t.tool_call_id: t for t in self._checkpoint.tools
         }
+        self._hook_cache: dict[str, dict[str, Any]] = {
+            h.label: h.resolution for h in self._checkpoint.hooks
+        }
 
         # New recordings
         self._steps: list[checkpoint_.StepEvent] = []
         self._tools: list[checkpoint_.ToolEvent] = []
+        self._hooks: list[checkpoint_.HookEvent] = []
 
     # ── Stream ────────────────────────────────────────────────
 
@@ -254,6 +266,17 @@ class EventLogProvider:
         )
         return result
 
+    # ── Hook ──────────────────────────────────────────────────
+
+    def get_hook_resolution(self, label: str) -> dict[str, Any] | None:
+        cached = self._hook_cache.get(label)
+        if cached is not None:
+            logger.info("Resolving hook '%s' from checkpoint", label)
+        return cached
+
+    def record_hook(self, label: str, resolution: dict[str, Any]) -> None:
+        self._hooks.append(checkpoint_.HookEvent(label=label, resolution=resolution))
+
     # ── Checkpoint ────────────────────────────────────────────
 
     def checkpoint(self) -> checkpoint_.Checkpoint:
@@ -261,4 +284,5 @@ class EventLogProvider:
         return checkpoint_.Checkpoint(
             steps=list(self._checkpoint.steps) + self._steps,
             tools=list(self._checkpoint.tools) + self._tools,
+            hooks=list(self._checkpoint.hooks) + self._hooks,
         )
