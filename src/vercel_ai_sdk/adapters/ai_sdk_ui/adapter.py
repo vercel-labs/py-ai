@@ -11,6 +11,7 @@ from collections.abc import AsyncGenerator, AsyncIterable
 from typing import Any
 
 from ...agents import hooks
+from ...agents.hooks import TOOL_APPROVAL_HOOK_TYPE
 from ...types import messages as messages_
 from . import protocol, ui_message
 
@@ -138,7 +139,7 @@ def _tool_call_id_from_approval_hook(
     Returns the tool_call_id if this is a ToolApproval hook whose hook_id
     follows the ``approve_{tool_call_id}`` convention, otherwise None.
     """
-    if hook_part.hook_type != hooks.ToolApproval.hook_type:  # type: ignore[attr-defined]
+    if hook_part.hook_type != TOOL_APPROVAL_HOOK_TYPE:
         return None
     prefix = "approve_"
     if hook_part.hook_id.startswith(prefix):
@@ -463,7 +464,7 @@ def to_messages(
                         and tp.approval is not None
                         and tp.approval.approved is not None
                     ):
-                        hooks.ToolApproval.resolve(  # type: ignore[attr-defined]
+                        hooks.resolve_hook(
                             tp.approval.id,
                             {
                                 "granted": tp.approval.approved,

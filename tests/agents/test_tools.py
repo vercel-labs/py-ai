@@ -1,10 +1,8 @@
-"""@tool decorator: schema extraction, registry, Runtime parameter handling."""
+"""@tool decorator: schema extraction, execution, ToolCall."""
 
 import pytest
 
 import vercel_ai_sdk as ai
-from vercel_ai_sdk.agents.runtime import Runtime
-from vercel_ai_sdk.agents.tools import get_tool
 
 # -- Schema extraction from type hints ------------------------------------
 
@@ -31,7 +29,6 @@ def test_optional_param_not_required() -> None:
 
     assert "query" in search.param_schema.get("required", [])
     assert "limit" not in search.param_schema.get("required", [])
-    # limit should still appear in properties
     assert "limit" in search.param_schema["properties"]
 
 
@@ -41,8 +38,8 @@ def test_default_value_not_required() -> None:
         """Fetch URL."""
         return url
 
-    assert "url" in search_required(fetch)
-    assert "timeout" not in search_required(fetch)
+    assert "url" in _required(fetch)
+    assert "timeout" not in _required(fetch)
 
 
 def test_complex_type_schema() -> None:
@@ -56,55 +53,67 @@ def test_complex_type_schema() -> None:
     assert props["recipients"]["items"]["type"] == "string"
 
 
-# -- Runtime parameter skipping -------------------------------------------
-
-
-def test_runtime_param_excluded_from_schema() -> None:
-    @ai.tool
-    async def needs_runtime(query: str, rt: Runtime) -> str:
-        """Tool that needs runtime."""
-        return query
-
-    props = needs_runtime.param_schema["properties"]
-    assert "rt" not in props
-    assert "query" in props
-    assert set(needs_runtime.param_schema.get("required", [])) == {"query"}
-
-
-# -- Registry -------------------------------------------------------------
-
-
-def test_tool_registered_on_decoration() -> None:
-    @ai.tool
-    async def unique_tool_abc() -> str:
-        """Unique."""
-        return "ok"
-
-    assert get_tool("unique_tool_abc") is unique_tool_abc
-
-
-def test_get_tool_returns_none_for_missing() -> None:
-    assert get_tool("nonexistent_tool_xyz") is None
-
-
-# -- Execution ------------------------------------------------------------
+# -- Execution (Tool.__call__) --------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_tool_fn_is_callable() -> None:
+async def test_tool_call_with_json_args() -> None:
     @ai.tool
     async def add(a: int, b: int) -> int:
         """Add two numbers."""
         return a + b
 
-    result = await add(a=1, b=2)
+    result = await add('{"a": 1, "b": 2}')
     assert result == 3
+
+
+# -- ToolCall binds a ToolCallPart to a Tool and returns ToolResultPart ----
+
+
+@pytest.mark.asyncio
+async def test_tool_call_returns_result_part() -> None:
+    @ai.tool
+    async def double(x: int) -> int:
+        """Double a number."""
+        return x * 2
+
+    part = ai.ToolCallPart(
+        tool_call_id="tc-1",
+        tool_name="double",
+        tool_args='{"x": 5}',
+    )
+    tc = ai.ToolCall(part=part, tool=double)
+    result = await tc()
+
+    assert result.tool_call_id == "tc-1"
+    assert result.tool_name == "double"
+    assert result.result == 10
+    assert not result.is_error
+
+
+@pytest.mark.asyncio
+async def test_tool_call_catches_errors() -> None:
+    @ai.tool
+    async def fail(x: int) -> int:
+        """Always fails."""
+        raise ValueError("boom")
+
+    part = ai.ToolCallPart(
+        tool_call_id="tc-err",
+        tool_name="fail",
+        tool_args='{"x": 1}',
+    )
+    tc = ai.ToolCall(part=part, tool=fail)
+    result = await tc()
+
+    assert result.is_error
+    assert "boom" in str(result.result)
 
 
 # -- Helpers ---------------------------------------------------------------
 
 
-def search_required(tool: ai.Tool[..., object]) -> list[str]:
+def _required(tool: ai.Tool[..., object]) -> list[str]:
     result = tool.param_schema.get("required", [])
     assert isinstance(result, list)
     return result

@@ -1,28 +1,24 @@
 from . import adapters, models, telemetry
 from .adapters import ai_sdk_ui
 from .agents import (
+    TOOL_APPROVAL_HOOK_TYPE,
     Agent,
-    AgentRun,
     Checkpoint,
     Context,
-    Hook,
-    HookInfo,
-    LoopFn,
+    DurabilityProvider,
+    EventLogProvider,
+    HookEvent,
     PendingHookInfo,
-    RunResult,
-    Runtime,
-    StreamResult,
+    StepEvent,
     Tool,
     ToolApproval,
-    ToolSource,
+    ToolCall,
+    ToolEvent,
     agent,
-    execute_tool,
-    get_checkpoint,
-    get_context,
+    cancel_hook,
     hook,
     mcp,
-    stream,
-    stream_step,
+    resolve_hook,
     tool,
 )
 from .models import Client, Model, ModelCost
@@ -87,33 +83,27 @@ __all__ = [
     "models",
     # Agents — primary API
     "Agent",
-    "AgentRun",
     "agent",
-    "LoopFn",
-    # Agents — composition primitives
-    "stream_step",
-    "execute_tool",
-    "get_checkpoint",
-    "stream",
-    "StreamResult",
+    "Context",
     # Agents — tools
     "Tool",
+    "ToolCall",
     "tool",
     # Agents — hooks
-    "Hook",
     "hook",
+    "resolve_hook",
+    "cancel_hook",
     "ToolApproval",
-    # Agents — context
-    "Context",
-    "ToolSource",
-    "get_context",
-    # Agents — runtime (developer API)
-    "Runtime",
-    "RunResult",
-    "HookInfo",
+    "TOOL_APPROVAL_HOOK_TYPE",
+    # Agents — durability
+    "DurabilityProvider",
+    "EventLogProvider",
     # Agents — checkpoint
     "Checkpoint",
     "PendingHookInfo",
+    "StepEvent",
+    "ToolEvent",
+    "HookEvent",
     # Submodules
     "telemetry",
     "mcp",

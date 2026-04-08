@@ -232,20 +232,21 @@ class OtelHandler:
             return
         span, _ctx = entry
 
+        msg = event.message
         attrs: dict[str, Any] = {}
-        usage = event.result.usage
+        usage = msg.usage
         if usage:
             attrs["gen_ai.usage.input_tokens"] = usage.input_tokens
             attrs["gen_ai.usage.output_tokens"] = usage.output_tokens
 
-        text = event.result.text
+        text = msg.text
         if text:
             attrs["ai.response.text"] = {"output": lambda: text}
 
         finish_reason = None
-        if event.result.last_message and not event.result.tool_calls:
+        if not msg.tool_calls:
             finish_reason = "stop"
-        elif event.result.tool_calls:
+        elif msg.tool_calls:
             finish_reason = "tool_calls"
         if finish_reason:
             attrs["ai.response.finishReason"] = finish_reason

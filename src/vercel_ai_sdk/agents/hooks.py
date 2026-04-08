@@ -1,245 +1,268 @@
+"""Hooks: suspension points that require external input to continue.
+
+Usage inside an agent loop::
+
+    result = await hook("approve_delete", payload=ToolApproval, metadata={"tool": "rm"})
+    if result.granted:
+        ...
+
+Resolution from outside the loop::
+
+    resolve_hook("approve_delete", {"granted": True})
+
+Cancellation::
+
+    await cancel_hook("approve_delete", reason="denied")
+
+Behavior depends on ``interrupt_loop``:
+
+interrupt_loop=False (default, long-running): the await blocks until
+resolve_hook() is called from outside (e.g. websocket handler, API endpoint).
+
+interrupt_loop=True (serverless): if no resolution is available, the
+hook's future is cancelled. The branch receives CancelledError and dies
+cleanly. On re-entry, call resolve_hook() before agent.run() to
+pre-register the resolution, then pass checkpoint= to replay.
+"""
+
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any
 
 import pydantic
 
+from .. import _durability as _dctx
 from ..types import messages as messages_
-
-if TYPE_CHECKING:
-    from . import runtime as runtime_
-
+from . import runtime as runtime_
 
 # ---------------------------------------------------------------------------
 # Module-level hook registries
 #
 # _live_hooks:
-#   Populated by Hook.create() when a hook suspends inside a running graph.
+#   Populated by hook() when it suspends inside a running agent.
 #   Maps hook label -> (future, metadata dict, Runtime).
-#   Consumed by Hook.resolve() / Hook.cancel() to unblock the awaiting
+#   Consumed by resolve_hook() / cancel_hook() to unblock the awaiting
 #   coroutine.  Entries are removed when the hook resolves, cancels, or
 #   the run completes.
 #
 # _pending_resolutions:
-#   Populated by Hook.resolve() when no live hook exists yet (serverless
-#   re-entry: the user calls resolve() *before* ai.run() replays the graph).
-#   Maps hook label -> validated resolution dict.
-#   Consumed by Hook.create() at the start of graph execution — if a
-#   pre-registered resolution exists for the label, the hook returns
-#   immediately without suspending.  Entries are removed on consumption.
+#   Populated by resolve_hook() when no live hook exists yet (serverless
+#   re-entry: the user calls resolve_hook() *before* agent.run() replays).
+#   Maps hook label -> (payload type, validated resolution dict).
+#   Consumed by hook() at the start of execution — if a pre-registered
+#   resolution exists for the label, the hook returns immediately without
+#   suspending.  Entries are removed on consumption.
 # ---------------------------------------------------------------------------
 
 _live_hooks: dict[
-    str, tuple[asyncio.Future[Any], dict[str, Any], runtime_.Runtime]
+    str, tuple[asyncio.Future[dict[str, Any]], dict[str, Any], runtime_.Runtime]
 ] = {}
 
 _pending_resolutions: dict[str, dict[str, Any]] = {}
-# label -> validated resolution dict
 
 
-def _cleanup_run(labels: set[str]) -> None:
+def cleanup_run(labels: set[str]) -> None:
     """Remove all registry entries associated with a finished run."""
     for label in labels:
         _live_hooks.pop(label, None)
         _pending_resolutions.pop(label, None)
 
 
-class Hook[T: pydantic.BaseModel]:
-    """Hook: a suspension point that requires external input to continue.
+async def hook[T: pydantic.BaseModel](
+    label: str,
+    *,
+    payload: type[T],
+    metadata: dict[str, Any] | None = None,
+    interrupt_loop: bool = False,
+) -> T:
+    """Create a hook suspension point and await its resolution.
 
-    Usage in graph code:
-
-        approval = await ToolApproval.create("approve_delete", metadata={...})
-        if approval.granted:
-            ...
-
-    Resolution from outside the graph:
-
-        ToolApproval.resolve("approve_delete", {"granted": True, ...})
-
-    Behavior depends on the ``cancels_future`` class variable:
-
-    cancels_future=False (default, long-running): the await blocks until
-    Hook.resolve() is called from outside the graph (e.g., websocket
-    handler, API endpoint).
-
-    cancels_future=True (serverless): if no resolution is available, the
-    hook's future is cancelled by run(). The branch receives CancelledError
-    and dies cleanly. On re-entry, call Hook.resolve() before ai.run() to
-    pre-register the resolution, then pass checkpoint= to replay.
+    Args:
+        label: Unique identifier for this hook instance.
+        payload: Pydantic model class — the resolution data must validate
+            against this type.  The return value is a validated instance.
+        metadata: Arbitrary metadata surfaced in the pending signal message
+            and checkpoint.  Useful for UI rendering (e.g. which tool needs
+            approval, what arguments it received).
+        interrupt_loop: When ``True`` (serverless mode), the hook's future
+            is cancelled if no resolution is available, causing
+            ``CancelledError`` in the awaiting coroutine.  When ``False``
+            (long-running mode), the future is held until resolved
+            externally.
     """
+    rt = runtime_.get_runtime()
+    hook_metadata = metadata or {}
 
-    _schema: ClassVar[type[pydantic.BaseModel]]
-    hook_type: ClassVar[str]
-    cancels_future: ClassVar[bool] = False
+    provider = _dctx.get_provider()
 
-    @classmethod
-    async def create(cls, label: str, metadata: dict[str, Any] | None = None) -> T:
-        """Create a hook and await its resolution.
+    # Path 1: pre-registered resolution (serverless re-entry).
+    pre_registered = _pending_resolutions.pop(label, None)
+    if pre_registered is not None:
+        if provider is not None:
+            provider.record_hook(label, pre_registered)
+        return payload(**pre_registered)
 
-        The hook is submitted to the LoopExecutor's step queue. run() will
-        either:
-        - Resolve immediately (if a resolution is available from checkpoint
-          or pre-registered via Hook.resolve())
-        - Cancel the future (cancels_future=True, serverless mode)
-        - Hold the future (cancels_future=False, long-running mode)
-        """
-        from . import runtime as rt_mod
+    # Path 2: cached resolution from checkpoint (durability replay).
+    if provider is not None:
+        cached = provider.get_hook_resolution(label)
+        if cached is not None:
+            provider.record_hook(label, cached)
+            return payload(**cached)
 
-        rt = rt_mod._runtime.get(None)
-        if rt is None:
-            raise ValueError("No Runtime context - must be called within ai.run()")
+    # Path 3: no resolution available — suspend.
+    future: asyncio.Future[dict[str, Any]] = asyncio.Future()
 
-        # Check pre-registered resolutions (serverless re-entry path)
-        pre_registered = _pending_resolutions.pop(label, None)
-        if pre_registered is not None:
-            rt.log.record_hook(label, pre_registered)
-            return cls._schema(**pre_registered)  # type: ignore[return-value]
+    _live_hooks[label] = (future, hook_metadata, rt)
+    rt.track_hook_label(label)
 
-        # Check checkpoint for a previously resolved value
-        resolution = rt.log.get_hook_resolution(label)
-        if resolution is not None:
-            rt.log.record_hook(label, resolution)
-            return cls._schema(**resolution)  # type: ignore[return-value]
-
-        # Submit to executor queue — run() decides what to do
-        future: asyncio.Future[dict[str, Any]] = asyncio.Future()
-        suspension = rt_mod.HookSuspension(
-            label=label,
-            hook_type=cls.hook_type,
-            metadata=metadata or {},
-            future=future,
-            cancels_future=cls.cancels_future,
-        )
-        await rt.executor.put_hook(suspension)
-
-        # Register in module-level registry for external resolution
-        hook_metadata = metadata or {}
-        _live_hooks[label] = (future, hook_metadata, rt)
-        rt.executor.track_hook_label(label)
-
-        # Await resolution — may be resolved immediately by run(),
-        # cancelled by run() (serverless), or resolved later by
-        # Hook.resolve() (long-running).
-        resolution = await future
-
-        # Clean up
-        _live_hooks.pop(label, None)
-
-        # Record for checkpoint
-        rt.log.record_hook(label, resolution)
-
-        # Emit resolved message
-        await rt.executor.put_message(
-            messages_.Message(
-                role="assistant",
-                parts=[
-                    messages_.HookPart(
-                        hook_id=label,
-                        hook_type=cls.hook_type,
-                        status="resolved",
-                        metadata=hook_metadata,
-                        resolution=resolution,
-                    )
-                ],
-            )
-        )
-
-        return cls._schema(**resolution)  # type: ignore[return-value]
-
-    @classmethod
-    def resolve(cls, label: str, data: T | dict[str, Any]) -> None:
-        """Resolve a hook by label.
-
-        Works in two modes:
-
-        1. Live hook exists (long-running): validates data, resolves the
-           future immediately, unblocking the awaiting coroutine.
-
-        2. No live hook yet (serverless re-entry): validates data and
-           stashes it in the pre-registration registry. When ai.run()
-           replays the graph and Hook.create() executes, it finds the
-           pre-registered resolution and returns without suspending.
-        """
-        # Validate and normalize to dict
-        if isinstance(data, dict):
-            validated = cls._schema(**data)
-            resolution = validated.model_dump()
-        else:
-            if not isinstance(data, cls._schema):
-                raise TypeError(
-                    f"Expected {cls._schema.__name__} or dict, "
-                    f"got {type(data).__name__}"
+    # Emit pending signal message.
+    await rt.put_message(
+        messages_.Message(
+            role="signal",
+            parts=[
+                messages_.HookPart(
+                    hook_id=label,
+                    hook_type=payload.__name__,
+                    status="pending",
+                    metadata=hook_metadata,
                 )
-            resolution = data.model_dump()
-
-        # Path 1: live hook — resolve the future directly
-        if label in _live_hooks:
-            future, _, _rt = _live_hooks[label]
-            future.set_result(resolution)
-            return
-
-        # Path 2: no live hook — pre-register for later consumption
-        _pending_resolutions[label] = resolution
-
-    @classmethod
-    async def cancel(cls, label: str, reason: str | None = None) -> None:
-        """Cancel a pending hook.
-
-        Only works for live hooks (long-running mode). Raises if the
-        hook is not currently pending.
-        """
-        if label not in _live_hooks:
-            raise ValueError(f"No pending hook with label: {label}")
-
-        future, hook_metadata, rt = _live_hooks.pop(label)
-        future.cancel(reason)
-
-        await rt.executor.put_message(
-            messages_.Message(
-                role="assistant",
-                parts=[
-                    messages_.HookPart(
-                        hook_id=label,
-                        hook_type=cls.hook_type,
-                        status="cancelled",
-                        metadata=hook_metadata,
-                    )
-                ],
-            )
+            ],
         )
-
-
-def hook[T: pydantic.BaseModel](cls: type[T]) -> type[Hook[T]]:
-    """Decorator to create a Hook type from a pydantic model.
-
-    The pydantic model defines the schema for the hook's resolution payload.
-    """
-    hook_impl = type(
-        cls.__name__,
-        (Hook,),
-        {
-            "_schema": cls,
-            "hook_type": cls.__name__,
-            "cancels_future": cls.__dict__.get("cancels_future", False),
-            "__doc__": cls.__doc__,
-        },
     )
 
-    return hook_impl
+    if interrupt_loop:
+        # Yield control so the consumer can see the pending message,
+        # then cancel — the caller catches CancelledError.
+        await asyncio.sleep(0)
+        if not future.done():
+            future.cancel()
+
+    # Await resolution — may be resolved externally or cancelled.
+    resolution = await future
+
+    # Clean up live registry.
+    _live_hooks.pop(label, None)
+
+    # Record for checkpoint.
+    if provider is not None:
+        provider.record_hook(label, resolution)
+
+    # Emit resolved signal message.
+    await rt.put_message(
+        messages_.Message(
+            role="signal",
+            parts=[
+                messages_.HookPart(
+                    hook_id=label,
+                    hook_type=payload.__name__,
+                    status="resolved",
+                    metadata=hook_metadata,
+                    resolution=resolution,
+                )
+            ],
+        )
+    )
+
+    return payload(**resolution)
 
 
-@hook
-class ToolApproval(pydantic.BaseModel):
-    """Prewired hook for tool call approval.
+def resolve_hook(
+    label: str,
+    data: pydantic.BaseModel | dict[str, Any],
+    *,
+    payload: type[pydantic.BaseModel] | None = None,
+) -> None:
+    """Resolve a hook by label.
 
-    Used by the AI SDK UI adapter to bridge the protocol's
-    tool-approval-request / approval-responded flow to the
-    hook system.
+    Works in two modes:
+
+    1. **Live hook exists** (long-running): validates data (if ``payload``
+       type is provided), resolves the future immediately, unblocking the
+       awaiting coroutine.
+
+    2. **No live hook yet** (serverless re-entry): stashes the resolution
+       in the pre-registration registry.  When ``hook()`` executes during
+       replay, it finds the pre-registered value and returns without
+       suspending.
+
+    Args:
+        label: The hook label to resolve.
+        data: Resolution data — a dict or pydantic model instance.
+        payload: Optional pydantic model class for validation.  When
+            omitted and *data* is a model instance, its type is used.
     """
+    # Normalize to dict.
+    if isinstance(data, pydantic.BaseModel):
+        resolution = data.model_dump()
+    elif isinstance(data, dict):
+        if payload is not None:
+            # Validate against the payload type.
+            validated = payload(**data)
+            resolution = validated.model_dump()
+        else:
+            resolution = data
+    else:
+        raise TypeError(f"Expected dict or pydantic model, got {type(data).__name__}")
 
-    cancels_future: ClassVar[bool] = True
+    # Path 1: live hook — resolve the future directly.
+    if label in _live_hooks:
+        future, _, _rt = _live_hooks[label]
+        future.set_result(resolution)
+        return
+
+    # Path 2: no live hook — pre-register for later consumption.
+    _pending_resolutions[label] = resolution
+
+
+async def cancel_hook(label: str, *, reason: str | None = None) -> None:
+    """Cancel a pending hook.
+
+    Only works for live hooks (long-running mode).  Raises ValueError
+    if the hook is not currently pending.
+    """
+    if label not in _live_hooks:
+        raise ValueError(f"No pending hook with label: {label!r}")
+
+    future, hook_metadata, rt = _live_hooks.pop(label)
+    future.cancel(reason)
+
+    # Emit cancelled signal message.
+    await rt.put_message(
+        messages_.Message(
+            role="signal",
+            parts=[
+                messages_.HookPart(
+                    hook_id=label,
+                    hook_type="",  # not available at cancel site
+                    status="cancelled",
+                    metadata=hook_metadata,
+                )
+            ],
+        )
+    )
+
+
+# ── Built-in hook payloads ────────────────────────────────────────
+
+
+class ToolApproval(pydantic.BaseModel):
+    """Payload schema for tool-approval hooks.
+
+    Usage inside a loop::
+
+        approval = await hook(
+            f"approve_{tc.tool_call_id}",
+            payload=ToolApproval,
+            metadata={"tool_name": tc.tool_name},
+            interrupt_loop=True,
+        )
+        if approval.granted:
+            ...
+    """
 
     granted: bool
     reason: str | None = None
+
+
+TOOL_APPROVAL_HOOK_TYPE = ToolApproval.__name__

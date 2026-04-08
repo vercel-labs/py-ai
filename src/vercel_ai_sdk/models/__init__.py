@@ -169,7 +169,7 @@ async def stream(
     the final ``Message``.  After iteration, access ``.text``,
     ``.tool_calls``, ``.usage``, etc.
 
-    If a :class:`~vercel_ai_sdk.agents3.durability.DurabilityProvider` is
+    If a :class:`~vercel_ai_sdk.agents.durability.DurabilityProvider` is
     active (set by ``Agent.run()``), the stream is routed through the
     provider for recording or replay.
     """

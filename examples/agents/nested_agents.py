@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import AsyncGenerator
 
 import vercel_ai_sdk as ai
-from vercel_ai_sdk.agents3 import agent, tool
+from vercel_ai_sdk.agents import agent, tool
 
 model = ai.Model(
     id="anthropic/claude-sonnet-4-20250514",

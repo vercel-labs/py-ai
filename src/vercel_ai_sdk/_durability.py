@@ -1,9 +1,9 @@
 """Shared durability context var.
 
 Lives at the package root so that both ``models`` (lower-level) and
-``agents3`` (higher-level) can import it without circular dependencies.
+``agents`` (higher-level) can import it without circular dependencies.
 The actual ``DurabilityProvider`` protocol and implementations live in
-``agents3.durability``; this module only holds the context var and a
+``agents.durability``; this module only holds the context var and a
 thin accessor.
 """
 
@@ -13,10 +13,10 @@ import contextvars
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .agents3 import durability
+    from .agents import durability
 
 # The context var stores Any at runtime to avoid importing the protocol
-# at module level.  ``agents3.durability`` provides the typed accessor.
+# at module level.  ``agents.durability`` provides the typed accessor.
 _provider: contextvars.ContextVar[Any] = contextvars.ContextVar(
     "durability_provider", default=None
 )

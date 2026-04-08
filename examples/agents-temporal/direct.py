@@ -23,7 +23,7 @@ with temporalio.workflow.unsafe.imports_passed_through():
     import activities
 
     import vercel_ai_sdk as ai
-    from vercel_ai_sdk.agents3 import Context, agent, tool
+    from vercel_ai_sdk.agents import Context, agent, tool
 
 
 # ── Tools ────────────────────────────────────────────────────────

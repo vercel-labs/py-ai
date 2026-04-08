@@ -27,7 +27,7 @@ import provider
 import temporalio.client
 import temporalio.worker
 
-TASK_QUEUE = "agents3-durable"
+TASK_QUEUE = "agents-durable"
 
 
 async def main(mode: str, user_query: str) -> None:
@@ -50,7 +50,7 @@ async def main(mode: str, user_query: str) -> None:
             activities.tool_dispatch_activity,
         ],
     ):
-        workflow_id = f"agents3-{mode}-{uuid.uuid4().hex[:8]}"
+        workflow_id = f"agents-{mode}-{uuid.uuid4().hex[:8]}"
         print(f"Mode:     {mode}")
         print(f"Workflow: {workflow_id}")
         print(f"Query:    {user_query}\n")

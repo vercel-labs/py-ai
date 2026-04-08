@@ -3,7 +3,7 @@
 import asyncio
 
 import vercel_ai_sdk as ai
-from vercel_ai_sdk.agents3 import agent, tool
+from vercel_ai_sdk.agents import agent, tool
 
 
 @tool

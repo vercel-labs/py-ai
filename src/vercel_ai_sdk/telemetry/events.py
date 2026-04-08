@@ -29,7 +29,6 @@ import time
 import uuid
 from typing import Any, Protocol, runtime_checkable
 
-from ..agents import streams
 from ..types import messages as messages_
 
 # ── Protocol ───────────────────────────────────────────────────────
@@ -66,10 +65,10 @@ class StepStartEvent(TelemetryEvent):
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class StepFinishEvent(TelemetryEvent):
-    """Emitted when a ``@stream``-decorated step finishes."""
+    """Emitted when an LLM stream step finishes."""
 
     step_index: int
-    result: streams.StreamResult
+    message: messages_.Message
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

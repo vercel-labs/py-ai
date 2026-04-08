@@ -1,7 +1,7 @@
 [project]
-name = "agents3-temporal"
+name = "agents-temporal"
 version = "0.1.0"
-description = "Durable agent execution with Temporal (agents3 API)"
+description = "Durable agent execution with Temporal"
 requires-python = ">=3.12"
 dependencies = [
     "vercel-ai-sdk",

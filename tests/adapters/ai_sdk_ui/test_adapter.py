@@ -247,11 +247,7 @@ async def test_runtime_tool_roundtrip() -> None:
     status="pending", but pydantic models are mutable so when we collect
     them at the end, we see the mutated state.
     """
-    weather_agent = ai.agent(
-        model=MOCK_MODEL,
-        system="You are helpful.",
-        tools=[get_weather],
-    )
+    weather_agent = ai.agent(tools=[get_weather])
 
     # First LLM call: returns a tool call
     tool_call_response = [
@@ -283,7 +279,7 @@ async def test_runtime_tool_roundtrip() -> None:
     # Collect all messages from the runtime
     runtime_messages: list[messages.Message] = []
     async for msg in weather_agent.run(
-        ai.make_messages(user="What's the weather in London?")
+        MOCK_MODEL, ai.make_messages(user="What's the weather in London?")
     ):
         runtime_messages.append(msg)
 
@@ -556,7 +552,7 @@ async def test_tool_approval_hook_emits_approval_request() -> None:
             parts=[
                 messages.HookPart(
                     hook_id="approve_tc-1",
-                    hook_type=hooks.ToolApproval.hook_type,  # type: ignore[attr-defined]
+                    hook_type=hooks.TOOL_APPROVAL_HOOK_TYPE,
                     status="pending",
                     metadata={"tool_name": "rm_rf", "tool_args": '{"path": "/"}'},
                 ),
@@ -617,51 +613,51 @@ def test_approval_responded_resolves_hook() -> None:
 async def test_runtime_tool_approval_same_step() -> None:
     """E2E: tool-approval-request must land in the same SSE step as the tool call.
 
-    Runs a graph with ToolApproval (cancels_future=True) through ai.run(),
+    Runs a graph with ToolApproval (interrupt_loop=True) through agent.run(),
     collects runtime messages, streams through the adapter, and asserts
     that no spurious step boundary appears between tool-input-available
     and tool-approval-request.
-
-    This is the test that would have caught the bug where the Runtime's
-    HookPart message (which has a different id from the LLM message)
-    caused the adapter to open a new step.
     """
+    from collections.abc import AsyncGenerator as AG
 
     @ai.tool
     async def dangerous_action(path: str) -> str:
         """Do something dangerous."""
         return f"deleted {path}"
 
-    approval_agent = ai.agent(
-        model=MOCK_MODEL,
-        system="You are helpful.",
-        tools=[dangerous_action],
-    )
+    approval_agent = ai.agent(tools=[dangerous_action])
 
     @approval_agent.loop
-    async def custom(agent: ai.Agent, msgs: list[ai.Message]) -> None:
-        result = await ai.stream_step(agent.model, msgs, agent.tools)
-        if not result.tool_calls:
+    async def custom(context: ai.Context) -> AG[ai.Message]:
+        stream = await ai.models.stream(
+            context.model, context.messages, tools=context.tools
+        )
+        async for msg in stream:
+            yield msg
+
+        tool_calls = context.resolve(stream.tool_calls)
+        if not tool_calls:
             return
 
-        last_msg = result.last_message
-        assert last_msg is not None
-
-        async def approve_and_execute(tc: ai.ToolCallPart) -> ai.ToolResultPart:
-            approval = await ai.ToolApproval.create(  # type: ignore[attr-defined]
-                f"approve_{tc.tool_call_id}",
-                metadata={"tool_name": tc.tool_name},
+        async def approve_and_execute(tc: ai.ToolCall) -> ai.ToolResultPart:
+            approval = await ai.hook(
+                f"approve_{tc.id}",
+                payload=ai.ToolApproval,
+                metadata={"tool_name": tc.name},
+                interrupt_loop=True,
             )
             if approval.granted:
-                return await ai.execute_tool(tc, message=last_msg)
+                return await tc()
             return ai.ToolResultPart(
-                tool_call_id=tc.tool_call_id,
-                tool_name=tc.tool_name,
+                tool_call_id=tc.id,
+                tool_name=tc.name,
                 result="denied",
                 is_error=True,
             )
 
-        await asyncio.gather(*(approve_and_execute(tc) for tc in result.tool_calls))
+        async with asyncio.TaskGroup() as tg:
+            tasks = [tg.create_task(approve_and_execute(tc)) for tc in tool_calls]
+        yield ai.tool_message(*(t.result() for t in tasks))
 
     mock_llm(
         [
@@ -676,12 +672,10 @@ async def test_runtime_tool_approval_same_step() -> None:
     )
 
     runtime_messages: list[messages.Message] = []
-    result = approval_agent.run(ai.make_messages(user="delete /tmp"))
-    async for msg in result:
+    async for msg in approval_agent.run(
+        MOCK_MODEL, ai.make_messages(user="delete /tmp")
+    ):
         runtime_messages.append(msg)
-
-    # The run should have a pending hook (approval not yet granted)
-    assert "approve_tc-1" in result.pending_hooks
 
     # Stream through UI adapter
     event_types = [
@@ -690,10 +684,6 @@ async def test_runtime_tool_approval_same_step() -> None:
     ]
 
     # tool-approval-request must be in the SAME step as tool-input.
-    # If a spurious step boundary sneaks in, we'd see:
-    #   [..., "tool-input-available", "finish-step", "start-step",
-    #    "tool-approval-request", ...]
-    # which breaks the frontend's sendAutomaticallyWhen helper.
     assert event_types == [
         "start",
         "start-step",
