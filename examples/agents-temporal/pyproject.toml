@@ -1,5 +1,5 @@
 [project]
-name = "temporal-durable"
+name = "agents-temporal"
 version = "0.1.0"
 description = "Durable agent execution with Temporal"
 requires-python = ">=3.12"

@@ -28,35 +28,41 @@ class TextPart(pydantic.BaseModel):
     delta: str | None = None  # Current delta, None when not actively streaming
 
 
-class ToolPart(pydantic.BaseModel):
+class ToolCallPart(pydantic.BaseModel):
+    """A tool invocation requested by the LLM.
+
+    Lives inside ``role="assistant"`` messages.  The corresponding result
+    (if any) will appear as a :class:`ToolResultPart` in a separate
+    ``role="tool"`` message, linked by ``tool_call_id``.
+    """
+
     model_config = pydantic.ConfigDict(frozen=True)
 
     id: str = pydantic.Field(default_factory=generate_id)
     tool_call_id: str
     tool_name: str
     tool_args: str
-    status: Literal["pending", "result", "error"] = "pending"  # Execution status
-    result: Any = None
-    type: Literal["tool"] = "tool"
+    type: Literal["tool_call"] = "tool_call"
     # Streaming state (for args streaming)
     state: PartState | None = None
     args_delta: str | None = None  # Delta for tool_args
 
-    def with_result(self, result: Any) -> ToolPart:
-        """Return a copy with status='result' and the given result."""
-        if self.status != "pending":
-            raise ValueError(
-                f"Tool call '{self.tool_call_id}' already has status '{self.status}'"
-            )
-        return self.model_copy(update={"status": "result", "result": result})
 
-    def with_error(self, message: str) -> ToolPart:
-        """Return a copy with status='error' and the error message."""
-        if self.status != "pending":
-            raise ValueError(
-                f"Tool call '{self.tool_call_id}' already has status '{self.status}'"
-            )
-        return self.model_copy(update={"status": "error", "result": message})
+class ToolResultPart(pydantic.BaseModel):
+    """The result of executing a tool call.
+
+    Lives inside ``role="tool"`` messages.  Back-references the
+    originating call via ``tool_call_id``.
+    """
+
+    model_config = pydantic.ConfigDict(frozen=True)
+
+    id: str = pydantic.Field(default_factory=generate_id)
+    tool_call_id: str
+    tool_name: str
+    result: Any = None
+    is_error: bool = False
+    type: Literal["tool_result"] = "tool_result"
 
 
 class ReasoningPart(pydantic.BaseModel):
@@ -202,7 +208,13 @@ class FilePart(pydantic.BaseModel):
 
 
 Part = Annotated[
-    TextPart | ToolPart | ReasoningPart | HookPart | StructuredOutputPart | FilePart,
+    TextPart
+    | ToolCallPart
+    | ToolResultPart
+    | ReasoningPart
+    | HookPart
+    | StructuredOutputPart
+    | FilePart,
     pydantic.Field(discriminator="type"),
 ]
 
@@ -270,7 +282,7 @@ class ToolDelta(pydantic.BaseModel):
 class Message(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(frozen=True)
 
-    role: Literal["user", "assistant", "system"]
+    role: Literal["user", "assistant", "system", "tool", "signal"]
     parts: list[Part]
     id: str = pydantic.Field(default_factory=generate_id)
     label: str | None = None
@@ -328,7 +340,7 @@ class Message(pydantic.BaseModel):
         """Message is done when all parts are done (or have no streaming state)."""
         for part in self.parts:
             if (
-                isinstance(part, (TextPart, ReasoningPart, ToolPart))
+                isinstance(part, (TextPart, ReasoningPart, ToolCallPart))
                 and part.state == "streaming"
             ):
                 return False
@@ -355,7 +367,7 @@ class Message(pydantic.BaseModel):
         """Get current tool deltas from parts."""
         deltas = []
         for part in self.parts:
-            if isinstance(part, ToolPart) and part.args_delta:
+            if isinstance(part, ToolCallPart) and part.args_delta:
                 deltas.append(
                     ToolDelta(
                         tool_call_id=part.tool_call_id,
@@ -403,9 +415,14 @@ class Message(pydantic.BaseModel):
         return ""
 
     @property
-    def tool_calls(self) -> list[ToolPart]:
-        # TODO properly validate args?
-        return [part for part in self.parts if isinstance(part, ToolPart)]
+    def tool_calls(self) -> list[ToolCallPart]:
+        """All tool-call parts in this message."""
+        return [part for part in self.parts if isinstance(part, ToolCallPart)]
+
+    @property
+    def tool_results(self) -> list[ToolResultPart]:
+        """All tool-result parts in this message."""
+        return [part for part in self.parts if isinstance(part, ToolResultPart)]
 
     def get_hook_part(self, hook_id: str | None = None) -> HookPart | None:
         """Find a HookPart by hook_id, or return the first HookPart if no id given."""

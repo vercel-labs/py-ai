@@ -12,7 +12,7 @@ from vercel_ai_sdk.adapters.ai_sdk_ui import adapter, ui_message
 from vercel_ai_sdk.agents import hooks
 from vercel_ai_sdk.types import messages
 
-from ...conftest import MOCK_MODEL, mock_llm, tool_msg
+from ...conftest import MOCK_MODEL, mock_llm, tool_call_msg
 
 
 async def get_event_types(msgs: list[messages.Message]) -> list[str]:
@@ -74,32 +74,28 @@ async def test_tool_roundtrip() -> None:
     Reference: process-ui-message-stream.test.ts "server-side tool roundtrip"
     """
     msgs = [
-        # Tool pending
+        # Tool call (assistant message)
         messages.Message(
             id="msg-1",
             role="assistant",
             parts=[
-                messages.ToolPart(
+                messages.ToolCallPart(
                     tool_call_id="tc-1",
                     tool_name="get_weather",
                     tool_args='{"city": "London"}',
-                    status="pending",
                     state="done",
                 ),
             ],
         ),
-        # Tool result
+        # Tool result (tool message, pinned to same id for same step)
         messages.Message(
             id="msg-1",
-            role="assistant",
+            role="tool",
             parts=[
-                messages.ToolPart(
+                messages.ToolResultPart(
                     tool_call_id="tc-1",
                     tool_name="get_weather",
-                    tool_args='{"city": "London"}',
-                    status="result",
                     result={"weather": "sunny"},
-                    state="done",
                 ),
             ],
         ),
@@ -151,34 +147,29 @@ async def test_text_then_tool_then_text() -> None:
                 )
             ],
         ),
-        # Text done + tool pending
+        # Text done + tool call
         messages.Message(
             id="msg-1",
             role="assistant",
             parts=[
                 messages.TextPart(text="I'll check with the mothership.", state="done"),
-                messages.ToolPart(
+                messages.ToolCallPart(
                     tool_call_id="tc-1",
                     tool_name="talk_to_mothership",
                     tool_args='{"question": "when?"}',
-                    status="pending",
                     state="done",
                 ),
             ],
         ),
-        # Tool result
+        # Tool result (pinned to same id for same step)
         messages.Message(
             id="msg-1",
-            role="assistant",
+            role="tool",
             parts=[
-                messages.TextPart(text="I'll check with the mothership.", state="done"),
-                messages.ToolPart(
+                messages.ToolResultPart(
                     tool_call_id="tc-1",
                     tool_name="talk_to_mothership",
-                    tool_args='{"question": "when?"}',
-                    status="result",
                     result={"answer": "Soon."},
-                    state="done",
                 ),
             ],
         ),
@@ -256,11 +247,7 @@ async def test_runtime_tool_roundtrip() -> None:
     status="pending", but pydantic models are mutable so when we collect
     them at the end, we see the mutated state.
     """
-    weather_agent = ai.agent(
-        model=MOCK_MODEL,
-        system="You are helpful.",
-        tools=[get_weather],
-    )
+    weather_agent = ai.agent(tools=[get_weather])
 
     # First LLM call: returns a tool call
     tool_call_response = [
@@ -268,11 +255,10 @@ async def test_runtime_tool_roundtrip() -> None:
             id="msg-1",
             role="assistant",
             parts=[
-                messages.ToolPart(
+                messages.ToolCallPart(
                     tool_call_id="tc-1",
                     tool_name="get_weather",
                     tool_args='{"city": "London"}',
-                    status="pending",
                     state="done",
                 ),
             ],
@@ -293,7 +279,7 @@ async def test_runtime_tool_roundtrip() -> None:
     # Collect all messages from the runtime
     runtime_messages: list[messages.Message] = []
     async for msg in weather_agent.run(
-        ai.make_messages(user="What's the weather in London?")
+        MOCK_MODEL, ai.make_messages(user="What's the weather in London?")
     ):
         runtime_messages.append(msg)
 
@@ -423,12 +409,13 @@ def test_ui_to_internal_two_turn_with_tool() -> None:
 
     # The single UI assistant message contains [text, tool(done), text] from
     # two stream_loop iterations.  to_messages splits at the tool-result
-    # boundary so LLM adapters receive one message per iteration.
-    assert len(internal) == 4
+    # boundary so LLM adapters receive one message per iteration:
+    # user, assistant (text + tool_call), tool (result), assistant (text), user
+    assert len(internal) == 5
     assert internal[0].role == "user"
     assert internal[0].text == "when will the robots take over?"
 
-    # First iteration: text + tool call
+    # First iteration: text + tool call (assistant message)
     assert internal[1].role == "assistant"
     assert internal[1].text == (
         "I'll check with the mothership about this important question."
@@ -436,16 +423,19 @@ def test_ui_to_internal_two_turn_with_tool() -> None:
     assert len(internal[1].tool_calls) == 1
     assert internal[1].tool_calls[0].tool_name == "talk_to_mothership"
     assert internal[1].tool_calls[0].tool_call_id == "toolu_01FiXNXhq1kHx4TegRjSaJyv"
-    assert internal[1].tool_calls[0].status == "result"
-    assert internal[1].tool_calls[0].result == {"value": "Soon."}
+
+    # Tool result (separate tool message)
+    assert internal[2].role == "tool"
+    assert len(internal[2].tool_results) == 1
+    assert internal[2].tool_results[0].result == {"value": "Soon."}
 
     # Second iteration: follow-up text
-    assert internal[2].role == "assistant"
-    assert internal[2].text == "The mothership has spoken: Soon."
-    assert len(internal[2].tool_calls) == 0
+    assert internal[3].role == "assistant"
+    assert internal[3].text == "The mothership has spoken: Soon."
+    assert len(internal[3].tool_calls) == 0
 
-    assert internal[3].role == "user"
-    assert internal[3].text == "this is a test run. can you remember the first turn?"
+    assert internal[4].role == "user"
+    assert internal[4].text == "this is a test run. can you remember the first turn?"
 
 
 def test_ui_tool_part_with_dict_input() -> None:
@@ -470,7 +460,7 @@ def test_ui_tool_part_with_dict_input() -> None:
     tool_part = internal[0].tool_calls[0]
     assert tool_part.tool_name == "get_weather"
     assert tool_part.tool_args == '{"city": "London"}'
-    assert tool_part.status == "pending"  # input-available maps to pending
+    # input-available means call is present but no result yet (no tool message)
 
 
 def test_ui_file_part_converted_to_core_file_part() -> None:
@@ -541,16 +531,15 @@ async def test_tool_approval_hook_emits_approval_request() -> None:
     helper can find the tool part when the user responds to the approval.
     """
     msgs = [
-        # Tool pending (args complete, awaiting approval)
+        # Tool call (args complete, awaiting approval)
         messages.Message(
             id="msg-1",
             role="assistant",
             parts=[
-                messages.ToolPart(
+                messages.ToolCallPart(
                     tool_call_id="tc-1",
                     tool_name="rm_rf",
                     tool_args='{"path": "/"}',
-                    status="pending",
                     state="done",
                 ),
             ],
@@ -563,7 +552,7 @@ async def test_tool_approval_hook_emits_approval_request() -> None:
             parts=[
                 messages.HookPart(
                     hook_id="approve_tc-1",
-                    hook_type=hooks.ToolApproval.hook_type,  # type: ignore[attr-defined]
+                    hook_type=hooks.TOOL_APPROVAL_HOOK_TYPE,
                     status="pending",
                     metadata={"tool_name": "rm_rf", "tool_args": '{"path": "/"}'},
                 ),
@@ -624,51 +613,56 @@ def test_approval_responded_resolves_hook() -> None:
 async def test_runtime_tool_approval_same_step() -> None:
     """E2E: tool-approval-request must land in the same SSE step as the tool call.
 
-    Runs a graph with ToolApproval (cancels_future=True) through ai.run(),
+    Runs a graph with ToolApproval (interrupt_loop=True) through agent.run(),
     collects runtime messages, streams through the adapter, and asserts
     that no spurious step boundary appears between tool-input-available
     and tool-approval-request.
-
-    This is the test that would have caught the bug where the Runtime's
-    HookPart message (which has a different id from the LLM message)
-    caused the adapter to open a new step.
     """
+    from collections.abc import AsyncGenerator as AG
 
     @ai.tool
     async def dangerous_action(path: str) -> str:
         """Do something dangerous."""
         return f"deleted {path}"
 
-    approval_agent = ai.agent(
-        model=MOCK_MODEL,
-        system="You are helpful.",
-        tools=[dangerous_action],
-    )
+    approval_agent = ai.agent(tools=[dangerous_action])
 
     @approval_agent.loop
-    async def custom(agent: ai.Agent, msgs: list[ai.Message]) -> None:
-        result = await ai.stream_step(agent.model, msgs, agent.tools)
-        if not result.tool_calls:
+    async def custom(context: ai.Context) -> AG[ai.Message]:
+        stream = await ai.models.stream(
+            context.model, context.messages, tools=context.tools
+        )
+        async for msg in stream:
+            yield msg
+
+        tool_calls = context.resolve(stream.tool_calls)
+        if not tool_calls:
             return
 
-        last_msg = result.last_message
-        assert last_msg is not None
-
-        async def approve_and_execute(tc: ai.ToolPart) -> ai.ToolPart:
-            approval = await ai.ToolApproval.create(  # type: ignore[attr-defined]
-                f"approve_{tc.tool_call_id}",
-                metadata={"tool_name": tc.tool_name},
+        async def approve_and_execute(tc: ai.ToolCall) -> ai.ToolResultPart:
+            approval = await ai.hook(
+                f"approve_{tc.id}",
+                payload=ai.ToolApproval,
+                metadata={"tool_name": tc.name},
+                interrupt_loop=True,
             )
             if approval.granted:
-                return await ai.execute_tool(tc, message=last_msg)
-            return tc.with_error("denied")
+                return await tc()
+            return ai.ToolResultPart(
+                tool_call_id=tc.id,
+                tool_name=tc.name,
+                result="denied",
+                is_error=True,
+            )
 
-        await asyncio.gather(*(approve_and_execute(tc) for tc in result.tool_calls))
+        async with asyncio.TaskGroup() as tg:
+            tasks = [tg.create_task(approve_and_execute(tc)) for tc in tool_calls]
+        yield ai.tool_message(*(t.result() for t in tasks))
 
     mock_llm(
         [
             [
-                tool_msg(
+                tool_call_msg(
                     tc_id="tc-1",
                     name="dangerous_action",
                     args='{"path": "/tmp"}',
@@ -678,12 +672,10 @@ async def test_runtime_tool_approval_same_step() -> None:
     )
 
     runtime_messages: list[messages.Message] = []
-    result = approval_agent.run(ai.make_messages(user="delete /tmp"))
-    async for msg in result:
+    async for msg in approval_agent.run(
+        MOCK_MODEL, ai.make_messages(user="delete /tmp")
+    ):
         runtime_messages.append(msg)
-
-    # The run should have a pending hook (approval not yet granted)
-    assert "approve_tc-1" in result.pending_hooks
 
     # Stream through UI adapter
     event_types = [
@@ -692,10 +684,6 @@ async def test_runtime_tool_approval_same_step() -> None:
     ]
 
     # tool-approval-request must be in the SAME step as tool-input.
-    # If a spurious step boundary sneaks in, we'd see:
-    #   [..., "tool-input-available", "finish-step", "start-step",
-    #    "tool-approval-request", ...]
-    # which breaks the frontend's sendAutomaticallyWhen helper.
     assert event_types == [
         "start",
         "start-step",

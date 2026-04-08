@@ -14,7 +14,8 @@ import mcp.client.stdio
 import mcp.client.streamable_http
 import mcp.types
 
-from .. import context, tools
+from ... import types
+from ..agent import Tool as Tool_
 
 __all__ = [
     "get_stdio_tools",
@@ -31,8 +32,7 @@ class _Connection:
     exit_stack: contextlib.AsyncExitStack
 
 
-# Connection pool stored in contextvar, scoped to execute()
-# The pool is set by execute() and cleaned up when execute() finishes
+# Connection pool stored in contextvar, scoped to Agent.run()
 _pool: contextvars.ContextVar[dict[str, _Connection] | None] = contextvars.ContextVar(
     "mcp_connections", default=None
 )
@@ -49,7 +49,7 @@ async def _get_or_create_connection(
 
     if pool is None:
         raise RuntimeError(
-            "MCP tools must be used inside ai.execute(). "
+            "MCP tools must be used inside agent.run(). "
             "The connection pool is not initialized."
         )
 
@@ -57,17 +57,12 @@ async def _get_or_create_connection(
         if key in pool:
             return pool[key].client
 
-        # Use AsyncExitStack for clean resource management
         exit_stack = contextlib.AsyncExitStack()
 
         try:
-            # Enter the transport context
             streams = await exit_stack.enter_async_context(transport_factory())
-
-            # Handle both (read, write) and (read, write, callback) returns
             read_stream, write_stream = streams[0], streams[1]
 
-            # Create and initialize the client session
             client = mcp.client.session.ClientSession(
                 read_stream=read_stream,
                 write_stream=write_stream,
@@ -79,7 +74,6 @@ async def _get_or_create_connection(
             return client
 
         except BaseException:
-            # Clean up on any error during setup
             await exit_stack.aclose()
             raise
 
@@ -103,7 +97,6 @@ def _make_tool_fn(
                 f"MCP tool call timed out after 30 seconds: {tool_name}"
             ) from e
 
-        # Handle error responses
         if result.isError:
             error_text = " ".join(
                 part.text
@@ -112,15 +105,12 @@ def _make_tool_fn(
             )
             raise RuntimeError(f"MCP tool error: {error_text or 'Unknown error'}")
 
-        # Prefer structured content if available
         if result.structuredContent is not None:
             return result.structuredContent
 
-        # Fall back to parsing content
         for part in result.content:
             if isinstance(part, mcp.types.TextContent):
                 text = part.text
-                # Try to parse JSON, otherwise return raw text
                 if text.startswith(("{", "[")):
                     try:
                         return json.loads(text)
@@ -139,12 +129,11 @@ async def get_stdio_tools(
     env: dict[str, str] | None = None,
     cwd: str | None = None,
     tool_prefix: str | None = None,
-) -> list[tools.Tool[..., Any]]:
-    """
-    Get tools from an MCP server running as a subprocess.
+) -> list[Tool_[..., Any]]:
+    """Get tools from an MCP server running as a subprocess.
 
     Connection is managed automatically - created on first use, cleaned up
-    when execute() finishes.
+    when the agent run finishes.
 
     Args:
         command: The command to run (e.g., "npx", "python").
@@ -156,7 +145,8 @@ async def get_stdio_tools(
     Returns:
         List of Tool objects that can be passed to an agent or custom loop.
 
-    Example:
+    Example::
+
         tools = await ai.mcp.get_stdio_tools(
             "npx", "-y", "@anthropic/mcp-server-filesystem", "/tmp"
         )
@@ -187,12 +177,11 @@ async def get_http_tools(
     *,
     headers: dict[str, str] | None = None,
     tool_prefix: str | None = None,
-) -> list[tools.Tool[..., Any]]:
-    """
-    Get tools from an MCP server over HTTP (Streamable HTTP transport).
+) -> list[Tool_[..., Any]]:
+    """Get tools from an MCP server over HTTP (Streamable HTTP transport).
 
     Connection is managed automatically - created on first use, cleaned up
-    when execute() finishes.
+    when the agent run finishes.
 
     Args:
         url: The URL of the MCP server endpoint.
@@ -202,7 +191,8 @@ async def get_http_tools(
     Returns:
         List of Tool objects that can be passed to an agent or custom loop.
 
-    Example:
+    Example::
+
         tools = await ai.mcp.get_http_tools(
             "http://localhost:3000/mcp",
             headers={"Authorization": "Bearer xxx"}
@@ -230,53 +220,30 @@ def _mcp_tool_to_native(
     connection_key: str,
     transport_factory: Callable[[], contextlib.AbstractAsyncContextManager[Any]],
     tool_prefix: str | None,
-) -> tools.Tool[..., Any]:
+) -> Tool_[..., Any]:
     """Convert an MCP tool to a native Tool."""
     name = mcp_tool.name
     if tool_prefix:
         name = f"{tool_prefix}_{name}"
 
-    schema = tools.ToolSchema(
+    schema = types.ToolSchema(
         name=name,
         description=mcp_tool.description or "",
         param_schema=mcp_tool.inputSchema,
         return_type=Any,
     )
 
-    # Determine source provenance from connection key
-    if connection_key.startswith("http:"):
-        source = context.ToolSource(
-            kind="mcp_http",
-            uri=connection_key.removeprefix("http:"),
-        )
-    elif connection_key.startswith("stdio:"):
-        source = context.ToolSource(
-            kind="mcp_stdio",
-            server_command=connection_key.removeprefix("stdio:"),
-        )
-    else:
-        source = context.ToolSource(kind="mcp")
-
-    t = tools.Tool(
+    return Tool_(
         fn=_make_tool_fn(connection_key, mcp_tool.name, transport_factory),
         schema=schema,
-        source=source,
     )
-
-    # Register on active Context if available, else fall back to global
-    ctx = context._context.get(None)
-    if ctx is not None:
-        ctx.register_tool(t)
-    tools._tool_registry[name] = t
-    return t
 
 
 async def close_connections() -> None:
-    """
-    Close all MCP connections in the current context.
+    """Close all MCP connections in the current context.
 
-    This is called automatically by execute(), but can be called
-    manually for explicit cleanup.
+    Called automatically at the end of an agent run, but can also be
+    called manually for explicit cleanup.
     """
     pool = _pool.get()
     if pool is None:
@@ -286,7 +253,6 @@ async def close_connections() -> None:
         if not pool:
             return
 
-        # Use TaskGroup for concurrent cleanup
         async with asyncio.TaskGroup() as tg:
             for conn in pool.values():
                 tg.create_task(_close_connection_safely(conn))

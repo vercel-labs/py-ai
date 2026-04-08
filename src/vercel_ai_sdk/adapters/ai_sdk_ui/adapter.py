@@ -8,9 +8,10 @@ import dataclasses
 import json
 import logging
 from collections.abc import AsyncGenerator, AsyncIterable
-from typing import Any, Literal
+from typing import Any
 
 from ...agents import hooks
+from ...agents.hooks import TOOL_APPROVAL_HOOK_TYPE
 from ...types import messages as messages_
 from . import protocol, ui_message
 
@@ -138,7 +139,7 @@ def _tool_call_id_from_approval_hook(
     Returns the tool_call_id if this is a ToolApproval hook whose hook_id
     follows the ``approve_{tool_call_id}`` convention, otherwise None.
     """
-    if hook_part.hook_type != hooks.ToolApproval.hook_type:  # type: ignore[attr-defined]
+    if hook_part.hook_type != TOOL_APPROVAL_HOOK_TYPE:
         return None
     prefix = "approve_"
     if hook_part.hook_id.startswith(prefix):
@@ -169,6 +170,13 @@ async def to_ui_message_stream(
     state = _StreamState()
 
     async for msg in messages:
+        # Tool-result messages (role="tool") are emitted by the Runtime
+        # as separate Message objects (with their own auto-generated id).
+        # To the frontend they belong to the *same* step as the tool
+        # call, so we pin the message id to avoid a spurious step boundary.
+        if msg.role == "tool" and state.message_id:
+            msg = msg.model_copy(update={"id": state.message_id})
+
         # Tool-approval hook messages are emitted by the Runtime as
         # separate Message objects (with their own id).  To the frontend
         # they belong to the *same* step as the tool call, so we pin
@@ -217,26 +225,21 @@ async def to_ui_message_stream(
             for part in state.close_open_blocks():
                 yield part
 
-            # Scan tool parts for new pending/completed states
-            has_new_pending_tools = False
-            has_new_tool_results = False
+            # Scan for new pending tool calls or tool results
+            has_new_pending_tools = any(
+                isinstance(p, messages_.ToolCallPart)
+                and p.tool_call_id not in state.pending_tool_calls
+                for p in msg.parts
+            )
+            has_new_tool_results = any(
+                isinstance(p, messages_.ToolResultPart)
+                and p.tool_call_id not in state.emitted_tool_results
+                for p in msg.parts
+            )
 
-            for msg_part in msg.parts:
-                if isinstance(msg_part, messages_.ToolPart):
-                    if (
-                        msg_part.status == "pending"
-                        and msg_part.tool_call_id not in state.pending_tool_calls
-                    ):
-                        has_new_pending_tools = True
-                    elif (
-                        msg_part.status in ("result", "error")
-                        and msg_part.tool_call_id not in state.emitted_tool_results
-                    ):
-                        has_new_tool_results = True
-
-            # Process parts in two passes:
-            # 1. First handle text and pending tools
-            # 2. Then handle tool results (which may need their own step)
+            # Process parts in passes:
+            # 1. Text and pending tool calls (from assistant messages)
+            # 2. Tool results (from tool messages)
 
             # Pass 1: Text and pending tool inputs
             for msg_part in msg.parts:
@@ -250,8 +253,7 @@ async def to_ui_message_stream(
                         text_id = messages_.generate_id("text")
                         yield protocol.TextStartPart(id=text_id)
                         yield protocol.TextEndPart(id=text_id)
-                    case messages_.ToolPart(
-                        status="pending",
+                    case messages_.ToolCallPart(
                         tool_call_id=tc_id,
                         tool_name=name,
                         tool_args=args,
@@ -270,25 +272,19 @@ async def to_ui_message_stream(
                                 input=args,
                             )
 
-            # Pass 2: Tool outputs (same step as tool input per AI SDK protocol)
-            # Tool input and output are part of the same "step" (one LLM turn)
+            # Pass 2: Tool results
             if has_new_tool_results:
                 for msg_part in msg.parts:
-                    match msg_part:
-                        case messages_.ToolPart(
-                            tool_call_id=tc_id,
-                            result=result,
-                            status=status,
-                        ) if (
-                            status in ("result", "error")
-                            and tc_id not in state.emitted_tool_results
-                        ):
-                            state.emitted_tool_results.add(tc_id)
-                            state.pending_tool_calls.discard(tc_id)
-                            yield protocol.ToolOutputAvailablePart(
-                                tool_call_id=tc_id,
-                                output=result,
-                            )
+                    if (
+                        isinstance(msg_part, messages_.ToolResultPart)
+                        and msg_part.tool_call_id not in state.emitted_tool_results
+                    ):
+                        state.emitted_tool_results.add(msg_part.tool_call_id)
+                        state.pending_tool_calls.discard(msg_part.tool_call_id)
+                        yield protocol.ToolOutputAvailablePart(
+                            tool_call_id=msg_part.tool_call_id,
+                            output=msg_part.result,
+                        )
 
             # Pass 3: Hook-based tool approvals
             for msg_part in msg.parts:
@@ -356,15 +352,14 @@ _TOOL_RESULT_STATES: frozenset[str] = frozenset({"output-available"})
 _TOOL_ERROR_STATES: frozenset[str] = frozenset({"output-error", "output-denied"})
 
 
-def _map_tool_status(
-    state: ui_message.UIToolInvocationState,
-) -> Literal["pending", "result", "error"]:
-    """Map AI SDK v6 tool invocation state to internal status."""
-    if state in _TOOL_ERROR_STATES:
-        return "error"
-    if state in _TOOL_RESULT_STATES:
-        return "result"
-    return "pending"
+def _is_tool_completed(state: ui_message.UIToolInvocationState) -> bool:
+    """Return True if the tool invocation state indicates a completed tool."""
+    return state in _TOOL_RESULT_STATES or state in _TOOL_ERROR_STATES
+
+
+def _is_tool_error(state: ui_message.UIToolInvocationState) -> bool:
+    """Return True if the tool invocation state indicates an error."""
+    return state in _TOOL_ERROR_STATES
 
 
 def _normalize_tool_args(tool_input: str | dict[str, Any] | None) -> str:
@@ -379,9 +374,9 @@ def _normalize_tool_args(tool_input: str | dict[str, Any] | None) -> str:
 
 
 def _normalize_tool_result(output: Any) -> dict[str, Any] | None:
-    """Normalize tool output to dict format for internal ToolPart.
+    """Normalize tool output to dict format for internal ToolResultPart.
 
-    The internal ToolPart.result expects dict | None, but AI SDK
+    The internal ToolResultPart.result expects dict | None, but AI SDK
     output can be any type. Wrap non-dict results for compatibility.
     """
     if output is None:
@@ -412,39 +407,56 @@ def to_messages(
     resolved_any_approval = False
 
     for ui_msg in ui_messages:
-        internal_parts: list[messages_.Part] = []
+        # For assistant messages, separate tool calls from tool results.
+        assistant_parts: list[messages_.Part] = []
+        tool_result_parts: list[messages_.ToolResultPart] = []
 
         for part in ui_msg.parts:
             match part:
                 case ui_message.UITextPart(text=text) if text:
-                    internal_parts.append(messages_.TextPart(text=text))
+                    assistant_parts.append(messages_.TextPart(text=text))
 
                 case ui_message.UIReasoningPart(reasoning=reasoning):
-                    internal_parts.append(messages_.ReasoningPart(text=reasoning))
+                    assistant_parts.append(messages_.ReasoningPart(text=reasoning))
 
                 case ui_message.UIToolInvocationPart() as inv:
-                    # Legacy tool-invocation type
-                    internal_parts.append(
-                        messages_.ToolPart(
+                    # Legacy tool-invocation type — always create the call part
+                    tool_args = json.dumps(inv.args) if inv.args else "{}"
+                    assistant_parts.append(
+                        messages_.ToolCallPart(
                             tool_call_id=inv.tool_invocation_id,
                             tool_name=inv.tool_name,
-                            tool_args=json.dumps(inv.args) if inv.args else "{}",
-                            status=_map_tool_status(inv.state),
-                            result=inv.result,
+                            tool_args=tool_args,
                         )
                     )
+                    if _is_tool_completed(inv.state):
+                        tool_result_parts.append(
+                            messages_.ToolResultPart(
+                                tool_call_id=inv.tool_invocation_id,
+                                tool_name=inv.tool_name,
+                                result=inv.result,
+                                is_error=_is_tool_error(inv.state),
+                            )
+                        )
 
                 case ui_message.UIToolPart() as tp:
                     # Dynamic tool-{toolName} type (e.g., "tool-get_weather")
-                    internal_parts.append(
-                        messages_.ToolPart(
+                    assistant_parts.append(
+                        messages_.ToolCallPart(
                             tool_call_id=tp.tool_call_id,
                             tool_name=tp.tool_name,
                             tool_args=_normalize_tool_args(tp.input),
-                            status=_map_tool_status(tp.state),
-                            result=_normalize_tool_result(tp.output),
                         )
                     )
+                    if _is_tool_completed(tp.state):
+                        tool_result_parts.append(
+                            messages_.ToolResultPart(
+                                tool_call_id=tp.tool_call_id,
+                                tool_name=tp.tool_name,
+                                result=_normalize_tool_result(tp.output),
+                                is_error=_is_tool_error(tp.state),
+                            )
+                        )
                     # Side-effect: resolve ToolApproval hooks from approval
                     # responses so the agent loop can resume execution.
                     if (
@@ -452,7 +464,7 @@ def to_messages(
                         and tp.approval is not None
                         and tp.approval.approved is not None
                     ):
-                        hooks.ToolApproval.resolve(  # type: ignore[attr-defined]
+                        hooks.resolve_hook(
                             tp.approval.id,
                             {
                                 "granted": tp.approval.approved,
@@ -462,7 +474,7 @@ def to_messages(
                         resolved_any_approval = True
 
                 case ui_message.UIFilePart() as fp:
-                    internal_parts.append(
+                    assistant_parts.append(
                         messages_.FilePart(
                             data=fp.url,
                             media_type=fp.media_type,
@@ -477,9 +489,8 @@ def to_messages(
                 ):
                     pass  # Skip unsupported/boundary parts
 
-        # Validate user/system messages have content - OpenAI requires it there.
-        # Assistant messages can have empty content if they have tool calls.
-        if ui_msg.role in ("user", "system") and not internal_parts:
+        # Validate user/system messages have content - OpenAI requires it.
+        if ui_msg.role in ("user", "system") and not assistant_parts:
             raise ValueError(
                 f"Message '{ui_msg.id}' has role '{ui_msg.role}' but no content. "
                 "User and system messages require non-empty content."
@@ -487,16 +498,21 @@ def to_messages(
 
         # The UI sends one assistant message per conversation turn, but a
         # single turn may span multiple default-loop iterations (e.g.
-        # [text, tool(done), text, tool(done), text]).  LLM APIs expect
-        # one message per iteration, so split at completed-tool boundaries.
+        # [text, tool_call, tool_result, text, tool_call, tool_result, text]).
+        # LLM APIs expect one message per iteration, so split into
+        # assistant + tool message pairs at tool-result boundaries.
         if ui_msg.role == "assistant":
-            result.extend(_split_assistant_parts(internal_parts, msg_id=ui_msg.id))
+            result.extend(
+                _split_assistant_parts(
+                    assistant_parts, tool_result_parts, msg_id=ui_msg.id
+                )
+            )
         else:
             result.append(
                 messages_.Message(
                     id=ui_msg.id,
                     role=ui_msg.role,
-                    parts=internal_parts,
+                    parts=assistant_parts,
                 )
             )
 
@@ -515,34 +531,79 @@ def to_messages(
 
 def _split_assistant_parts(
     parts: list[messages_.Part],
+    tool_results: list[messages_.ToolResultPart],
     msg_id: str,
 ) -> list[messages_.Message]:
-    """Split assistant parts at completed-tool → non-tool boundaries.
+    """Split assistant parts into assistant + tool message pairs.
 
-    Returns one ``Message`` per default-loop iteration so that LLM
-    adapters receive correctly-shaped single-iteration messages.
+    The UI sends one big assistant message per turn, but internally each
+    loop iteration produces an assistant message (with tool calls) followed
+    by a tool message (with results).  This reconstructs that structure.
+
+    Returns a list of Messages: alternating assistant and tool messages,
+    split at tool-call boundaries when results are available.
     """
+    # Index tool results by their tool_call_id for lookup
+    results_by_id = {tr.tool_call_id: tr for tr in tool_results}
+
     messages: list[messages_.Message] = []
     current: list[messages_.Part] = []
-    has_completed_tool = False
+    pending_results: list[messages_.ToolResultPart] = []
 
     for part in parts:
-        if has_completed_tool and not isinstance(part, messages_.ToolPart):
+        current.append(part)
+
+        # When we see a ToolCallPart that has a result, accumulate it
+        if (
+            isinstance(part, messages_.ToolCallPart)
+            and part.tool_call_id in results_by_id
+        ):
+            pending_results.append(results_by_id[part.tool_call_id])
+
+    # If there are pending results and more parts follow, we need to split.
+    # Walk again, splitting at boundaries where all accumulated tool calls
+    # have results and a non-tool part follows.
+    if not pending_results:
+        # No completed tools — single assistant message
+        if current:
             messages.append(
                 messages_.Message(role="assistant", parts=current, id=msg_id)
             )
+        return messages
+
+    # Re-walk to split at tool-call boundaries
+    messages = []
+    current = []
+    current_results: list[messages_.ToolResultPart] = []
+    seen_tool_call = False
+
+    for part in parts:
+        # If we had a completed tool call group and now see a non-tool part,
+        # split here
+        if (
+            seen_tool_call
+            and current_results
+            and not isinstance(part, messages_.ToolCallPart)
+        ):
+            messages.append(
+                messages_.Message(role="assistant", parts=current, id=msg_id)
+            )
+            messages.append(messages_.Message(role="tool", parts=list(current_results)))
             current = []
-            has_completed_tool = False
+            current_results = []
+            seen_tool_call = False
 
         current.append(part)
 
-        if isinstance(part, messages_.ToolPart) and part.status in (
-            "result",
-            "error",
-        ):
-            has_completed_tool = True
+        if isinstance(part, messages_.ToolCallPart):
+            seen_tool_call = True
+            if part.tool_call_id in results_by_id:
+                current_results.append(results_by_id[part.tool_call_id])
 
+    # Flush remaining
     if current:
         messages.append(messages_.Message(role="assistant", parts=current, id=msg_id))
+    if current_results:
+        messages.append(messages_.Message(role="tool", parts=list(current_results)))
 
     return messages

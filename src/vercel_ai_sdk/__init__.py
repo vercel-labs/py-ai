@@ -1,28 +1,24 @@
 from . import adapters, models, telemetry
 from .adapters import ai_sdk_ui
 from .agents import (
+    TOOL_APPROVAL_HOOK_TYPE,
     Agent,
-    AgentRun,
     Checkpoint,
     Context,
-    Hook,
-    HookInfo,
-    LoopFn,
+    DurabilityProvider,
+    EventLogProvider,
+    HookEvent,
     PendingHookInfo,
-    RunResult,
-    Runtime,
-    StreamResult,
+    StepEvent,
     Tool,
     ToolApproval,
-    ToolSource,
+    ToolCall,
+    ToolEvent,
     agent,
-    execute_tool,
-    get_checkpoint,
-    get_context,
+    cancel_hook,
     hook,
     mcp,
-    stream,
-    stream_step,
+    resolve_hook,
     tool,
 )
 from .models import Client, Model, ModelCost
@@ -37,12 +33,22 @@ from .types import (
     ReasoningPart,
     StructuredOutputPart,
     TextPart,
+    ToolCallPart,
     ToolDelta,
     ToolLike,
-    ToolPart,
+    ToolResultPart,
     ToolSchema,
     Usage,
     make_messages,
+)
+from .types.builders import (
+    assistant_message,
+    file_part,
+    system_message,
+    thinking,
+    tool_message,
+    tool_result,
+    user_message,
 )
 
 __all__ = [
@@ -51,7 +57,8 @@ __all__ = [
     "Part",
     "PartState",
     "TextPart",
-    "ToolPart",
+    "ToolCallPart",
+    "ToolResultPart",
     "ToolDelta",
     "ReasoningPart",
     "FilePart",
@@ -61,6 +68,14 @@ __all__ = [
     "ToolSchema",
     "Usage",
     "make_messages",
+    # Builders (from types/builders)
+    "user_message",
+    "assistant_message",
+    "system_message",
+    "tool_message",
+    "tool_result",
+    "file_part",
+    "thinking",
     # Models (from models/)
     "Model",
     "ModelCost",
@@ -68,33 +83,27 @@ __all__ = [
     "models",
     # Agents — primary API
     "Agent",
-    "AgentRun",
     "agent",
-    "LoopFn",
-    # Agents — composition primitives
-    "stream_step",
-    "execute_tool",
-    "get_checkpoint",
-    "stream",
-    "StreamResult",
+    "Context",
     # Agents — tools
     "Tool",
+    "ToolCall",
     "tool",
     # Agents — hooks
-    "Hook",
     "hook",
+    "resolve_hook",
+    "cancel_hook",
     "ToolApproval",
-    # Agents — context
-    "Context",
-    "ToolSource",
-    "get_context",
-    # Agents — runtime (developer API)
-    "Runtime",
-    "RunResult",
-    "HookInfo",
+    "TOOL_APPROVAL_HOOK_TYPE",
+    # Agents — durability
+    "DurabilityProvider",
+    "EventLogProvider",
     # Agents — checkpoint
     "Checkpoint",
     "PendingHookInfo",
+    "StepEvent",
+    "ToolEvent",
+    "HookEvent",
     # Submodules
     "telemetry",
     "mcp",

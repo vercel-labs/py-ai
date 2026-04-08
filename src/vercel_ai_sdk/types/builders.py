@@ -8,6 +8,8 @@ plain strings (auto-wrapped in :class:`TextPart`) and existing
 
 from __future__ import annotations
 
+from typing import Any
+
 from .messages import (
     FilePart,
     HookPart,
@@ -16,12 +18,14 @@ from .messages import (
     ReasoningPart,
     StructuredOutputPart,
     TextPart,
-    ToolPart,
+    ToolCallPart,
+    ToolResultPart,
 )
 
 _PART_TYPES = (
     TextPart,
-    ToolPart,
+    ToolCallPart,
+    ToolResultPart,
     ReasoningPart,
     HookPart,
     StructuredOutputPart,
@@ -91,3 +95,30 @@ def thinking(text: str, *, signature: str | None = None) -> ReasoningPart:
     Useful for replaying conversation history that includes model reasoning.
     """
     return ReasoningPart(text=text, signature=signature)
+
+
+def tool_message(*parts: ToolResultPart) -> Message:
+    """Create a tool-result message from one or more :class:`ToolResultPart` objects.
+
+    >>> ai.tool_message(ai.tool_result("tc-1", result=72, tool_name="weather"))
+    """
+    return Message(role="tool", parts=list(parts))
+
+
+def tool_result(
+    tool_call_id: str,
+    *,
+    result: Any = None,
+    tool_name: str = "",
+    is_error: bool = False,
+) -> ToolResultPart:
+    """Create a :class:`ToolResultPart`.
+
+    >>> ai.tool_result("tc-1", result={"temp": 72}, tool_name="weather")
+    """
+    return ToolResultPart(
+        tool_call_id=tool_call_id,
+        tool_name=tool_name,
+        result=result,
+        is_error=is_error,
+    )

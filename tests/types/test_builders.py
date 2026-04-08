@@ -13,7 +13,7 @@ from vercel_ai_sdk.types.messages import (
     FilePart,
     ReasoningPart,
     TextPart,
-    ToolPart,
+    ToolCallPart,
 )
 
 # -- system_message --------------------------------------------------------
@@ -77,11 +77,11 @@ def test_assistant_message_with_thinking() -> None:
     assert isinstance(msg.parts[1], TextPart)
 
 
-def test_assistant_message_with_tool_part() -> None:
-    tool = ToolPart(tool_call_id="tc-1", tool_name="test", tool_args="{}")
+def test_assistant_message_with_tool_call_part() -> None:
+    tool = ToolCallPart(tool_call_id="tc-1", tool_name="test", tool_args="{}")
     msg = assistant_message("calling tool", tool)
     assert len(msg.parts) == 2
-    assert isinstance(msg.parts[1], ToolPart)
+    assert isinstance(msg.parts[1], ToolCallPart)
 
 
 # -- file_part -------------------------------------------------------------

@@ -67,19 +67,15 @@ async def _messages_to_prompt(
 
             case "assistant":
                 assistant_content: list[dict[str, Any]] = []
-                tool_results: list[dict[str, Any]] = []
-
                 for part in msg.parts:
                     match part:
                         case messages_.ReasoningPart(text=text):
                             assistant_content.append(
                                 {"type": "reasoning", "text": text}
                             )
-
                         case messages_.TextPart(text=text):
                             assistant_content.append({"type": "text", "text": text})
-
-                        case messages_.ToolPart() as tp:
+                        case messages_.ToolCallPart() as tp:
                             tool_input: Any = (
                                 json.loads(tp.tool_args) if tp.tool_args else {}
                             )
@@ -91,32 +87,33 @@ async def _messages_to_prompt(
                                     "input": tool_input,
                                 }
                             )
-                            if tp.status in ("result", "error"):
-                                output = (
-                                    {
-                                        "type": "error-text",
-                                        "value": (
-                                            str(tp.result)
-                                            if tp.result is not None
-                                            else ""
-                                        ),
-                                    }
-                                    if tp.status == "error"
-                                    else {
-                                        "type": "json",
-                                        "value": tp.result,
-                                    }
-                                )
-                                tool_results.append(
-                                    {
-                                        "type": "tool-result",
-                                        "toolCallId": tp.tool_call_id,
-                                        "toolName": tp.tool_name,
-                                        "output": output,
-                                    }
-                                )
-
                 result.append({"role": "assistant", "content": assistant_content})
+
+            case "tool":
+                tool_results: list[dict[str, Any]] = []
+                for part in msg.parts:
+                    if isinstance(part, messages_.ToolResultPart):
+                        output = (
+                            {
+                                "type": "error-text",
+                                "value": (
+                                    str(part.result) if part.result is not None else ""
+                                ),
+                            }
+                            if part.is_error
+                            else {
+                                "type": "json",
+                                "value": part.result,
+                            }
+                        )
+                        tool_results.append(
+                            {
+                                "type": "tool-result",
+                                "toolCallId": part.tool_call_id,
+                                "toolName": part.tool_name,
+                                "output": output,
+                            }
+                        )
                 if tool_results:
                     result.append({"role": "tool", "content": tool_results})
 

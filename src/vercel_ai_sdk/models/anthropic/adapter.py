@@ -126,8 +126,6 @@ async def _messages_to_anthropic(
                 )
             case "assistant":
                 content: list[dict[str, Any]] = []
-                tool_results: list[dict[str, Any]] = []
-
                 for part in msg.parts:
                     match part:
                         case messages_.ReasoningPart(text=text, signature=signature):
@@ -141,7 +139,7 @@ async def _messages_to_anthropic(
                                 )
                         case messages_.TextPart(text=text):
                             content.append({"type": "text", "text": text})
-                        case messages_.ToolPart():
+                        case messages_.ToolCallPart():
                             tool_input = (
                                 json.loads(part.tool_args) if part.tool_args else {}
                             )
@@ -153,20 +151,23 @@ async def _messages_to_anthropic(
                                     "input": tool_input,
                                 }
                             )
-                            if part.status in ("result", "error"):
-                                entry: dict[str, Any] = {
-                                    "type": "tool_result",
-                                    "tool_use_id": part.tool_call_id,
-                                    "content": str(part.result)
-                                    if part.result is not None
-                                    else "",
-                                }
-                                if part.status == "error":
-                                    entry["is_error"] = True
-                                tool_results.append(entry)
-
                 if content:
                     result.append({"role": "assistant", "content": content})
+
+            case "tool":
+                tool_results: list[dict[str, Any]] = []
+                for part in msg.parts:
+                    if isinstance(part, messages_.ToolResultPart):
+                        entry: dict[str, Any] = {
+                            "type": "tool_result",
+                            "tool_use_id": part.tool_call_id,
+                            "content": str(part.result)
+                            if part.result is not None
+                            else "",
+                        }
+                        if part.is_error:
+                            entry["is_error"] = True
+                        tool_results.append(entry)
                 if tool_results:
                     result.append({"role": "user", "content": tool_results})
 

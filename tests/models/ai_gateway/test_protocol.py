@@ -78,15 +78,23 @@ class TestMessagesToPrompt:
             messages.Message(
                 role="assistant",
                 parts=[
-                    messages.ToolPart(
+                    messages.ToolCallPart(
                         tool_call_id="tc-1",
                         tool_name="get_weather",
                         tool_args='{"city": "SF"}',
-                        status="result",
+                    )
+                ],
+            ),
+            messages.Message(
+                role="tool",
+                parts=[
+                    messages.ToolResultPart(
+                        tool_call_id="tc-1",
+                        tool_name="get_weather",
                         result={"temp": 72},
                     )
                 ],
-            )
+            ),
         ]
         result = await stream_mod._messages_to_prompt(msgs)
         assert len(result) == 2
@@ -107,15 +115,24 @@ class TestMessagesToPrompt:
             messages.Message(
                 role="assistant",
                 parts=[
-                    messages.ToolPart(
+                    messages.ToolCallPart(
                         tool_call_id="tc-1",
                         tool_name="get_weather",
                         tool_args="{}",
-                        status="error",
-                        result="Connection timeout",
                     )
                 ],
-            )
+            ),
+            messages.Message(
+                role="tool",
+                parts=[
+                    messages.ToolResultPart(
+                        tool_call_id="tc-1",
+                        tool_name="get_weather",
+                        result="Connection timeout",
+                        is_error=True,
+                    )
+                ],
+            ),
         ]
         result = await stream_mod._messages_to_prompt(msgs)
         tr = result[1]["content"][0]
@@ -181,16 +198,16 @@ class TestMessagesToPrompt:
         ]
 
     async def test_pending_tool_call_no_tool_message(self) -> None:
-        """A pending tool call should NOT produce a tool-result message."""
+        """A tool call without a corresponding tool-result message
+        should NOT produce a tool-result in the prompt."""
         msgs = [
             messages.Message(
                 role="assistant",
                 parts=[
-                    messages.ToolPart(
+                    messages.ToolCallPart(
                         tool_call_id="tc-1",
                         tool_name="search",
                         tool_args="{}",
-                        status="pending",
                     )
                 ],
             )

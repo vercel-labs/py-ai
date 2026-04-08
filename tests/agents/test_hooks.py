@@ -1,7 +1,7 @@
 """Hooks: live resolution, cancellation, pre-registration, schema validation."""
 
 import asyncio
-from typing import Any, ClassVar
+from collections.abc import AsyncGenerator
 
 import pydantic
 import pytest
@@ -11,88 +11,75 @@ import vercel_ai_sdk as ai
 from ..conftest import MOCK_MODEL, mock_llm, text_msg
 
 
-@ai.hook
 class Confirmation(pydantic.BaseModel):
     approved: bool
     reason: str = ""
 
 
-@ai.hook
-class CancellingConfirmation(pydantic.BaseModel):
-    cancels_future: ClassVar[bool] = True
-    approved: bool
-    reason: str = ""
-
-
-# -- Hook.resolve() with live future (long-running mode) -------------------
+# -- resolve_hook() with live future (long-running mode) -------------------
 
 
 @pytest.mark.asyncio
 async def test_resolve_live_future() -> None:
-    """In long-running mode, Hook.resolve() unblocks the awaiting coroutine."""
-    resolved_value = None
-    my_agent = ai.agent(model=MOCK_MODEL)
+    """In long-running mode, resolve_hook() unblocks the awaiting coroutine."""
+    resolved_value: Confirmation | None = None
+    my_agent = ai.agent()
 
     @my_agent.loop
-    async def custom(agent: ai.Agent, msgs: list[ai.Message]) -> None:
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.Message]:
         nonlocal resolved_value
-        await ai.stream_step(agent.model, msgs)
-        result = await Confirmation.create("confirm_1")  # type: ignore[attr-defined]
+        async for msg in await ai.models.stream(context.model, context.messages):
+            yield msg
+        result = await ai.hook("confirm_1", payload=Confirmation)
         resolved_value = result
 
     mock_llm([[text_msg("OK")]])
-    # Confirmation.cancels_future=False -> long-running mode
-    run_result = my_agent.run(ai.make_messages(user="go"))
 
-    collected = []
-    async for msg in run_result:
-        collected.append(msg)
-        # When we see the pending hook message, resolve it
+    async for msg in my_agent.run(MOCK_MODEL, ai.make_messages(user="go")):
+        # When we see the pending hook message, resolve it.
         if any(isinstance(p, ai.HookPart) and p.status == "pending" for p in msg.parts):
-            Confirmation.resolve(  # type: ignore[attr-defined]
-                "confirm_1", {"approved": True, "reason": "looks good"}
-            )
+            ai.resolve_hook("confirm_1", {"approved": True, "reason": "looks good"})
 
     assert resolved_value is not None
     assert resolved_value.approved is True
     assert resolved_value.reason == "looks good"
 
 
-# -- Hook.cancel() --------------------------------------------------------
+# -- cancel_hook() --------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_cancel_live_hook() -> None:
-    """Hook.cancel() cancels the future, causing CancelledError in graph."""
+    """cancel_hook() cancels the future, causing CancelledError in graph."""
     was_cancelled = False
-    my_agent = ai.agent(model=MOCK_MODEL)
+    my_agent = ai.agent()
 
     @my_agent.loop
-    async def custom(agent: ai.Agent, msgs: list[ai.Message]) -> None:
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.Message]:
         nonlocal was_cancelled
-        await ai.stream_step(agent.model, msgs)
+        async for msg in await ai.models.stream(context.model, context.messages):
+            yield msg
         try:
-            await Confirmation.create("cancel_me")  # type: ignore[attr-defined]
+            await ai.hook("cancel_me", payload=Confirmation)
         except asyncio.CancelledError:
             was_cancelled = True
 
     mock_llm([[text_msg("OK")]])
-    run_result = my_agent.run(ai.make_messages(user="go"))
 
-    async for msg in run_result:
+    async for msg in my_agent.run(MOCK_MODEL, ai.make_messages(user="go")):
         if any(isinstance(p, ai.HookPart) and p.status == "pending" for p in msg.parts):
-            await Confirmation.cancel("cancel_me", reason="denied")  # type: ignore[attr-defined]
+            await ai.cancel_hook("cancel_me", reason="denied")
 
     assert was_cancelled
 
 
-# -- Hook.cancel() on non-existent label raises ----------------------------
+# -- cancel_hook() on non-existent label raises ----------------------------
 
 
 @pytest.mark.asyncio
 async def test_cancel_nonexistent_raises() -> None:
     with pytest.raises(ValueError, match="No pending hook"):
-        await Confirmation.cancel("does_not_exist_xyz")  # type: ignore[attr-defined]
+        await ai.cancel_hook("does_not_exist_xyz")
 
 
 # -- Pre-registration (serverless re-entry) --------------------------------
@@ -100,36 +87,44 @@ async def test_cancel_nonexistent_raises() -> None:
 
 @pytest.mark.asyncio
 async def test_pre_registered_resolution_consumed() -> None:
-    """Pre-registered resolution is consumed by Hook.create() without suspending."""
-    my_agent = ai.agent(model=MOCK_MODEL)
+    """Pre-registered resolution is consumed by hook() without suspending."""
+    my_agent = ai.agent()
 
     @my_agent.loop
-    async def custom(agent: ai.Agent, msgs: list[ai.Message]) -> Any:
-        await ai.stream_step(agent.model, msgs)
-        result = await Confirmation.create("pre_reg_1")  # type: ignore[attr-defined]
-        return result
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.Message]:
+        async for msg in await ai.models.stream(context.model, context.messages):
+            yield msg
+        await ai.hook("pre_reg_1", payload=Confirmation)
 
-    # Pre-register BEFORE run
-    Confirmation.resolve("pre_reg_1", {"approved": True})  # type: ignore[attr-defined]
+    # Pre-register BEFORE run.
+    ai.resolve_hook("pre_reg_1", {"approved": True})
 
     mock_llm([[text_msg("OK")]])
-    run_result = my_agent.run(ai.make_messages(user="go"))
-    [m async for m in run_result]
+    provider = ai.EventLogProvider()
+    async for _msg in my_agent.run(
+        MOCK_MODEL,
+        ai.make_messages(user="go"),
+        durability=provider,
+    ):
+        pass
 
-    # Should have completed with no pending hooks
-    assert len(run_result.pending_hooks) == 0
-    # Hook event should be in checkpoint
-    assert any(h.label == "pre_reg_1" for h in run_result.checkpoint.hooks)
+    # Hook event should be recorded in checkpoint.
+    cp = provider.checkpoint()
+    assert any(h.label == "pre_reg_1" for h in cp.hooks)
 
 
 # -- Schema validation on resolve -----------------------------------------
 
 
 def test_resolve_validates_schema() -> None:
-    """resolve() with invalid data raises from pydantic validation."""
-    # 'approved' is required bool, passing string should raise
+    """resolve_hook() with invalid data raises from pydantic validation."""
+    # 'approved' is required bool, passing string should raise.
     with pytest.raises(pydantic.ValidationError):
-        Confirmation.resolve("schema_test", {"approved": "not_a_bool"})  # type: ignore[attr-defined]
+        ai.resolve_hook(
+            "schema_test",
+            {"approved": "not_a_bool"},
+            payload=Confirmation,
+        )
 
 
 # -- Resolved hook emits message -------------------------------------------
@@ -138,21 +133,21 @@ def test_resolve_validates_schema() -> None:
 @pytest.mark.asyncio
 async def test_resolved_hook_emits_message() -> None:
     """After resolution, a 'resolved' HookPart message is emitted."""
-    my_agent = ai.agent(model=MOCK_MODEL)
+    my_agent = ai.agent()
 
     @my_agent.loop
-    async def custom(agent: ai.Agent, msgs: list[ai.Message]) -> None:
-        await ai.stream_step(agent.model, msgs)
-        await Confirmation.create("emit_test")  # type: ignore[attr-defined]
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.Message]:
+        async for msg in await ai.models.stream(context.model, context.messages):
+            yield msg
+        await ai.hook("emit_test", payload=Confirmation)
 
     mock_llm([[text_msg("OK")]])
-    run_result = my_agent.run(ai.make_messages(user="go"))
 
-    msgs = []
-    async for msg in run_result:
+    msgs: list[ai.Message] = []
+    async for msg in my_agent.run(MOCK_MODEL, ai.make_messages(user="go")):
         msgs.append(msg)
         if any(isinstance(p, ai.HookPart) and p.status == "pending" for p in msg.parts):
-            Confirmation.resolve("emit_test", {"approved": False})  # type: ignore[attr-defined]
+            ai.resolve_hook("emit_test", {"approved": False})
 
     hook_msgs = [
         m
@@ -160,7 +155,7 @@ async def test_resolved_hook_emits_message() -> None:
         if any(isinstance(p, ai.HookPart) and p.status == "resolved" for p in m.parts)
     ]
     assert len(hook_msgs) == 1
-    assert hook_msgs[0].parts[0].resolution == {"approved": False, "reason": ""}  # type: ignore[union-attr]
+    assert hook_msgs[0].parts[0].resolution == {"approved": False}  # type: ignore[union-attr]
 
 
 # -- Hook metadata surfaces in pending message -----------------------------
@@ -168,18 +163,24 @@ async def test_resolved_hook_emits_message() -> None:
 
 @pytest.mark.asyncio
 async def test_hook_metadata_in_pending() -> None:
-    my_agent = ai.agent(model=MOCK_MODEL)
+    my_agent = ai.agent()
 
     @my_agent.loop
-    async def custom(agent: ai.Agent, msgs: list[ai.Message]) -> None:
-        await ai.stream_step(agent.model, msgs)
-        await CancellingConfirmation.create(  # type: ignore[attr-defined]
-            "meta_test", metadata={"tool": "rm -rf", "path": "/"}
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.Message]:
+        async for msg in await ai.models.stream(context.model, context.messages):
+            yield msg
+        await ai.hook(
+            "meta_test",
+            payload=Confirmation,
+            metadata={"tool": "rm -rf", "path": "/"},
+            interrupt_loop=True,
         )
 
     mock_llm([[text_msg("OK")]])
-    run_result = my_agent.run(ai.make_messages(user="go"))
-    [m async for m in run_result]
+    msgs: list[ai.Message] = []
+    async for msg in my_agent.run(MOCK_MODEL, ai.make_messages(user="go")):
+        msgs.append(msg)
 
-    info = run_result.pending_hooks["meta_test"]
-    assert info.metadata == {"tool": "rm -rf", "path": "/"}
+    hook_msgs = [m for m in msgs if any(isinstance(p, ai.HookPart) for p in m.parts)]
+    assert len(hook_msgs) >= 1
+    assert hook_msgs[0].parts[0].metadata == {"tool": "rm -rf", "path": "/"}  # type: ignore[union-attr]

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Generator
+from collections.abc import AsyncGenerator, Generator
 from typing import Any
 
 import pytest
@@ -17,7 +17,7 @@ from vercel_ai_sdk.telemetry.events import (
     ToolCallStartEvent,
 )
 
-from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_msg
+from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_call_msg
 
 # ── Recording handler ────────────────────────────────────────────
 
@@ -55,11 +55,11 @@ async def double(x: int) -> int:
 @pytest.mark.asyncio
 async def test_text_only_run_events(handler: RecordingHandler) -> None:
     """Simplest run emits RunStart, StepStart, StepFinish, RunFinish."""
-    my_agent = ai.agent(model=MOCK_MODEL, tools=[])
+    my_agent = ai.agent()
 
     mock_llm([[text_msg("Hello!")]])
-    result = my_agent.run(ai.make_messages(user="Hi"))
-    [m async for m in result]
+    async for _m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Hi")):
+        pass
 
     types = [type(e).__name__ for e in handler.events]
     assert types == [
@@ -77,16 +77,16 @@ async def test_text_only_run_events(handler: RecordingHandler) -> None:
 @pytest.mark.asyncio
 async def test_tool_call_events(handler: RecordingHandler) -> None:
     """Tool-calling run emits tool events between steps."""
-    my_agent = ai.agent(model=MOCK_MODEL, tools=[double])
+    my_agent = ai.agent(tools=[double])
 
     mock_llm(
         [
-            [tool_msg(tc_id="tc-1", name="double", args='{"x": 5}')],
+            [tool_call_msg(tc_id="tc-1", name="double", args='{"x": 5}')],
             [text_msg("10")],
         ]
     )
-    result = my_agent.run(ai.make_messages(user="Double 5"))
-    [m async for m in result]
+    async for _m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Double 5")):
+        pass
 
     types = [type(e).__name__ for e in handler.events]
     assert types == [
@@ -125,11 +125,11 @@ async def test_run_id_available_during_run() -> None:
 
     ai.telemetry.enable(Capture())
     try:
-        my_agent = ai.agent(model=MOCK_MODEL, tools=[])
+        my_agent = ai.agent()
 
         mock_llm([[text_msg("Hello!")]])
-        result = my_agent.run(ai.make_messages(user="Hi"))
-        [m async for m in result]
+        async for _m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Hi")):
+            pass
         assert len(captured) == 16
     finally:
         ai.telemetry.disable()
@@ -144,19 +144,19 @@ async def test_disable_reverts_to_noop() -> None:
     handler = RecordingHandler()
     ai.telemetry.enable(handler)
 
-    my_agent = ai.agent(model=MOCK_MODEL, tools=[])
+    my_agent = ai.agent()
 
     mock_llm([[text_msg("Hello!")]])
-    result = my_agent.run(ai.make_messages(user="Hi"))
-    [m async for m in result]
+    async for _m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Hi")):
+        pass
     assert len(handler.of_type(RunStartEvent)) == 1
 
     ai.telemetry.disable()
     handler.events.clear()
 
     mock_llm([[text_msg("Hello!")]])
-    result = my_agent.run(ai.make_messages(user="Hi"))
-    [m async for m in result]
+    async for _m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Hi")):
+        pass
     assert len(handler.events) == 0
 
 
@@ -171,16 +171,17 @@ async def test_user_emitted_custom_event(handler: RecordingHandler) -> None:
     class CustomEvent(TelemetryEvent):
         message: str
 
-    my_agent = ai.agent(model=MOCK_MODEL, tools=[])
+    my_agent = ai.agent()
 
     @my_agent.loop
-    async def custom(agent: ai.Agent, msgs: list[ai.Message]) -> ai.StreamResult:
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.Message]:
         ai.telemetry.handle(CustomEvent(message="hello"))
-        return await ai.stream_step(agent.model, msgs)
+        async for msg in await ai.models.stream(context.model, context.messages):
+            yield msg
 
     mock_llm([[text_msg("Hello!")]])
-    result = my_agent.run(ai.make_messages(user="Hi"))
-    [m async for m in result]
+    async for _m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Hi")):
+        pass
 
     custom_events = [e for e in handler.events if isinstance(e, CustomEvent)]
     assert len(custom_events) == 1
@@ -193,16 +194,17 @@ async def test_user_emitted_custom_event(handler: RecordingHandler) -> None:
 @pytest.mark.asyncio
 async def test_run_error_in_finish_event(handler: RecordingHandler) -> None:
     """RunFinishEvent captures the error when the loop function raises."""
-    my_agent = ai.agent(model=MOCK_MODEL, tools=[])
+    my_agent = ai.agent()
 
     @my_agent.loop
-    async def failing(agent: ai.Agent, msgs: list[ai.Message]) -> None:
+    async def failing(context: ai.Context) -> AsyncGenerator[ai.Message]:
         raise ValueError("boom")
+        yield  # make it a generator
 
     mock_llm([])
-    result = my_agent.run(ai.make_messages(user="Hi"))
     with pytest.raises(ExceptionGroup):
-        [m async for m in result]
+        async for _m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Hi")):
+            pass
 
     run_finish = handler.of_type(RunFinishEvent)[0]
     assert run_finish.error is not None

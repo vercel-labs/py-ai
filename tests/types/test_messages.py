@@ -1,4 +1,4 @@
-"""Message model: properties, immutability, part IDs, ToolPart.with_result/with_error,
+"""Message model: properties, immutability, part IDs, ToolCallPart, ToolResultPart,
 Message.replace, make_messages, StructuredOutputPart, FilePart."""
 
 import pydantic
@@ -11,7 +11,8 @@ from vercel_ai_sdk.types.messages import (
     ReasoningPart,
     StructuredOutputPart,
     TextPart,
-    ToolPart,
+    ToolCallPart,
+    ToolResultPart,
     Usage,
     make_messages,
 )
@@ -34,7 +35,9 @@ def test_is_done_all_done() -> None:
         role="assistant",
         parts=[
             TextPart(text="hello", state="done"),
-            ToolPart(tool_call_id="tc1", tool_name="t", tool_args="{}", state="done"),
+            ToolCallPart(
+                tool_call_id="tc1", tool_name="t", tool_args="{}", state="done"
+            ),
         ],
     )
     assert m.is_done is True
@@ -74,7 +77,7 @@ def test_text_empty_when_no_text_parts() -> None:
     m = Message(
         id="m1",
         role="assistant",
-        parts=[ToolPart(tool_call_id="tc1", tool_name="t", tool_args="{}")],
+        parts=[ToolCallPart(tool_call_id="tc1", tool_name="t", tool_args="{}")],
     )
     assert m.text == ""
 
@@ -119,7 +122,7 @@ def test_tool_deltas() -> None:
         id="m1",
         role="assistant",
         parts=[
-            ToolPart(
+            ToolCallPart(
                 tool_call_id="tc1",
                 tool_name="search",
                 tool_args='{"q":"te',
@@ -143,8 +146,8 @@ def test_tool_calls() -> None:
         role="assistant",
         parts=[
             TextPart(text="hi"),
-            ToolPart(tool_call_id="tc1", tool_name="a", tool_args="{}"),
-            ToolPart(tool_call_id="tc2", tool_name="b", tool_args="{}"),
+            ToolCallPart(tool_call_id="tc1", tool_name="a", tool_args="{}"),
+            ToolCallPart(tool_call_id="tc2", tool_name="b", tool_args="{}"),
         ],
     )
     assert len(m.tool_calls) == 2
@@ -182,49 +185,34 @@ def test_get_hook_part_missing() -> None:
 
 def test_frozen_rejects_field_mutation() -> None:
     """Frozen models reject direct attribute assignment."""
-    tp = ToolPart(tool_call_id="tc1", tool_name="t", tool_args="{}")
+    tc = ToolCallPart(tool_call_id="tc1", tool_name="t", tool_args="{}")
     with pytest.raises(pydantic.ValidationError):
-        tp.status = "result"  # type: ignore[misc]
+        tc.tool_name = "other"  # type: ignore[misc]
 
     m = Message(id="m1", role="assistant", parts=[TextPart(text="hi")])
     with pytest.raises(pydantic.ValidationError):
         m.label = "test"  # type: ignore[misc]
 
 
-# -- ToolPart.with_result / with_error ------------------------------------
+# -- ToolResultPart --------------------------------------------------------
 
 
-def test_with_result() -> None:
-    tp = ToolPart(tool_call_id="tc1", tool_name="t", tool_args="{}")
-    assert tp.status == "pending"
-    updated = tp.with_result({"answer": 42})
-    assert updated.status == "result"
-    assert updated.result == {"answer": 42}
-    assert updated.id == tp.id  # id preserved
-    # Original unchanged
-    assert tp.status == "pending"
-    assert tp.result is None
+def test_tool_result_part() -> None:
+    tr = ToolResultPart(tool_call_id="tc1", tool_name="t", result={"answer": 42})
+    assert tr.tool_call_id == "tc1"
+    assert tr.result == {"answer": 42}
+    assert tr.is_error is False
 
 
-def test_with_error() -> None:
-    tp = ToolPart(tool_call_id="tc1", tool_name="t", tool_args="{}")
-    updated = tp.with_error("Something went wrong")
-    assert updated.status == "error"
-    assert updated.result == "Something went wrong"
-    assert updated.id == tp.id  # id preserved
-    # Original unchanged
-    assert tp.status == "pending"
-
-
-def test_with_result_rejects_non_pending() -> None:
-    """with_result / with_error reject non-pending tool calls."""
-    tp = ToolPart(
-        tool_call_id="tc1", tool_name="t", tool_args="{}", status="result", result=42
+def test_tool_result_part_error() -> None:
+    tr = ToolResultPart(
+        tool_call_id="tc1",
+        tool_name="t",
+        result="Something went wrong",
+        is_error=True,
     )
-    with pytest.raises(ValueError, match="already has status"):
-        tp.with_result("new result")
-    with pytest.raises(ValueError, match="already has status"):
-        tp.with_error("oops")
+    assert tr.is_error is True
+    assert tr.result == "Something went wrong"
 
 
 # -- Part ids --------------------------------------------------------------
@@ -233,7 +221,7 @@ def test_with_result_rejects_non_pending() -> None:
 def test_parts_have_auto_generated_ids() -> None:
     """All parts get an auto-generated id."""
     text = TextPart(text="hi")
-    tool = ToolPart(tool_call_id="tc1", tool_name="t", tool_args="{}")
+    tool = ToolCallPart(tool_call_id="tc1", tool_name="t", tool_args="{}")
     reasoning = ReasoningPart(text="thinking")
     assert text.id  # non-empty
     assert tool.id
@@ -252,20 +240,17 @@ def test_part_id_explicit() -> None:
 
 
 def test_replace() -> None:
-    tp = ToolPart(id="p1", tool_call_id="tc1", tool_name="t", tool_args="{}")
+    old_text = TextPart(id="p0", text="hello")
     m = Message(
         id="m1",
         role="assistant",
-        parts=[TextPart(id="p0", text="hi"), tp],
+        parts=[old_text, TextPart(id="p1", text="world")],
     )
-    updated_tp = tp.with_result({"answer": 42})
-    updated_m = m.replace(updated_tp)
-    tc = next(p for p in updated_m.parts if isinstance(p, ToolPart))
-    assert tc.status == "result"
-    assert tc.result == {"answer": 42}
+    new_text = TextPart(id="p0", text="updated")
+    updated_m = m.replace(new_text)
+    assert updated_m.parts[0].text == "updated"  # type: ignore[union-attr]
     # Original unchanged
-    orig_tc = next(p for p in m.parts if isinstance(p, ToolPart))
-    assert orig_tc.status == "pending"
+    assert m.parts[0].text == "hello"  # type: ignore[union-attr]
 
 
 def test_replace_missing_id() -> None:

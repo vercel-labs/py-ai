@@ -212,11 +212,11 @@ class StreamHandler:
                 )
             )
 
-        # Tool parts
+        # Tool call parts
         for tcid, (name, args) in self._tool_calls.items():
             is_active = tcid in self._active_tool_ids
             parts.append(
-                messages_.ToolPart(
+                messages_.ToolCallPart(
                     id=tcid,
                     tool_call_id=tcid,
                     tool_name=name,

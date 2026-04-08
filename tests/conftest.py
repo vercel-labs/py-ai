@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Sequence
-from typing import Any, Literal
+from typing import Any
 
 import pydantic
 
@@ -71,7 +71,7 @@ class MockAdapter:
                         streaming_.ReasoningEnd(block_id=bid, signature=part.signature)
                     )
 
-                elif isinstance(part, messages_.ToolPart):
+                elif isinstance(part, messages_.ToolCallPart):
                     yield handler.handle_event(
                         streaming_.ToolStart(
                             tool_call_id=part.tool_call_id,
@@ -116,21 +116,35 @@ def text_msg(
     return messages_.Message(id=id, role="assistant", parts=[part])
 
 
-def tool_msg(
+def tool_call_msg(
     *,
     id: str = "msg-1",
     tc_id: str = "tc-1",
     name: str = "test_tool",
     args: str = "{}",
-    status: Literal["pending", "result", "error"] = "pending",
-    result: dict[str, object] | None = None,
 ) -> messages_.Message:
-    part: messages_.Part = messages_.ToolPart(
+    """Assistant message containing a tool call."""
+    part: messages_.Part = messages_.ToolCallPart(
         tool_call_id=tc_id,
         tool_name=name,
         tool_args=args,
-        status=status,
-        result=result,
         state="done",
     )
     return messages_.Message(id=id, role="assistant", parts=[part])
+
+
+def tool_result_msg(
+    *,
+    tc_id: str = "tc-1",
+    name: str = "test_tool",
+    result: Any = None,
+    is_error: bool = False,
+) -> messages_.Message:
+    """Tool-result message."""
+    part: messages_.Part = messages_.ToolResultPart(
+        tool_call_id=tc_id,
+        tool_name=name,
+        result=result,
+        is_error=is_error,
+    )
+    return messages_.Message(role="tool", parts=[part])
