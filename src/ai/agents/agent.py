@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable
 from typing import Any, Protocol, get_type_hints
 
 import pydantic
@@ -35,24 +35,32 @@ class Tool[**P, R]:
         self._is_gen = is_gen
         self.schema = schema
 
-    async def __call__(self, json_args: str) -> R:
-        """Parse json_args into kwargs, validate, and call the function."""
+    def parse_args(self, json_args: str) -> dict[str, Any]:
+        """Parse and validate JSON args into Python kwargs."""
         kwargs = json.loads(json_args) if json_args else {}
-        if self._validator is not None:
-            self._validator.model_validate(kwargs)
+        return self.validate_kwargs(kwargs)
 
+    def validate_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Validate kwargs and return normalized Python values."""
+        if self._validator is not None:
+            validated = self._validator.model_validate(kwargs)
+            return dict(validated.model_dump())
+        return kwargs
+
+    async def execute_kwargs(self, kwargs: dict[str, Any]) -> R:
+        """Validate kwargs and call the underlying tool implementation."""
+        kwargs = self.validate_kwargs(kwargs)
         if not self._is_gen:
             return await self._fn(**kwargs)  # type: ignore[call-arg]
 
         # Generator tool (e.g. agent-as-a-tool): drain the async
-        # generator, pipe each yielded message to the runtime for
+        # generator, forward each yielded message to the runtime for
         # real-time streaming, and return the final text as the result.
-        rt = runtime.get_runtime()
-        last: types.Message | None = None
-        async for message in self._fn(**kwargs):  # type: ignore[call-arg,attr-defined]
-            await rt.put_message(message)
-            last = message
-        return last.text if last else ""  # type: ignore[return-value]
+        return await yield_from(self._fn(**kwargs))  # type: ignore[arg-type,call-arg,return-value]
+
+    async def __call__(self, json_args: str) -> R:
+        """Parse json_args into kwargs, validate, and call the function."""
+        return await self.execute_kwargs(self.parse_args(json_args))
 
     @property
     def name(self) -> str:
@@ -65,6 +73,10 @@ class Tool[**P, R]:
     @property
     def param_schema(self) -> dict[str, Any]:
         return self.schema.param_schema
+
+    @property
+    def fn(self) -> Callable[P, Awaitable[R]]:
+        return self._fn
 
 
 def tool[**P, R](fn: Callable[P, Awaitable[R]]) -> Tool[P, R]:
@@ -100,12 +112,13 @@ def tool[**P, R](fn: Callable[P, Awaitable[R]]) -> Tool[P, R]:
 class ToolCall:
     """Callable that binds a :class:`ToolCallPart` to its :class:`Tool`.
 
-    Calling it executes the tool and returns a :class:`ToolResultPart`.
+    Calling it executes the tool and returns a ``role="tool"`` message.
     """
 
     def __init__(self, part: types.ToolCallPart, tool: Tool[..., Any]) -> None:
         self._part = part
         self._tool = tool
+        self._kwargs: dict[str, Any] | None = None
 
     @property
     def id(self) -> str:
@@ -116,22 +129,46 @@ class ToolCall:
         return self._part.tool_name
 
     @property
-    def args(self) -> str:
-        return self._part.tool_args
+    def fn(self) -> Callable[..., Awaitable[Any]]:
+        return self._tool.fn
 
-    async def __call__(self) -> types.ToolResultPart:
-        """Execute the tool and return a :class:`ToolResultPart`.
+    @property
+    def kwargs(self) -> dict[str, Any]:
+        if self._kwargs is None:
+            self._kwargs = self._tool.parse_args(self._part.tool_args)
+        return dict(self._kwargs)
+
+    async def __call__(self, **overrides: Any) -> types.Message:
+        """Execute the tool and return a single tool-result message.
 
         If a durability provider is active, the call is routed through
         it for recording or replay.
         """
         provider = _dctx.get_provider()
+        prep_error: Exception | None = None
+        try:
+            base_kwargs = self.kwargs
+        except Exception as exc:
+            prep_error = exc
+            base_kwargs = {}
+
+        try:
+            final_kwargs = self._tool.validate_kwargs({**base_kwargs, **overrides})
+            prep_error = None
+        except Exception:
+            if prep_error is None or overrides:
+                raise
+            final_kwargs = None
 
         telemetry.handle(
             telemetry.ToolCallStartEvent(
                 tool_name=self.name,
                 tool_call_id=self.id,
-                args=self.args,
+                args=(
+                    json.dumps(final_kwargs)
+                    if final_kwargs is not None
+                    else self._part.tool_args
+                ),
             )
         )
         t0 = telemetry.time_ms()
@@ -140,7 +177,9 @@ class ToolCall:
         async def _execute() -> types.ToolResultPart:
             nonlocal error_str
             try:
-                result = await self._tool(self._part.tool_args)
+                if prep_error is not None or final_kwargs is None:
+                    raise prep_error or ValueError("Failed to prepare tool kwargs")
+                result = await self._tool.execute_kwargs(final_kwargs)
             except Exception as exc:
                 error_str = str(exc)
                 return types.ToolResultPart(
@@ -173,7 +212,7 @@ class ToolCall:
                 duration_ms=telemetry.time_ms() - t0,
             )
         )
-        return result_part
+        return builders.tool_message(result_part)
 
 
 class Context(pydantic.BaseModel):
@@ -224,7 +263,7 @@ async def _default_loop(context: Context) -> AsyncGenerator[types.Message]:
         async with asyncio.TaskGroup() as tg:
             tasks = [tg.create_task(tc()) for tc in tool_calls]
 
-        # Yield a tool-result message — history auto-collects it.
+        # Yield one merged tool-result message — history auto-collects it.
         yield builders.tool_message(*(t.result() for t in tasks))
 
 
@@ -250,6 +289,31 @@ async def _collect_messages(
         yield message
 
 
+async def yield_from(source: AsyncIterable[types.Message]) -> str:
+    """Drain *source*, forwarding each message to the current runtime.
+
+    Use inside a custom loop to stream messages from a sub-agent to the
+    consumer without adding them to the parent agent's message history::
+
+        result = await yield_from(sub.run(model, msgs, label="researcher"))
+
+    Works with :func:`asyncio.gather` for concurrent fan-out::
+
+        r1, r2 = await asyncio.gather(
+            yield_from(a.run(model, m1, label="a")),
+            yield_from(b.run(model, m2, label="b")),
+        )
+
+    Returns the final message's text (empty string if no messages).
+    """
+    rt = runtime.get_runtime()
+    last: types.Message | None = None
+    async for message in source:
+        await rt.put_message(message)
+        last = message
+    return last.text if last else ""
+
+
 class Agent:
     """Bag of configuration: model + tools + loop."""
 
@@ -271,6 +335,7 @@ class Agent:
         model: models.Model,
         messages: list[types.Message],
         *,
+        label: str | None = None,
         durability: durability_.DurabilityProvider | None = None,
         checkpoint: checkpoint_.Checkpoint | None = None,
     ) -> AsyncGenerator[types.Message]:
@@ -279,6 +344,9 @@ class Agent:
         Args:
             model: The model to use for LLM calls.
             messages: Initial conversation messages.
+            label: Optional label applied to every yielded message.
+                Useful for multi-agent graphs where the consumer needs
+                to route messages by source.
             durability: Explicit durability provider.  If ``None`` but
                 *checkpoint* is given, an :class:`EventLogProvider` is
                 created automatically.
@@ -297,6 +365,8 @@ class Agent:
         try:
             source = _collect_messages(self._loop_fn(context), context.messages)
             async for message in runtime.run(source):
+                if label is not None:
+                    message = message.model_copy(update={"label": label})
                 yield message
         finally:
             if token is not None:

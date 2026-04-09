@@ -27,7 +27,7 @@ async def test_step_replay_skips_llm() -> None:
     llm1 = mock_llm([[text_msg("Hi there!")]])
     async for _msg in my_agent.run(
         MOCK_MODEL,
-        ai.make_messages(system="test", user="hello"),
+        [ai.system_message("test"), ai.user_message("hello")],
         durability=provider1,
     ):
         pass
@@ -38,7 +38,7 @@ async def test_step_replay_skips_llm() -> None:
     llm2 = mock_llm([])
     async for _msg in my_agent.run(
         MOCK_MODEL,
-        ai.make_messages(system="test", user="hello"),
+        [ai.system_message("test"), ai.user_message("hello")],
         checkpoint=cp,
     ):
         pass
@@ -68,7 +68,7 @@ async def test_tool_replay_skips_execution() -> None:
     provider1 = ai.EventLogProvider()
     async for _msg in my_agent.run(
         MOCK_MODEL,
-        ai.make_messages(system="t", user="go"),
+        [ai.system_message("t"), ai.user_message("go")],
         durability=provider1,
     ):
         pass
@@ -81,7 +81,7 @@ async def test_tool_replay_skips_execution() -> None:
     mock_llm([])
     async for _msg in my_agent.run(
         MOCK_MODEL,
-        ai.make_messages(system="t", user="go"),
+        [ai.system_message("t"), ai.user_message("go")],
         checkpoint=cp,
     ):
         pass
@@ -108,7 +108,9 @@ async def test_hook_cancellation_pending() -> None:
 
     mock_llm([[text_msg("OK")]])
     msgs: list[ai.Message] = []
-    async for msg in my_agent.run(MOCK_MODEL, ai.make_messages(system="t", user="go")):
+    async for msg in my_agent.run(
+        MOCK_MODEL, [ai.system_message("t"), ai.user_message("go")]
+    ):
         msgs.append(msg)
 
     hook_msgs = [m for m in msgs if any(isinstance(p, ai.HookPart) for p in m.parts)]
@@ -134,7 +136,7 @@ async def test_hook_resolution_on_reentry() -> None:
     provider1 = ai.EventLogProvider()
     async for _msg in my_agent.run(
         MOCK_MODEL,
-        ai.make_messages(system="t", user="go"),
+        [ai.system_message("t"), ai.user_message("go")],
         durability=provider1,
     ):
         pass
@@ -146,7 +148,7 @@ async def test_hook_resolution_on_reentry() -> None:
     provider2 = ai.EventLogProvider(cp)
     async for _msg in my_agent.run(
         MOCK_MODEL,
-        ai.make_messages(system="t", user="go"),
+        [ai.system_message("t"), ai.user_message("go")],
         durability=provider2,
     ):
         pass

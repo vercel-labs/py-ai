@@ -11,8 +11,10 @@ arrive back on the same WebSocket from the Textual TUI client.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import warnings
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import fastapi
@@ -20,7 +22,7 @@ import pydantic
 
 import ai
 
-# ToolPart.result is typed as dict but tools can return plain strings.
+# ToolResultPart.result is typed as dict but tools can return plain strings.
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
 app = fastapi.FastAPI(title="multiagent-textual")
@@ -43,11 +45,10 @@ async def contact_data_centers(question: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Hook
+# Hook payload
 # ---------------------------------------------------------------------------
 
 
-@ai.hook
 class Approval(pydantic.BaseModel):
     granted: bool
     reason: str
@@ -57,147 +58,134 @@ class Approval(pydantic.BaseModel):
 # Model
 # ---------------------------------------------------------------------------
 
-MODEL = ai.Model(
-    id="anthropic/claude-opus-4.6",
-    adapter="ai-gateway-v3",
-    provider="ai-gateway",
-)
+MODEL = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
 
 
 # ---------------------------------------------------------------------------
-# Sub-agent branches (implemented as custom loops on per-branch agents)
+# Gated agent factory
+#
+# Creates an agent whose loop gates one tool behind an approval hook.
+# Everything else (streaming, tool execution, history) uses the
+# standard stream → tool → stream cycle.
 # ---------------------------------------------------------------------------
 
 
-mothership_agent = ai.agent(
-    model=MODEL,
-    system="You are assistant 1. Use contact_mothership when asked about the future.",
+def _gated_agent(
+    tools: list[ai.Tool[..., Any]],
+    approval_tool: str,
+    label: str,
+) -> ai.Agent:
+    gated = ai.agent(tools=tools)
+
+    @gated.loop
+    async def gated_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
+        while True:
+            s = await ai.stream(context.model, context.messages, tools=context.tools)
+            async for msg in s:
+                yield msg
+
+            tool_calls = context.resolve(s.tool_calls)
+            if not tool_calls:
+                break
+
+            results: list[ai.Message] = []
+            for tc in tool_calls:
+                if tc.name == approval_tool:
+                    approval = await ai.hook(
+                        f"{label}_{tc.id}",
+                        payload=Approval,
+                        metadata={"branch": label, "tool": tc.name},
+                    )
+                    if approval.granted:
+                        results.append(await tc())
+                    else:
+                        results.append(
+                            ai.tool_message(
+                                tool_call_id=tc.id,
+                                tool_name=tc.name,
+                                result=f"Denied: {approval.reason}",
+                                is_error=True,
+                            )
+                        )
+                else:
+                    results.append(await tc())
+
+            yield ai.tool_message(*results)
+
+    return gated
+
+
+mothership_agent = _gated_agent(
     tools=[contact_mothership],
+    approval_tool="contact_mothership",
+    label="mothership",
 )
 
-
-@mothership_agent.loop
-async def mothership_loop(
-    agent: ai.Agent, messages: list[ai.Message]
-) -> ai.StreamResult:
-    """Agent that contacts the mothership, gated by an approval hook."""
-    local_messages = list(messages)
-
-    while True:
-        result = await ai.stream_step(
-            agent.model, local_messages, agent.tools, label="mothership"
-        )
-
-        if not result.tool_calls:
-            break
-
-        last_msg = result.last_message
-        assert last_msg is not None
-
-        for tc in result.tool_calls:
-            if tc.tool_name == "contact_mothership":
-                # TODO: mypy doesn't support class decorators that change the
-                # class type — @ai.hook returns type[Hook[T]] but mypy still
-                # sees the original BaseModel.
-                approval = await Approval.create(  # type: ignore[attr-defined]
-                    f"mothership_{tc.tool_call_id}",
-                    metadata={"branch": "mothership", "tool": tc.tool_name},
-                )
-                if approval.granted:
-                    updated_tc = await ai.execute_tool(tc, message=last_msg)
-                else:
-                    updated_tc = tc.with_error(f"Denied: {approval.reason}")
-            else:
-                updated_tc = await ai.execute_tool(tc, message=last_msg)
-            last_msg = last_msg.replace(updated_tc)
-
-        local_messages.append(last_msg)
-
-    return result
-
-
-data_center_agent = ai.agent(
-    model=MODEL,
-    system="You are assistant 2. Use contact_data_centers when asked about the future.",
+data_centers_agent = _gated_agent(
     tools=[contact_data_centers],
+    approval_tool="contact_data_centers",
+    label="data_centers",
 )
-
-
-@data_center_agent.loop
-async def data_center_loop(
-    agent: ai.Agent, messages: list[ai.Message]
-) -> ai.StreamResult:
-    """Agent that contacts data centers, gated by an approval hook."""
-    local_messages = list(messages)
-
-    while True:
-        result = await ai.stream_step(
-            agent.model, local_messages, agent.tools, label="data_centers"
-        )
-
-        if not result.tool_calls:
-            break
-
-        last_msg = result.last_message
-        assert last_msg is not None
-
-        for tc in result.tool_calls:
-            if tc.tool_name == "contact_data_centers":
-                # TODO: mypy doesn't support class decorators that change the
-                # class type — @ai.hook returns type[Hook[T]] but mypy still
-                # sees the original BaseModel.
-                approval = await Approval.create(  # type: ignore[attr-defined]
-                    f"data_centers_{tc.tool_call_id}",
-                    metadata={"branch": "data_centers", "tool": tc.tool_name},
-                )
-                if approval.granted:
-                    updated_tc = await ai.execute_tool(tc, message=last_msg)
-                else:
-                    updated_tc = tc.with_error(f"Access denied: {approval.reason}")
-            else:
-                updated_tc = await ai.execute_tool(tc, message=last_msg)
-            last_msg = last_msg.replace(updated_tc)
-
-        local_messages.append(last_msg)
-
-    return result
 
 
 # ---------------------------------------------------------------------------
 # Orchestrator — fan-out, hooks, fan-in
 # ---------------------------------------------------------------------------
 
-
-orchestrator = ai.agent(model=MODEL)
+orchestrator = ai.agent()
 
 
 @orchestrator.loop
-async def multiagent_loop(
-    agent: ai.Agent, messages: list[ai.Message]
-) -> ai.StreamResult:
+async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
     """Run two gated agents in parallel, then summarise their results."""
-    query = messages[-1].text
+    query = context.messages[-1].text
 
-    # Fan out: run both sub-agent loops within this runtime
+    # Fan out: both branches stream concurrently via yield_from.
+    # Messages are forwarded to the runtime automatically and labelled
+    # so the TUI can route them to the correct panel.
     r1, r2 = await asyncio.gather(
-        mothership_loop(mothership_agent, [ai.user_message(query)]),
-        data_center_loop(data_center_agent, [ai.user_message(query)]),
+        ai.yield_from(
+            mothership_agent.run(
+                context.model,
+                [
+                    ai.system_message(
+                        "You are assistant 1. Use contact_mothership "
+                        "when asked about the future."
+                    ),
+                    ai.user_message(query),
+                ],
+                label="mothership",
+            )
+        ),
+        ai.yield_from(
+            data_centers_agent.run(
+                context.model,
+                [
+                    ai.system_message(
+                        "You are assistant 2. Use contact_data_centers "
+                        "when asked about the future."
+                    ),
+                    ai.user_message(query),
+                ],
+                label="data_centers",
+            )
+        ),
     )
 
-    combined = (
-        f"Mothership: {r1.messages[-1].text}\nData centers: {r2.messages[-1].text}"
-    )
+    combined = f"Mothership: {r1}\nData centers: {r2}"
 
-    return await ai.stream_step(
-        agent.model,
+    # Fan in: summarise.
+    s = await ai.stream(
+        context.model,
         [
             ai.system_message(
                 "You are assistant 3. Summarise the results from the other assistants."
             ),
             ai.user_message(combined),
         ],
-        label="summary",
     )
+    async for msg in s:
+        yield msg.model_copy(update={"label": "summary"})
 
 
 # ---------------------------------------------------------------------------
@@ -206,9 +194,9 @@ async def multiagent_loop(
 
 
 def _normalise_message(data: dict[str, Any]) -> dict[str, Any]:
-    """Ensure ToolPart.result is always a dict for safe deserialisation."""
+    """Ensure ToolResultPart.result is always a dict for safe deserialisation."""
     for part in data.get("parts", []):
-        if part.get("type") == "tool" and isinstance(part.get("result"), str):
+        if part.get("type") == "tool_result" and isinstance(part.get("result"), str):
             part["result"] = {"value": part["result"]}
     return data
 
@@ -223,7 +211,9 @@ async def ws_endpoint(websocket: fastapi.WebSocket) -> None:
     await websocket.accept()
     print("Client connected")
 
-    result = orchestrator.run([ai.user_message("When will the robots take over?")])
+    result = orchestrator.run(
+        MODEL, [ai.user_message("When will the robots take over?")]
+    )
 
     # Background task: read hook resolutions from the client.
     async def read_resolutions() -> None:
@@ -232,12 +222,9 @@ async def ws_endpoint(websocket: fastapi.WebSocket) -> None:
                 raw = await websocket.receive_text()
                 data = json.loads(raw)
                 print(f"  Resolution received: {data['hook_id']}")
-                # TODO: mypy doesn't support class decorators that change the
-                # class type — @ai.hook returns type[Hook[T]] but mypy still
-                # sees the original BaseModel.
-                Approval.resolve(  # type: ignore[attr-defined]
+                ai.resolve_hook(
                     data["hook_id"],
-                    {"granted": data["granted"], "reason": data["reason"]},
+                    Approval(granted=data["granted"], reason=data["reason"]),
                 )
         except fastapi.WebSocketDisconnect:
             pass
@@ -253,16 +240,12 @@ async def ws_endpoint(websocket: fastapi.WebSocket) -> None:
                 print(f"  Hook {hook_part.status}: {hook_part.hook_id}")
     finally:
         reader.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await reader
-        except asyncio.CancelledError:
-            pass
 
     # Signal completion
-    try:
+    with contextlib.suppress(Exception):
         await websocket.send_json({"type": "done"})
-    except Exception:
-        pass
 
     print("Run complete")
 

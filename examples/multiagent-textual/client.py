@@ -186,13 +186,13 @@ class MultiAgentApp(textual.app.App):
         for delta in msg.tool_deltas:
             panel.append_text(delta.args_delta, style="dim")
 
-        # Completed message — show tool call results
+        # Completed message — show tool calls and results
         if msg.is_done:
             for part in msg.parts:
                 match part:
-                    case ai.ToolPart(status="pending", tool_name=name, tool_args=args):
+                    case ai.ToolCallPart(tool_name=name, tool_args=args, state="done"):
                         panel.append_line(f"> {name}({args})")
-                    case ai.ToolPart(status="result", tool_name=name, result=result):
+                    case ai.ToolResultPart(tool_name=name, result=result):
                         panel.append_line(f"< {name} = {result}")
 
     # ------------------------------------------------------------------

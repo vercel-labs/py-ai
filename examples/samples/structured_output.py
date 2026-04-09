@@ -1,44 +1,34 @@
+"""Structured output — get validated JSON from the model."""
+
 import asyncio
 
 import pydantic
 
 import ai
 
+model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
 
-class WeatherForecast(pydantic.BaseModel):
-    city: str
-    temperature: float
-    conditions: str
-    humidity: int
-    wind_speed: float
+
+class Recipe(pydantic.BaseModel):
+    name: str
+    ingredients: list[str]
+    steps: list[str]
+    prep_time_minutes: int
+
+
+messages = [ai.user_message("Give me a simple pancake recipe.")]
 
 
 async def main() -> None:
-    llm = ai.ai_gateway.GatewayModel(model="anthropic/claude-opus-4.6")
-
-    messages = [
-        ai.system_message(
-            "You are a weather assistant. Respond with realistic weather data."
-        ),
-        ai.user_message("What's the weather like in San Francisco right now?"),
-    ]
-
-    # Streaming: watch the JSON arrive incrementally, get validated output at the end
-    print("--- Streaming ---")
-    async for msg in llm.stream(messages, output_type=WeatherForecast):
+    # Stream with structured output — watch JSON arrive, get validated at the end
+    async for msg in await ai.stream(model, messages, output_type=Recipe):
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)
         if msg.output:
-            print(f"\n\nParsed: {msg.output}")
-
-    # Non-streaming: get the validated output directly
-    print("\n--- Buffer ---")
-    msg = await llm.buffer(messages, output_type=WeatherForecast)
-    print(f"City: {msg.output.city}")
-    print(f"Temperature: {msg.output.temperature}")
-    print(f"Conditions: {msg.output.conditions}")
-    print(f"Humidity: {msg.output.humidity}%")
-    print(f"Wind: {msg.output.wind_speed} mph")
+            recipe: Recipe = msg.output
+            print(f"\n\nParsed recipe: {recipe.name}")
+            print(f"  Ingredients: {', '.join(recipe.ingredients)}")
+            print(f"  Prep time: {recipe.prep_time_minutes} min")
 
 
 if __name__ == "__main__":

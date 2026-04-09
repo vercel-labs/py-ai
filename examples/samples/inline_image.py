@@ -10,25 +10,14 @@ import base64
 import pathlib
 
 import ai
-from ai import models as m
 
-# This is a language model that can also output images inline.
-model = m.Model(
-    id="google/gemini-3-pro-image",
-    adapter="ai-gateway-v3",
-    provider="ai-gateway",
-    capabilities=("text", "image"),
-)
+model = ai.model("ai-gateway", "google/gemini-3-pro-image")
 
 messages = [
     ai.system_message(
-        "You are an anime art assistant. When asked to draw or create "
-        "an image, generate it in a soft pastel anime style."
+        "You are an art assistant. When asked to draw or create an image, generate it."
     ),
-    ai.user_message(
-        "Draw an anime girl with long silver hair and violet eyes, "
-        "sitting in a field of cherry blossoms at sunset."
-    ),
+    ai.user_message("Draw a cat sitting in a field of cherry blossoms at sunset."),
 ]
 
 
@@ -36,7 +25,7 @@ async def main() -> None:
     last_msg: ai.Message | None = None
 
     # Stream — text deltas arrive as usual, images arrive as FileParts
-    async for msg in m.stream(model, messages):
+    async for msg in await ai.stream(model, messages):
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)
         last_msg = msg

@@ -4,17 +4,11 @@ import asyncio
 import os
 from typing import Any
 
-import rich
-
 import ai
 
 
 async def main() -> None:
-    model = ai.Model(
-        id="anthropic/claude-opus-4.6",
-        adapter="ai-gateway-v3",
-        provider="ai-gateway",
-    )
+    model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
 
     context7_tools: list[ai.Tool[..., Any]] = await ai.mcp.get_http_tools(
         "https://mcp.context7.com/mcp",
@@ -22,16 +16,19 @@ async def main() -> None:
         tool_prefix="context7",
     )
 
-    my_agent = ai.agent(
-        model=model,
-        system="You are a helpful assistant. Use context7 to look up documentation.",
-        tools=context7_tools,
-    )
+    my_agent = ai.agent(tools=context7_tools)
 
-    async for msg in my_agent.run(
-        [ai.user_message("How do I create middleware in Next.js?")]
-    ):
-        rich.print(msg)
+    messages = [
+        ai.system_message(
+            "You are a helpful assistant. Use context7 to look up documentation."
+        ),
+        ai.user_message("How do I create middleware in Next.js?"),
+    ]
+
+    async for msg in my_agent.run(model, messages):
+        if msg.text_delta:
+            print(msg.text_delta, end="", flush=True)
+    print()
 
 
 if __name__ == "__main__":

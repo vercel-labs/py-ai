@@ -7,6 +7,7 @@ import pydantic
 
 import ai
 from ai import models
+from ai.types import builders
 from ai.types import messages as messages_
 
 # A fixed Model used in tests — adapter="mock" dispatches to the mock adapter.
@@ -141,10 +142,9 @@ def tool_result_msg(
     is_error: bool = False,
 ) -> messages_.Message:
     """Tool-result message."""
-    part: messages_.Part = messages_.ToolResultPart(
+    return builders.tool_message(
         tool_call_id=tc_id,
         tool_name=name,
         result=result,
         is_error=is_error,
     )
-    return messages_.Message(role="tool", parts=[part])

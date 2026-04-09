@@ -1,14 +1,13 @@
 """Composable message construction helpers.
 
 Convenience functions for building Message objects without manually
-constructing Part lists.  Each ``*_message`` function accepts a mix of
-plain strings (auto-wrapped in :class:`TextPart`) and existing
-:class:`Part` objects, returning a single :class:`Message`.
+constructing Part lists. Each ``*_message`` function returns a single
+``Message``.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, overload
 
 from .messages import (
     FilePart,
@@ -97,12 +96,112 @@ def thinking(text: str, *, signature: str | None = None) -> ReasoningPart:
     return ReasoningPart(text=text, signature=signature)
 
 
-def tool_message(*parts: ToolResultPart) -> Message:
-    """Create a tool-result message from one or more :class:`ToolResultPart` objects.
+def _tool_results_from_messages(messages: list[Message]) -> list[ToolResultPart]:
+    parts: list[ToolResultPart] = []
+    for message in messages:
+        if message.role != "tool":
+            raise TypeError(f"Expected tool message, got role={message.role!r}")
+        for part in message.parts:
+            if not isinstance(part, ToolResultPart):
+                raise TypeError(
+                    "tool_message() only accepts tool messages containing "
+                    "ToolResultPart parts"
+                )
+            parts.append(part)
+    return parts
 
-    >>> ai.tool_message(ai.tool_result("tc-1", result=72, tool_name="weather"))
+
+@overload
+def tool_message(*messages: Message | list[Message]) -> Message: ...
+
+
+@overload
+def tool_message(*parts: ToolResultPart) -> Message: ...
+
+
+@overload
+def tool_message(
+    *,
+    tool_call_id: str,
+    result: Any = None,
+    tool_name: str = "",
+    is_error: bool = False,
+) -> Message: ...
+
+
+def tool_message(
+    *items: Message | ToolResultPart | list[Message],
+    tool_call_id: str | None = None,
+    result: Any = None,
+    tool_name: str = "",
+    is_error: bool = False,
+) -> Message:
+    """Create or merge a tool-result message.
+
+    >>> part = ai.tool_result("tc-1", result=72, tool_name="weather")
+    >>> ai.tool_message(part)
+    >>> ai.tool_message(tool_call_id="tc-1", result=72, tool_name="weather")
     """
-    return Message(role="tool", parts=list(parts))
+    if tool_call_id is None and (result is not None or tool_name or is_error):
+        raise TypeError(
+            "tool_message() keyword tool-result fields require tool_call_id"
+        )
+
+    if tool_call_id is not None:
+        if items:
+            raise TypeError(
+                "tool_message() cannot mix keyword tool-result fields with "
+                "positional messages or ToolResultPart values"
+            )
+        return Message(
+            role="tool",
+            parts=[
+                tool_result(
+                    tool_call_id,
+                    result=result,
+                    tool_name=tool_name,
+                    is_error=is_error,
+                )
+            ],
+        )
+
+    if not items:
+        raise TypeError("tool_message() requires at least one tool message or result")
+
+    flattened_messages: list[Message] = []
+    result_parts: list[ToolResultPart] = []
+    saw_message = False
+    saw_result_part = False
+
+    for item in items:
+        if isinstance(item, list):
+            saw_message = True
+            flattened_messages.extend(item)
+        elif isinstance(item, Message):
+            saw_message = True
+            flattened_messages.append(item)
+        elif isinstance(item, ToolResultPart):
+            saw_result_part = True
+            result_parts.append(item)
+        else:
+            raise TypeError(
+                "tool_message() only accepts tool messages, lists of tool "
+                "messages, or ToolResultPart values"
+            )
+
+    if saw_message and saw_result_part:
+        raise TypeError(
+            "tool_message() cannot mix tool messages with ToolResultPart values"
+        )
+
+    if saw_message:
+        merged_parts: list[Part] = []
+        merged_parts.extend(_tool_results_from_messages(flattened_messages))
+        return Message(role="tool", parts=merged_parts)
+
+    tool_parts: list[Part] = []
+    tool_parts.extend(result_parts)
+    return Message(role="tool", parts=tool_parts)
 
 
 def tool_result(

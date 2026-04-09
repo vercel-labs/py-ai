@@ -4,16 +4,11 @@ import asyncio
 from collections.abc import AsyncGenerator
 
 import ai
-from ai.agents import agent, tool
 
-model = ai.Model(
-    id="anthropic/claude-sonnet-4-20250514",
-    adapter="ai-gateway-v3",
-    provider="ai-gateway",
-)
+model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
 
 
-@tool
+@ai.tool
 async def get_facts(topic: str) -> str:
     """Look up facts about a topic."""
     facts = {
@@ -25,25 +20,31 @@ async def get_facts(topic: str) -> str:
 
 # This tool is an async generator — it streams intermediate messages
 # through the runtime sink, then returns the final result.
-@tool
+@ai.tool  # type: ignore[arg-type]  # async generator tools are supported at runtime
 async def research(topic: str) -> AsyncGenerator[ai.Message]:
     """Research a topic in depth using a sub-agent."""
-    researcher = agent(
-        system="You are a research assistant. Be concise.",
-        tools=[get_facts],
-    )
+    researcher = ai.agent(tools=[get_facts])
 
-    async for msg in researcher.run(model, [ai.user_message(f"Research: {topic}")]):
+    messages = [
+        ai.system_message("You are a research assistant. Be concise."),
+        ai.user_message(f"Research: {topic}"),
+    ]
+
+    async for msg in researcher.run(model, messages):
         yield msg
 
 
 async def main() -> None:
-    orchestrator = agent(
-        system="Use the research tool to answer questions. Summarize the findings.",
-        tools=[research],
-    )
+    orchestrator = ai.agent(tools=[research])
 
-    async for msg in orchestrator.run(model, [ai.user_message("Tell me about Mars.")]):
+    messages = [
+        ai.system_message(
+            "Use the research tool to answer questions. Summarize the findings."
+        ),
+        ai.user_message("Tell me about Mars."),
+    ]
+
+    async for msg in orchestrator.run(model, messages):
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)
     print()

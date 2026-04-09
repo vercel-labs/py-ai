@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
-import agent
+import agent as agent_
 import fastapi
 import fastapi.middleware.cors
 import fastapi.responses
@@ -12,7 +12,6 @@ import pydantic
 import storage
 
 import ai
-import ai.ai_sdk_ui
 
 app = fastapi.FastAPI(
     title="py-ai-fastapi-chat",
@@ -56,17 +55,21 @@ async def chat(request: ChatRequest) -> fastapi.responses.StreamingResponse:
     if saved:
         checkpoint = ai.Checkpoint.model_validate(saved)
 
-    result = agent.chat_agent.run(messages, checkpoint=checkpoint)
+    durability = ai.EventLogProvider(checkpoint)
+    result = agent_.chat_agent.run(agent_.MODEL, messages, durability=durability)
 
     async def stream_response() -> AsyncGenerator[str]:
         async for chunk in ai.ai_sdk_ui.to_sse_stream(result):
             yield chunk
 
-        if result.checkpoint.pending_hooks:
-            await file_storage.put(
-                checkpoint_key,
-                result.checkpoint.model_dump(),
-            )
+        # Persist checkpoint so interrupted runs (approval hooks with
+        # interrupt_loop=True) can resume on re-entry.  Clean up when
+        # the run completes without pending hooks.
+        cp = durability.checkpoint()
+        if cp.steps and not cp.hooks:
+            # Steps recorded but no hooks resolved — the run was likely
+            # interrupted by an approval hook.  Save for replay.
+            await file_storage.put(checkpoint_key, cp.model_dump())
         else:
             await file_storage.delete(checkpoint_key)
 

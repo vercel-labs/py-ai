@@ -20,8 +20,19 @@ from .agents import (
     mcp,
     resolve_hook,
     tool,
+    yield_from,
 )
-from .models import Client, Model, ModelCost
+from .models import (
+    Client,
+    ImageParams,
+    Model,
+    ModelCost,
+    VideoParams,
+    check_connection,
+    generate,
+    model,
+    stream,
+)
 
 # Re-export core types
 from .types import (
@@ -39,7 +50,6 @@ from .types import (
     ToolResultPart,
     ToolSchema,
     Usage,
-    make_messages,
 )
 from .types.builders import (
     assistant_message,
@@ -67,7 +77,6 @@ __all__ = [
     "ToolLike",
     "ToolSchema",
     "Usage",
-    "make_messages",
     # Builders (from types/builders)
     "user_message",
     "assistant_message",
@@ -79,8 +88,14 @@ __all__ = [
     # Models (from models/)
     "Model",
     "ModelCost",
+    "ImageParams",
+    "VideoParams",
     "Client",
+    "check_connection",
+    "model",
     "models",
+    "stream",
+    "generate",
     # Agents — primary API
     "Agent",
     "agent",
@@ -89,6 +104,8 @@ __all__ = [
     "Tool",
     "ToolCall",
     "tool",
+    # Agents — composition
+    "yield_from",
     # Agents — hooks
     "hook",
     "resolve_hook",

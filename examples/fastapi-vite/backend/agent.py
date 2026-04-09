@@ -5,9 +5,12 @@ Every tool call is gated behind user approval before execution.
 """
 
 import asyncio
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import ai
+
+MODEL = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
 
 
 @ai.tool
@@ -16,46 +19,13 @@ async def talk_to_mothership(question: str) -> str:
     return f"Mothership says: {question} -> Soon."
 
 
-MODEL = ai.Model(
-    id="anthropic/claude-opus-4.6",
-    adapter="ai-gateway-v3",
-    provider="ai-gateway",
-)
-
 TOOLS: list[ai.Tool[..., Any]] = [talk_to_mothership]
 
-
-async def _execute_with_approval(
-    tc: ai.ToolPart, message: ai.Message | None = None
-) -> ai.ToolPart:
-    """Execute a tool call only after the user grants approval.
-
-    Creates a ToolApproval hook that suspends execution until the
-    frontend responds with an approve/reject decision.
-    Returns the updated (immutable) ToolPart with the result.
-    """
-    approval = await ai.ToolApproval.create(  # type: ignore[attr-defined]
-        f"approve_{tc.tool_call_id}",
-        metadata={"tool_name": tc.tool_name, "tool_args": tc.tool_args},
-    )
-
-    if approval.granted:
-        return await ai.execute_tool(tc, message=message)
-    return tc.with_error("Tool call was denied by the user.")
-
-
-chat_agent = ai.agent(
-    model=MODEL,
-    system="",
-    tools=TOOLS,
-)
+chat_agent = ai.agent(tools=TOOLS)
 
 
 @chat_agent.loop
-async def graph(
-    agent: ai.Agent,
-    messages: list[ai.Message],
-) -> ai.StreamResult:
+async def graph(context: ai.Context) -> AsyncGenerator[ai.Message]:
     """Agent graph with human-in-the-loop tool approval.
 
     Loops: stream LLM -> request approval -> execute tools -> repeat.
@@ -63,21 +33,38 @@ async def graph(
     request event on the SSE stream.  The frontend displays Approve /
     Reject buttons and sends the decision back on the next request.
     """
-    local_messages = list(messages)
-
     while True:
-        result = await ai.stream_step(agent.model, local_messages, agent.tools)
+        s = await ai.models.stream(context.model, context.messages, tools=context.tools)
+        async for msg in s:
+            yield msg
 
-        if not result.tool_calls:
-            return result
+        tool_calls = context.resolve(s.tool_calls)
+        if not tool_calls:
+            return
 
-        last_msg = result.last_message
-        assert last_msg is not None
+        results = await asyncio.gather(*(_execute_with_approval(tc) for tc in tool_calls))
+        yield ai.tool_message(*results)
 
-        updated_parts = await asyncio.gather(
-            *(_execute_with_approval(tc, message=last_msg) for tc in result.tool_calls)
-        )
-        updated_msg = last_msg
-        for updated_tc in updated_parts:
-            updated_msg = updated_msg.replace(updated_tc)
-        local_messages.append(updated_msg)
+
+async def _execute_with_approval(tc: ai.ToolCall) -> ai.Message:
+    """Execute a tool call only after the user grants approval.
+
+    Creates a ToolApproval hook that suspends execution until the
+    frontend responds with an approve/reject decision.
+    """
+    approval = await ai.hook(
+        f"approve_{tc.id}",
+        payload=ai.ToolApproval,
+        metadata={"tool_name": tc.name, "tool_kwargs": tc.kwargs},
+        interrupt_loop=True,
+    )
+
+    if approval.granted:
+        return await tc()
+
+    return ai.tool_message(
+        tool_call_id=tc.id,
+        tool_name=tc.name,
+        result="Tool call was denied by the user.",
+        is_error=True,
+    )

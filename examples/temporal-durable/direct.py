@@ -23,7 +23,6 @@ with temporalio.workflow.unsafe.imports_passed_through():
     import activities
 
     import ai
-    from ai.agents import Context, agent, tool
 
 
 # ── Tools ────────────────────────────────────────────────────────
@@ -33,13 +32,13 @@ with temporalio.workflow.unsafe.imports_passed_through():
 # goes through Temporal activities instead.
 
 
-@tool
+@ai.tool
 async def get_weather(city: str) -> str:
     """Get current weather for a city."""
     raise RuntimeError("should not be called inside workflow")
 
 
-@tool
+@ai.tool
 async def get_population(city: str) -> int:
     """Get population of a city."""
     raise RuntimeError("should not be called inside workflow")
@@ -47,11 +46,11 @@ async def get_population(city: str) -> int:
 
 # ── Agent with custom loop ───────────────────────────────────────
 
-weather_agent = agent(tools=[get_weather, get_population])
+weather_agent = ai.agent(tools=[get_weather, get_population])
 
 
 @weather_agent.loop
-async def temporal_loop(context: Context) -> AsyncGenerator[ai.Message]:
+async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
     """Agent loop where every I/O call is a durable Temporal activity."""
     tool_schemas = [
         {
@@ -82,7 +81,7 @@ async def temporal_loop(context: Context) -> AsyncGenerator[ai.Message]:
         # Tool calls via activities (parallel).
         tool_call_parts = msg.tool_calls
 
-        async def _run_tool(tc: Any) -> ai.ToolResultPart:
+        async def _run_tool(tc: Any) -> ai.Message:
             dispatch_result = await temporalio.workflow.execute_activity(
                 activities.tool_dispatch_activity,
                 activities.ToolDispatchParams(
@@ -91,7 +90,7 @@ async def temporal_loop(context: Context) -> AsyncGenerator[ai.Message]:
                 ),
                 start_to_close_timeout=datetime.timedelta(minutes=2),
             )
-            return ai.ToolResultPart(
+            return ai.tool_message(
                 tool_call_id=tc.tool_call_id,
                 tool_name=tc.tool_name,
                 result=dispatch_result.result,
@@ -110,11 +109,7 @@ async def temporal_loop(context: Context) -> AsyncGenerator[ai.Message]:
 class DirectWorkflow:
     @temporalio.workflow.run
     async def run(self, user_query: str) -> str:
-        model = ai.Model(
-            id="anthropic/claude-sonnet-4-20250514",
-            adapter="ai-gateway-v3",
-            provider="ai-gateway",
-        )
+        model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
         messages: list[ai.Message] = [
             ai.system_message(
                 "Answer questions using the weather and population tools."

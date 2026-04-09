@@ -5,21 +5,13 @@ import base64
 import pathlib
 
 import ai
-from ai import models as m
 
-model = m.Model(
-    id="google/veo-3.0-generate-001",
-    adapter="ai-gateway-v3",
-    provider="ai-gateway",
-    capabilities=("video",),
-)
+model = ai.model("ai-gateway", "google/veo-3.0-generate-001")
 
 messages = [
     ai.user_message(
-        "An anime girl with long pink hair and a flowing white "
-        "dress stands on a hilltop at golden hour. A warm breeze "
-        "lifts her hair as she releases a paper lantern into the "
-        "sunset sky. Soft cel-shaded anime art style, warm palette."
+        "A slow aerial shot over a mountain lake at sunrise, with mist "
+        "rising from the water and birds taking flight."
     ),
 ]
 
@@ -27,10 +19,10 @@ messages = [
 async def main() -> None:
     print("Generating video (this may take a minute or two)...")
 
-    result = await m.generate(
+    result = await ai.generate(
         model,
         messages,
-        m.VideoParams(aspect_ratio="16:9", duration=8),
+        ai.VideoParams(aspect_ratio="16:9", duration=8),
     )
 
     print(f"Generated {len(result.videos)} video(s)")

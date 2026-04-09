@@ -12,7 +12,6 @@ from collections.abc import AsyncGenerator
 import pydantic
 
 import ai
-from ai.agents import Context, agent, hook, resolve_hook, tool
 
 
 class Approval(pydantic.BaseModel):
@@ -20,26 +19,19 @@ class Approval(pydantic.BaseModel):
     reason: str = ""
 
 
-@tool
+@ai.tool
 async def contact_mothership(query: str) -> str:
     """Contact the mothership for important decisions."""
     return "Soon."
 
 
 async def main() -> None:
-    model = ai.Model(
-        id="anthropic/claude-sonnet-4-20250514",
-        adapter="ai-gateway-v3",
-        provider="ai-gateway",
-    )
+    model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
 
-    my_agent = agent(
-        system="Use the contact_mothership tool when asked about the future.",
-        tools=[contact_mothership],
-    )
+    my_agent = ai.agent(tools=[contact_mothership])
 
     @my_agent.loop
-    async def with_approval(context: Context) -> AsyncGenerator[ai.Message]:
+    async def with_approval(context: ai.Context) -> AsyncGenerator[ai.Message]:
         while True:
             s = await ai.models.stream(
                 context.model, context.messages, tools=context.tools
@@ -55,16 +47,16 @@ async def main() -> None:
             for tc in tool_calls:
                 if tc.name == "contact_mothership":
                     # Suspends until resolved from outside the loop.
-                    approval = await hook(
+                    approval = await ai.hook(
                         f"approve_{tc.id}",
                         payload=Approval,
-                        metadata={"tool": tc.name, "args": tc.args},
+                        metadata={"tool": tc.name, "kwargs": tc.kwargs},
                     )
                     if approval.granted:
                         results.append(await tc())
                     else:
                         results.append(
-                            ai.ToolResultPart(
+                            ai.tool_message(
                                 tool_call_id=tc.id,
                                 tool_name=tc.name,
                                 result=f"Rejected: {approval.reason}",
@@ -76,15 +68,20 @@ async def main() -> None:
 
             yield ai.tool_message(*results)
 
-    async for msg in my_agent.run(
-        model, [ai.user_message("When will the robots take over?")]
-    ):
+    messages = [
+        ai.system_message(
+            "Use the contact_mothership tool when asked about the future."
+        ),
+        ai.user_message("When will the robots take over?"),
+    ]
+
+    async for msg in my_agent.run(model, messages):
         # Hook signals arrive with role="signal"
         if msg.role == "signal":
             hook_part = msg.get_hook_part()
             if hook_part and hook_part.status == "pending":
                 answer = input(f"Approve {hook_part.hook_id}? [y/n] ")
-                resolve_hook(
+                ai.resolve_hook(
                     hook_part.hook_id,
                     Approval(
                         granted=answer.strip().lower() in ("y", "yes"),

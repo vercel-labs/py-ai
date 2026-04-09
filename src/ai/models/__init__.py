@@ -2,30 +2,28 @@
 
 Usage::
 
-    from ai import models
+    import ai
     from ai.types import Message, TextPart
 
-    model = models.Model(
-        id="anthropic/claude-sonnet-4",
-        adapter="ai-gateway-v3",
-        provider="ai-gateway",
-    )
+    # look up a model from the catalog
+    opus = ai.model("ai-gateway", "anthropic/claude-opus-4-6")
+
     msgs = [Message(role="user", parts=[TextPart(text="hello")])]
 
     # stream — auto-creates client from env vars
-    s = await models.stream(model, msgs)
+    s = await ai.stream(opus, msgs)
     async for msg in s:
         print(msg.text_delta, end="")
 
     # buffer the whole response
-    result = await models.buffer(await models.stream(model, msgs))
+    result = await ai.models.buffer(await ai.stream(opus, msgs))
     print(result.text)
 
     # explicit client
-    client = models.Client(
+    client = ai.Client(
         base_url="https://custom.example.com/v3/ai", api_key="sk-...",
     )
-    s = await models.stream(model, msgs, client=client)
+    s = await ai.stream(opus, msgs, client=client)
     async for msg in s:
         ...
 """
@@ -41,9 +39,11 @@ import pydantic
 from ..types import messages as messages_
 from ..types import tools as tools_
 from .ai_gateway.generate import GenerateParams, ImageParams, VideoParams
+from .core.catalog import get_models, get_providers, register_catalog
+from .core.catalog import model as model
 from .core.client import Client
 from .core.model import Model, ModelCost
-from .core.proto import GenerateFn, StreamFn
+from .core.proto import CheckConnFn, GenerateFn, StreamFn
 
 # ---------------------------------------------------------------------------
 # Adapter registry — maps adapter string → adapter function.
@@ -87,6 +87,40 @@ def register_generate(adapter: str, fn: GenerateFn) -> None:
     Use this to add custom adapters (or override built-in ones).
     """
     _generate_adapters[adapter] = fn
+
+
+# ---------------------------------------------------------------------------
+# Connection-check registry — maps *provider* string → check function.
+# Keyed by provider (not adapter) because the check verifies "can this
+# client reach this provider and does this model exist there".
+# ---------------------------------------------------------------------------
+
+_check_fns: dict[str, CheckConnFn] = {}
+_check_fns_loaded = False
+
+
+def _ensure_check_fns() -> None:
+    """Lazily register built-in check functions on first call."""
+    global _check_fns_loaded  # noqa: PLW0603
+    if _check_fns_loaded:
+        return
+    _check_fns_loaded = True
+
+    from .ai_gateway import check as ai_gw_check
+    from .anthropic import check as anthropic_check
+    from .openai import check as openai_check
+
+    _check_fns["ai-gateway"] = ai_gw_check.check
+    _check_fns["anthropic"] = anthropic_check.check
+    _check_fns["openai"] = openai_check.check
+
+
+def register_check(provider: str, fn: CheckConnFn) -> None:
+    """Register a connection-check function for a provider.
+
+    Use this to add checks for custom providers.
+    """
+    _check_fns[provider] = fn
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +267,39 @@ async def generate(
     return await adapter_fn(c, model, messages, params=params)
 
 
+async def check_connection(
+    model: Model,
+    *,
+    client: Client | None = None,
+) -> bool:
+    """Check whether *client* can reach *model*'s provider and the model exists.
+
+    Returns ``True`` when the credentials are valid **and** the model is
+    available on the remote side — i.e. a subsequent :func:`stream` or
+    :func:`generate` call should succeed (network conditions permitting).
+
+    This only hits free metadata endpoints; no tokens or credits are
+    consumed.
+
+    If no *client* is given, one is auto-created from environment
+    variables (same logic as :func:`stream`).
+
+    Non-auth transport errors (network failures, 5xx) are raised rather
+    than returning ``False`` so that callers can distinguish "bad
+    credentials / unknown model" from "provider unreachable".
+    """
+    _ensure_check_fns()
+    c = client or _auto_client(model)
+    check_fn = _check_fns.get(model.provider)
+    if check_fn is None:
+        registered = ", ".join(sorted(_check_fns)) or "(none)"
+        raise KeyError(
+            f"No check function registered for provider={model.provider!r}. "
+            f"Registered: {registered}"
+        )
+    return await check_fn(c, model)
+
+
 async def buffer(gen: AsyncGenerator[messages_.Message]) -> messages_.Message:
     """Drain a stream and return the final ``Message``.
 
@@ -248,6 +315,7 @@ async def buffer(gen: AsyncGenerator[messages_.Message]) -> messages_.Message:
 
 __all__ = [
     # Core types
+    "CheckConnFn",
     "Client",
     "GenerateFn",
     "GenerateParams",
@@ -257,9 +325,16 @@ __all__ = [
     "StreamFn",
     "StreamResult",
     "VideoParams",
+    # Catalog
+    "get_models",
+    "get_providers",
+    "model",
+    "register_catalog",
     # Public API
     "buffer",
+    "check_connection",
     "generate",
+    "register_check",
     "register_generate",
     "register_stream",
     "stream",

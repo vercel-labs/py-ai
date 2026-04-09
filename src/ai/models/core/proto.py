@@ -57,3 +57,26 @@ class GenerateFn(Protocol):
         messages: list[messages_.Message],
         params: Any = None,
     ) -> messages_.Message: ...
+
+
+@runtime_checkable
+class CheckConnFn(Protocol):
+    """Protocol for connection-check functions.
+
+    A check function verifies that *client* can reach the provider and that
+    *model* is available there.  Returns ``True`` when the credentials are
+    valid **and** the model exists on the remote side.
+
+    The check must be **free** — it should only hit metadata / listing
+    endpoints that don't consume tokens or credits.
+
+    Non-auth transport errors (network failures, 5xx) should be raised
+    rather than returning ``False`` so that callers can distinguish
+    "bad credentials" from "provider unreachable".
+    """
+
+    async def __call__(
+        self,
+        client: Client,
+        model: Model,
+    ) -> bool: ...

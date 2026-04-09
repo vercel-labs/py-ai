@@ -7,10 +7,13 @@ from ai.types.builders import (
     file_part,
     system_message,
     thinking,
+    tool_message,
+    tool_result,
     user_message,
 )
 from ai.types.messages import (
     FilePart,
+    Message,
     ReasoningPart,
     TextPart,
     ToolCallPart,
@@ -130,6 +133,80 @@ def test_thinking_basic() -> None:
 def test_thinking_with_signature() -> None:
     r = thinking("deep thoughts", signature="sig123")
     assert r.signature == "sig123"
+
+
+# -- tool_message ----------------------------------------------------------
+
+
+def test_tool_message_merges_tool_messages() -> None:
+    m1 = Message(
+        role="tool",
+        parts=[tool_result("tc-1", result=1, tool_name="a")],
+    )
+    m2 = Message(
+        role="tool",
+        parts=[tool_result("tc-2", result=2, tool_name="b")],
+    )
+
+    merged = tool_message(m1, m2)
+
+    assert merged.role == "tool"
+    assert [part.tool_call_id for part in merged.tool_results] == ["tc-1", "tc-2"]
+
+
+def test_tool_message_accepts_message_list() -> None:
+    messages = [
+        Message(role="tool", parts=[tool_result("tc-1", result=1, tool_name="a")]),
+        Message(role="tool", parts=[tool_result("tc-2", result=2, tool_name="b")]),
+    ]
+
+    merged = tool_message(messages)
+
+    assert [part.tool_call_id for part in merged.tool_results] == ["tc-1", "tc-2"]
+
+
+def test_tool_message_wraps_tool_result_parts() -> None:
+    merged = tool_message(
+        tool_result("tc-1", result=1, tool_name="a"),
+        tool_result("tc-2", result=2, tool_name="b"),
+    )
+
+    assert merged.role == "tool"
+    assert [part.tool_call_id for part in merged.tool_results] == ["tc-1", "tc-2"]
+
+
+def test_tool_message_builds_from_keyword_fields() -> None:
+    message = tool_message(tool_call_id="tc-1", result=1, tool_name="weather")
+
+    assert message.role == "tool"
+    assert len(message.tool_results) == 1
+    assert message.tool_results[0].tool_call_id == "tc-1"
+    assert message.tool_results[0].tool_name == "weather"
+    assert message.tool_results[0].result == 1
+    assert message.tool_results[0].is_error is False
+
+
+def test_tool_message_builds_error_result_from_keyword_fields() -> None:
+    message = tool_message(
+        tool_call_id="tc-1",
+        result="Denied",
+        tool_name="weather",
+        is_error=True,
+    )
+
+    assert message.tool_results[0].is_error is True
+    assert message.tool_results[0].result == "Denied"
+
+
+def test_tool_message_rejects_non_tool_message() -> None:
+    with pytest.raises(TypeError, match="Expected tool message"):
+        tool_message(user_message("hello"))
+
+
+def test_tool_message_rejects_non_result_parts() -> None:
+    invalid = Message(role="tool", parts=[TextPart(text="bad")])
+    with pytest.raises(TypeError, match="ToolResultPart"):
+        tool_message(invalid)
 
 
 # -- type coercion edge cases ----------------------------------------------

@@ -17,14 +17,6 @@ from collections.abc import AsyncGenerator
 import pydantic
 
 import ai
-from ai.agents import (
-    Context,
-    EventLogProvider,
-    agent,
-    hook,
-    resolve_hook,
-    tool,
-)
 
 
 class Confirmation(pydantic.BaseModel):
@@ -32,26 +24,19 @@ class Confirmation(pydantic.BaseModel):
     reason: str = ""
 
 
-@tool
+@ai.tool
 async def delete_file(path: str) -> str:
     """Delete a file at the given path."""
     return f"Deleted {path}"
 
 
 async def main() -> None:
-    model = ai.Model(
-        id="anthropic/claude-sonnet-4-20250514",
-        adapter="ai-gateway-v3",
-        provider="ai-gateway",
-    )
+    model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
 
-    my_agent = agent(
-        system="Delete files when asked. Always use the delete_file tool.",
-        tools=[delete_file],
-    )
+    my_agent = ai.agent(tools=[delete_file])
 
     @my_agent.loop
-    async def with_confirmation(context: Context) -> AsyncGenerator[ai.Message]:
+    async def with_confirmation(context: ai.Context) -> AsyncGenerator[ai.Message]:
         while True:
             s = await ai.models.stream(
                 context.model, context.messages, tools=context.tools
@@ -66,10 +51,10 @@ async def main() -> None:
             results = []
             for tc in tool_calls:
                 try:
-                    confirmation = await hook(
+                    confirmation = await ai.hook(
                         f"confirm_{tc.id}",
                         payload=Confirmation,
-                        metadata={"tool": tc.name, "args": tc.args},
+                        metadata={"tool": tc.name, "kwargs": tc.kwargs},
                         interrupt_loop=True,  # serverless: cancel if unresolved
                     )
                 except asyncio.CancelledError:
@@ -81,7 +66,7 @@ async def main() -> None:
                     results.append(await tc())
                 else:
                     results.append(
-                        ai.ToolResultPart(
+                        ai.tool_message(
                             tool_call_id=tc.id,
                             tool_name=tc.name,
                             result=f"Rejected: {confirmation.reason}",
@@ -91,16 +76,17 @@ async def main() -> None:
 
             yield ai.tool_message(*results)
 
-    # ── First run: no resolution, hook interrupts ─────────────
+    messages = [
+        ai.system_message("Delete files when asked. Always use the delete_file tool."),
+        ai.user_message("Delete /tmp/old_logs.txt"),
+    ]
+
+    # -- First run: no resolution, hook interrupts --
     print("--- Run 1: hook fires, no resolution, run suspends ---")
     pending_hook_labels: list[str] = []
 
-    durability = EventLogProvider()
-    async for msg in my_agent.run(
-        model,
-        [ai.user_message("Delete /tmp/old_logs.txt")],
-        durability=durability,
-    ):
+    durability = ai.EventLogProvider()
+    async for msg in my_agent.run(model, messages, durability=durability):
         if msg.role == "signal":
             hook_part = msg.get_hook_part()
             if hook_part and hook_part.status == "pending":
@@ -115,19 +101,13 @@ async def main() -> None:
     saved_checkpoint = durability.checkpoint()
     print(f"\n  Checkpoint saved: {len(saved_checkpoint.steps)} steps\n")
 
-    # ── Second run: pre-register resolution, replay from checkpoint ──
+    # -- Second run: pre-register resolution, replay from checkpoint --
     print("--- Run 2: pre-register approval, resume from checkpoint ---")
-    # Resolve each pending hook captured from run 1.
-    # In a real app this would come from a user action (API call, button click).
     for label in pending_hook_labels:
-        resolve_hook(label, Confirmation(approved=True, reason="user approved"))
+        ai.resolve_hook(label, Confirmation(approved=True, reason="user approved"))
 
-    durability = EventLogProvider(saved_checkpoint)
-    async for msg in my_agent.run(
-        model,
-        [ai.user_message("Delete /tmp/old_logs.txt")],
-        durability=durability,
-    ):
+    durability = ai.EventLogProvider(saved_checkpoint)
+    async for msg in my_agent.run(model, messages, durability=durability):
         if msg.role == "signal":
             hook_part = msg.get_hook_part()
             if hook_part:
