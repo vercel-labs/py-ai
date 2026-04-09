@@ -33,10 +33,7 @@ async def main() -> None:
         provider="ai-gateway",
     )
 
-    my_agent = agent(
-        system="Use the contact_mothership tool when asked about the future.",
-        tools=[contact_mothership],
-    )
+    my_agent = agent(tools=[contact_mothership])
 
     @my_agent.loop
     async def with_approval(context: Context) -> AsyncGenerator[ai.Message]:
@@ -76,9 +73,14 @@ async def main() -> None:
 
             yield ai.tool_message(*results)
 
-    async for msg in my_agent.run(
-        model, [ai.user_message("When will the robots take over?")]
-    ):
+    messages = [
+        ai.system_message(
+            "Use the contact_mothership tool when asked about the future."
+        ),
+        ai.user_message("When will the robots take over?"),
+    ]
+
+    async for msg in my_agent.run(model, messages):
         # Hook signals arrive with role="signal"
         if msg.role == "signal":
             hook_part = msg.get_hook_part()

@@ -16,10 +16,8 @@ model = m.Model(
 
 messages = [
     ai.user_message(
-        "An anime girl with long pink hair and a flowing white "
-        "dress stands on a hilltop at golden hour. A warm breeze "
-        "lifts her hair as she releases a paper lantern into the "
-        "sunset sky. Soft cel-shaded anime art style, warm palette."
+        "A slow aerial shot over a mountain lake at sunrise, with mist "
+        "rising from the water and birds taking flight."
     ),
 ]
 

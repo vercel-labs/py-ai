@@ -31,7 +31,7 @@ messages = [ai.user_message("What's the weather in Tokyo?")]
 
 async def main() -> None:
     # Stream with tools — the model may emit tool calls
-    async for msg in m.stream(model, messages, tools=[get_weather]):
+    async for msg in await m.stream(model, messages, tools=[get_weather]):
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)
 

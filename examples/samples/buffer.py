@@ -15,7 +15,8 @@ messages = [ai.user_message("What is 2 + 2?")]
 
 
 async def main() -> None:
-    result = await m.buffer(m.stream(model, messages))
+    s = await m.stream(model, messages)
+    result = await m.buffer(s)  # type: ignore[arg-type]  # StreamResult is async-iterable
     print(result.text)
     if result.usage:
         print(

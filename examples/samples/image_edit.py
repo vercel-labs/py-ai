@@ -1,0 +1,53 @@
+"""Image editing with a dedicated image model.
+
+Demonstrates sending an input image to be edited/transformed by the
+image model. The input image is passed as a FilePart in the user
+message, and the model returns the edited version.
+"""
+
+import asyncio
+import base64
+import pathlib
+
+import ai
+from ai import models as m
+
+model = m.Model(
+    id="openai/gpt-image-1",
+    adapter="ai-gateway-v3",
+    provider="ai-gateway",
+    capabilities=("image",),
+)
+
+
+async def main() -> None:
+    # Load an existing image to use as input for editing.
+    # In practice you would load a real image file:
+    #   image_data = pathlib.Path("my_photo.png").read_bytes()
+    #   input_image = ai.file_part(image_data, media_type="image/png")
+    input_image = ai.FilePart(
+        data="https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/1200px-Cat03.jpg",
+        media_type="image/jpeg",
+    )
+
+    messages = [
+        ai.user_message(
+            "Transform this photo into a soft watercolor painting style. "
+            "Keep the composition and subject the same but make it look "
+            "like a hand-painted watercolor.",
+            input_image,
+        ),
+    ]
+
+    result = await m.generate(model, messages, m.ImageParams(size="1024x1024"))
+
+    print(f"Generated {len(result.images)} edited image(s)")
+    for i, img in enumerate(result.images):
+        filename = f"watercolor_edit_{i}.png"
+        data = img.data if isinstance(img.data, bytes) else base64.b64decode(img.data)
+        pathlib.Path(filename).write_bytes(data)
+        print(f"  {filename}: {img.media_type}, {len(data)} bytes")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

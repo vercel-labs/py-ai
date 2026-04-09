@@ -12,7 +12,7 @@ model = m.Model(
     provider="ai-gateway",
 )
 
-# Load a local image file (replace with your own path)
+# Load a local image file (replace with your own path).
 image_path = pathlib.Path("sample_image.jpg")
 image_data = image_path.read_bytes()
 
@@ -25,7 +25,7 @@ messages = [
 
 
 async def main() -> None:
-    async for msg in m.stream(model, messages):
+    async for msg in await m.stream(model, messages):
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)
     print()

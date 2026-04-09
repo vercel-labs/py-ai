@@ -24,7 +24,7 @@ messages = [ai.user_message("Hello!")]
 
 async def main() -> None:
     try:
-        async for msg in m.stream(model, messages, client=client):
+        async for msg in await m.stream(model, messages, client=client):
             if msg.text_delta:
                 print(msg.text_delta, end="", flush=True)
         print()

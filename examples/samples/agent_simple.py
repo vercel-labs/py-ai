@@ -19,14 +19,14 @@ async def main() -> None:
         provider="ai-gateway",
     )
 
-    my_agent = agent(
-        system="You are a helpful weather assistant.",
-        tools=[get_weather],
-    )
+    my_agent = agent(tools=[get_weather])
 
-    async for msg in my_agent.run(
-        model, [ai.user_message("What's the weather in Tokyo?")]
-    ):
+    messages = [
+        ai.system_message("You are a helpful weather assistant."),
+        ai.user_message("What's the weather in Tokyo?"),
+    ]
+
+    async for msg in my_agent.run(model, messages):
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)
     print()

@@ -45,10 +45,7 @@ async def main() -> None:
         provider="ai-gateway",
     )
 
-    my_agent = agent(
-        system="Delete files when asked. Always use the delete_file tool.",
-        tools=[delete_file],
-    )
+    my_agent = agent(tools=[delete_file])
 
     @my_agent.loop
     async def with_confirmation(context: Context) -> AsyncGenerator[ai.Message]:
@@ -91,16 +88,17 @@ async def main() -> None:
 
             yield ai.tool_message(*results)
 
-    # ── First run: no resolution, hook interrupts ─────────────
+    messages = [
+        ai.system_message("Delete files when asked. Always use the delete_file tool."),
+        ai.user_message("Delete /tmp/old_logs.txt"),
+    ]
+
+    # -- First run: no resolution, hook interrupts --
     print("--- Run 1: hook fires, no resolution, run suspends ---")
     pending_hook_labels: list[str] = []
 
     durability = EventLogProvider()
-    async for msg in my_agent.run(
-        model,
-        [ai.user_message("Delete /tmp/old_logs.txt")],
-        durability=durability,
-    ):
+    async for msg in my_agent.run(model, messages, durability=durability):
         if msg.role == "signal":
             hook_part = msg.get_hook_part()
             if hook_part and hook_part.status == "pending":
@@ -115,19 +113,13 @@ async def main() -> None:
     saved_checkpoint = durability.checkpoint()
     print(f"\n  Checkpoint saved: {len(saved_checkpoint.steps)} steps\n")
 
-    # ── Second run: pre-register resolution, replay from checkpoint ──
+    # -- Second run: pre-register resolution, replay from checkpoint --
     print("--- Run 2: pre-register approval, resume from checkpoint ---")
-    # Resolve each pending hook captured from run 1.
-    # In a real app this would come from a user action (API call, button click).
     for label in pending_hook_labels:
         resolve_hook(label, Confirmation(approved=True, reason="user approved"))
 
     durability = EventLogProvider(saved_checkpoint)
-    async for msg in my_agent.run(
-        model,
-        [ai.user_message("Delete /tmp/old_logs.txt")],
-        durability=durability,
-    ):
+    async for msg in my_agent.run(model, messages, durability=durability):
         if msg.role == "signal":
             hook_part = msg.get_hook_part()
             if hook_part:

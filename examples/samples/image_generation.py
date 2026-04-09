@@ -16,10 +16,9 @@ model = m.Model(
 
 messages = [
     ai.user_message(
-        "Anime girl with twin tails and cat ears, wearing a "
-        "sailor school uniform, striking a victory pose in front "
-        "of a futuristic Tokyo skyline at night, neon lights "
-        "reflecting in her eyes, digital art style"
+        "A watercolor painting of a cozy cabin in the mountains at sunset, "
+        "with warm light spilling from the windows and smoke rising from "
+        "the chimney."
     ),
 ]
 
