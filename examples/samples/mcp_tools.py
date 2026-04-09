@@ -8,11 +8,7 @@ import ai
 
 
 async def main() -> None:
-    model = ai.Model(
-        id="anthropic/claude-sonnet-4-20250514",
-        adapter="ai-gateway-v3",
-        provider="ai-gateway",
-    )
+    model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
 
     context7_tools: list[ai.Tool[..., Any]] = await ai.mcp.get_http_tools(
         "https://mcp.context7.com/mcp",

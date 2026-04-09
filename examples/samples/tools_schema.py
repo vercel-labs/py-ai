@@ -3,13 +3,8 @@
 import asyncio
 
 import ai
-from ai import models as m
 
-model = m.Model(
-    id="anthropic/claude-sonnet-4",
-    adapter="ai-gateway-v3",
-    provider="ai-gateway",
-)
+model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
 
 # Define a tool schema — anything matching the ToolLike protocol works.
 get_weather = ai.ToolSchema(
@@ -30,7 +25,7 @@ messages = [ai.user_message("What's the weather in Tokyo?")]
 
 async def main() -> None:
     # Stream with tools — the model may emit tool calls
-    async for msg in await m.stream(model, messages, tools=[get_weather]):
+    async for msg in await ai.stream(model, messages, tools=[get_weather]):
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)
 

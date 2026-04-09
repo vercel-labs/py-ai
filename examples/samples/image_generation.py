@@ -5,14 +5,8 @@ import base64
 import pathlib
 
 import ai
-from ai import models as m
 
-model = m.Model(
-    id="google/imagen-4.0-generate-001",
-    adapter="ai-gateway-v3",
-    provider="ai-gateway",
-    capabilities=("image",),
-)
+model = ai.model("ai-gateway", "google/imagen-4.0-generate-001")
 
 messages = [
     ai.user_message(
@@ -24,7 +18,9 @@ messages = [
 
 
 async def main() -> None:
-    result = await m.generate(model, messages, m.ImageParams(n=2, aspect_ratio="16:9"))
+    result = await ai.generate(
+        model, messages, ai.ImageParams(n=2, aspect_ratio="16:9")
+    )
 
     print(f"Generated {len(result.images)} image(s)")
     for i, img in enumerate(result.images):

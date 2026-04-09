@@ -10,14 +10,8 @@ import base64
 import pathlib
 
 import ai
-from ai import models as m
 
-model = m.Model(
-    id="openai/gpt-image-1",
-    adapter="ai-gateway-v3",
-    provider="ai-gateway",
-    capabilities=("image",),
-)
+model = ai.model("ai-gateway", "openai/gpt-image-1")
 
 
 async def main() -> None:
@@ -39,7 +33,7 @@ async def main() -> None:
         ),
     ]
 
-    result = await m.generate(model, messages, m.ImageParams(size="1024x1024"))
+    result = await ai.generate(model, messages, ai.ImageParams(size="1024x1024"))
 
     print(f"Generated {len(result.images)} edited image(s)")
     for i, img in enumerate(result.images):

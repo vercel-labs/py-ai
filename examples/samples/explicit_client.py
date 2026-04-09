@@ -5,11 +5,7 @@ import os
 
 import ai
 
-model = ai.Model(
-    id="anthropic/claude-sonnet-4",
-    adapter="ai-gateway-v3",
-    provider="ai-gateway",
-)
+model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
 
 # Explicit client — useful for custom auth, proxies, or self-hosted gateways.
 client = ai.Client(

@@ -26,11 +26,7 @@ async def contact_mothership(query: str) -> str:
 
 
 async def main() -> None:
-    model = ai.Model(
-        id="anthropic/claude-sonnet-4-20250514",
-        adapter="ai-gateway-v3",
-        provider="ai-gateway",
-    )
+    model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
 
     my_agent = ai.agent(tools=[contact_mothership])
 

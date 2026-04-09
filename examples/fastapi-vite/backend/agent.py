@@ -10,11 +10,7 @@ from typing import Any
 
 import ai
 
-MODEL = ai.Model(
-    id="anthropic/claude-sonnet-4-20250514",
-    adapter="ai-gateway-v3",
-    provider="ai-gateway",
-)
+MODEL = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
 
 
 @ai.tool

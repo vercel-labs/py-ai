@@ -22,7 +22,7 @@ from .agents import (
     tool,
     yield_from,
 )
-from .models import Client, Model, ModelCost, generate, stream
+from .models import Client, Model, ModelCost, ImageParams, VideoParams,  generate, model, stream
 
 # Re-export core types
 from .types import (
@@ -78,7 +78,10 @@ __all__ = [
     # Models (from models/)
     "Model",
     "ModelCost",
+    "ImageParams",
+    "VideoParams",
     "Client",
+    "model",
     "models",
     "stream",
     "generate",

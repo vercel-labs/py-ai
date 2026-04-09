@@ -2,30 +2,28 @@
 
 Usage::
 
-    from ai import models
+    import ai
     from ai.types import Message, TextPart
 
-    model = models.Model(
-        id="anthropic/claude-sonnet-4",
-        adapter="ai-gateway-v3",
-        provider="ai-gateway",
-    )
+    # look up a model from the catalog
+    opus = ai.model("ai-gateway", "anthropic/claude-opus-4-6")
+
     msgs = [Message(role="user", parts=[TextPart(text="hello")])]
 
     # stream — auto-creates client from env vars
-    s = await models.stream(model, msgs)
+    s = await ai.stream(opus, msgs)
     async for msg in s:
         print(msg.text_delta, end="")
 
     # buffer the whole response
-    result = await models.buffer(await models.stream(model, msgs))
+    result = await ai.models.buffer(await ai.stream(opus, msgs))
     print(result.text)
 
     # explicit client
-    client = models.Client(
+    client = ai.Client(
         base_url="https://custom.example.com/v3/ai", api_key="sk-...",
     )
-    s = await models.stream(model, msgs, client=client)
+    s = await ai.stream(opus, msgs, client=client)
     async for msg in s:
         ...
 """
@@ -41,6 +39,8 @@ import pydantic
 from ..types import messages as messages_
 from ..types import tools as tools_
 from .ai_gateway.generate import GenerateParams, ImageParams, VideoParams
+from .core.catalog import get_models, get_providers, register_catalog
+from .core.catalog import model as model
 from .core.client import Client
 from .core.model import Model, ModelCost
 from .core.proto import GenerateFn, StreamFn
@@ -257,6 +257,11 @@ __all__ = [
     "StreamFn",
     "StreamResult",
     "VideoParams",
+    # Catalog
+    "get_models",
+    "get_providers",
+    "model",
+    "register_catalog",
     # Public API
     "buffer",
     "generate",

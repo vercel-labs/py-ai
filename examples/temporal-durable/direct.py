@@ -109,11 +109,7 @@ async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
 class DirectWorkflow:
     @temporalio.workflow.run
     async def run(self, user_query: str) -> str:
-        model = ai.Model(
-            id="anthropic/claude-sonnet-4-20250514",
-            adapter="ai-gateway-v3",
-            provider="ai-gateway",
-        )
+        model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
         messages: list[ai.Message] = [
             ai.system_message(
                 "Answer questions using the weather and population tools."

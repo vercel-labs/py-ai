@@ -5,14 +5,8 @@ import base64
 import pathlib
 
 import ai
-from ai import models as m
 
-model = m.Model(
-    id="google/veo-3.0-generate-001",
-    adapter="ai-gateway-v3",
-    provider="ai-gateway",
-    capabilities=("video",),
-)
+model = ai.model("ai-gateway", "google/veo-3.0-generate-001")
 
 messages = [
     ai.user_message(
@@ -25,10 +19,10 @@ messages = [
 async def main() -> None:
     print("Generating video (this may take a minute or two)...")
 
-    result = await m.generate(
+    result = await ai.generate(
         model,
         messages,
-        m.VideoParams(aspect_ratio="16:9", duration=8),
+        ai.VideoParams(aspect_ratio="16:9", duration=8),
     )
 
     print(f"Generated {len(result.videos)} video(s)")

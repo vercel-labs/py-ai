@@ -87,11 +87,7 @@ class LLMCallResult:
 @temporalio.activity.defn(name="llm_call")
 async def llm_call_activity(params: LLMCallParams) -> LLMCallResult:
     """Call the LLM, drain the stream, return the final message."""
-    model = ai.Model(
-        id="anthropic/claude-sonnet-4-20250514",
-        adapter="ai-gateway-v3",
-        provider="ai-gateway",
-    )
+    model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
 
     messages = [ai.Message.model_validate(m) for m in params.messages]
     tools = [ai.ToolSchema(return_type=None, **t) for t in params.tool_schemas]
