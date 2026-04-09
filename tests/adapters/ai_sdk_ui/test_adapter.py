@@ -279,7 +279,7 @@ async def test_runtime_tool_roundtrip() -> None:
     # Collect all messages from the runtime
     runtime_messages: list[messages.Message] = []
     async for msg in weather_agent.run(
-        MOCK_MODEL, ai.make_messages(user="What's the weather in London?")
+        MOCK_MODEL, [ai.user_message("What's the weather in London?")]
     ):
         runtime_messages.append(msg)
 
@@ -672,9 +672,7 @@ async def test_runtime_tool_approval_same_step() -> None:
     )
 
     runtime_messages: list[messages.Message] = []
-    async for msg in approval_agent.run(
-        MOCK_MODEL, ai.make_messages(user="delete /tmp")
-    ):
+    async for msg in approval_agent.run(MOCK_MODEL, [ai.user_message("delete /tmp")]):
         runtime_messages.append(msg)
 
     # Stream through UI adapter

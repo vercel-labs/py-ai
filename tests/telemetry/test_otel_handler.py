@@ -38,7 +38,7 @@ async def test_text_only_spans(spans: InMemorySpanExporter) -> None:
     my_agent = ai.agent()
 
     mock_llm([[text_msg("Hello!")]])
-    async for _m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Hi")):
+    async for _m in my_agent.run(MOCK_MODEL, [ai.user_message("Hi")]):
         pass
 
     finished = spans.get_finished_spans()
@@ -72,7 +72,7 @@ async def test_tool_call_spans(spans: InMemorySpanExporter) -> None:
             [text_msg("10")],
         ]
     )
-    async for _m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Double 5")):
+    async for _m in my_agent.run(MOCK_MODEL, [ai.user_message("Double 5")]):
         pass
 
     finished = spans.get_finished_spans()

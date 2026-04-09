@@ -32,7 +32,7 @@ async def test_agent_text_only() -> None:
 
     llm = mock_llm([[text_msg("Hello!")]])
     msgs: list[ai.Message] = []
-    async for m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Hi")):
+    async for m in my_agent.run(MOCK_MODEL, [ai.user_message("Hi")]):
         msgs.append(m)
     assert llm.call_count == 1
     assert any(m.text == "Hello!" for m in msgs)
@@ -51,7 +51,7 @@ async def test_agent_tool_then_text() -> None:
     llm = mock_llm([call1, call2])
 
     msgs: list[ai.Message] = []
-    async for m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Double 5")):
+    async for m in my_agent.run(MOCK_MODEL, [ai.user_message("Double 5")]):
         msgs.append(m)
     assert llm.call_count == 2
     tool_results = [m for m in msgs if m.role == "tool" and m.tool_results]
@@ -89,7 +89,7 @@ async def test_agent_parallel_tools() -> None:
     llm = mock_llm([[two_tools], call2])
 
     msgs: list[ai.Message] = []
-    async for m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Double 3 and 7")):
+    async for m in my_agent.run(MOCK_MODEL, [ai.user_message("Double 3 and 7")]):
         msgs.append(m)
     assert llm.call_count == 2
     tool_result_msgs = [m for m in msgs if m.role == "tool" and m.tool_results]
@@ -112,8 +112,6 @@ async def test_agent_multi_turn() -> None:
     llm = mock_llm([turn1, turn2, turn3])
 
     msgs: list[ai.Message] = []
-    async for m in my_agent.run(
-        MOCK_MODEL, ai.make_messages(user="Concat then double")
-    ):
+    async for m in my_agent.run(MOCK_MODEL, [ai.user_message("Concat then double")]):
         msgs.append(m)
     assert llm.call_count == 3

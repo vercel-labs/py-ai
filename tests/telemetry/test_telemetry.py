@@ -58,7 +58,7 @@ async def test_text_only_run_events(handler: RecordingHandler) -> None:
     my_agent = ai.agent()
 
     mock_llm([[text_msg("Hello!")]])
-    async for _m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Hi")):
+    async for _m in my_agent.run(MOCK_MODEL, [ai.user_message("Hi")]):
         pass
 
     types = [type(e).__name__ for e in handler.events]
@@ -85,7 +85,7 @@ async def test_tool_call_events(handler: RecordingHandler) -> None:
             [text_msg("10")],
         ]
     )
-    async for _m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Double 5")):
+    async for _m in my_agent.run(MOCK_MODEL, [ai.user_message("Double 5")]):
         pass
 
     types = [type(e).__name__ for e in handler.events]
@@ -128,7 +128,7 @@ async def test_run_id_available_during_run() -> None:
         my_agent = ai.agent()
 
         mock_llm([[text_msg("Hello!")]])
-        async for _m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Hi")):
+        async for _m in my_agent.run(MOCK_MODEL, [ai.user_message("Hi")]):
             pass
         assert len(captured) == 16
     finally:
@@ -147,7 +147,7 @@ async def test_disable_reverts_to_noop() -> None:
     my_agent = ai.agent()
 
     mock_llm([[text_msg("Hello!")]])
-    async for _m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Hi")):
+    async for _m in my_agent.run(MOCK_MODEL, [ai.user_message("Hi")]):
         pass
     assert len(handler.of_type(RunStartEvent)) == 1
 
@@ -155,7 +155,7 @@ async def test_disable_reverts_to_noop() -> None:
     handler.events.clear()
 
     mock_llm([[text_msg("Hello!")]])
-    async for _m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Hi")):
+    async for _m in my_agent.run(MOCK_MODEL, [ai.user_message("Hi")]):
         pass
     assert len(handler.events) == 0
 
@@ -180,7 +180,7 @@ async def test_user_emitted_custom_event(handler: RecordingHandler) -> None:
             yield msg
 
     mock_llm([[text_msg("Hello!")]])
-    async for _m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Hi")):
+    async for _m in my_agent.run(MOCK_MODEL, [ai.user_message("Hi")]):
         pass
 
     custom_events = [e for e in handler.events if isinstance(e, CustomEvent)]
@@ -203,7 +203,7 @@ async def test_run_error_in_finish_event(handler: RecordingHandler) -> None:
 
     mock_llm([])
     with pytest.raises(ExceptionGroup):
-        async for _m in my_agent.run(MOCK_MODEL, ai.make_messages(user="Hi")):
+        async for _m in my_agent.run(MOCK_MODEL, [ai.user_message("Hi")]):
             pass
 
     run_finish = handler.of_type(RunFinishEvent)[0]

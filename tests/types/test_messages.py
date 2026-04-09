@@ -1,9 +1,10 @@
 """Message model: properties, immutability, part IDs, ToolCallPart, ToolResultPart,
-Message.replace, make_messages, StructuredOutputPart, FilePart."""
+Message.replace, StructuredOutputPart, FilePart."""
 
 import pydantic
 import pytest
 
+import ai
 from ai.types.messages import (
     FilePart,
     HookPart,
@@ -14,7 +15,6 @@ from ai.types.messages import (
     ToolCallPart,
     ToolResultPart,
     Usage,
-    make_messages,
 )
 
 
@@ -284,11 +284,11 @@ def test_replace_two_arg_missing() -> None:
         m.replace(stranger, TextPart(text="new"))
 
 
-# -- make_messages ---------------------------------------------------------
+# -- message builders (system_message / user_message) ----------------------
 
 
-def test_make_messages_system_and_user() -> None:
-    msgs = make_messages(system="You are helpful.", user="Hi")
+def test_builders_system_and_user() -> None:
+    msgs = [ai.system_message("You are helpful."), ai.user_message("Hi")]
     assert len(msgs) == 2
     assert msgs[0].role == "system"
     assert msgs[0].text == "You are helpful."
@@ -296,8 +296,8 @@ def test_make_messages_system_and_user() -> None:
     assert msgs[1].text == "Hi"
 
 
-def test_make_messages_user_only() -> None:
-    msgs = make_messages(user="Hi")
+def test_builders_user_only() -> None:
+    msgs = [ai.user_message("Hi")]
     assert len(msgs) == 1
     assert msgs[0].role == "user"
 

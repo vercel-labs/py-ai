@@ -89,7 +89,7 @@ async def test_mcp_tool_executes_through_agent() -> None:
     llm = mock_llm([call1, call2])
 
     msgs: list[ai.Message] = []
-    async for msg in my_agent.run(MOCK_MODEL, ai.make_messages(user="echo hello")):
+    async for msg in my_agent.run(MOCK_MODEL, [ai.user_message("echo hello")]):
         msgs.append(msg)
 
     # Tool was called with the right args.

@@ -18,7 +18,6 @@ from .messages import (
     ToolResultPart,
     Usage,
     generate_id,
-    make_messages,
 )
 from .tools import ToolLike, ToolSchema
 
@@ -38,5 +37,4 @@ __all__ = [
     "ToolSchema",
     "Usage",
     "generate_id",
-    "make_messages",
 ]
