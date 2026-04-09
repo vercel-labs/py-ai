@@ -21,7 +21,7 @@ from .agents import (
     resolve_hook,
     tool,
 )
-from .models import Client, Model, ModelCost
+from .models import Client, Model, ModelCost, generate, stream
 
 # Re-export core types
 from .types import (
@@ -39,7 +39,6 @@ from .types import (
     ToolResultPart,
     ToolSchema,
     Usage,
-    make_messages,
 )
 from .types.builders import (
     assistant_message,
@@ -67,7 +66,6 @@ __all__ = [
     "ToolLike",
     "ToolSchema",
     "Usage",
-    "make_messages",
     # Builders (from types/builders)
     "user_message",
     "assistant_message",
@@ -81,6 +79,8 @@ __all__ = [
     "ModelCost",
     "Client",
     "models",
+    "stream",
+    "generate",
     # Agents — primary API
     "Agent",
     "agent",

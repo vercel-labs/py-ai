@@ -21,7 +21,6 @@ import fastapi
 import pydantic
 
 import ai
-from ai.agents import Context, agent, hook, resolve_hook, tool
 from ai.agents import runtime as runtime_
 
 # ToolResultPart.result is typed as dict but tools can return plain strings.
@@ -34,13 +33,13 @@ app = fastapi.FastAPI(title="multiagent-textual")
 # ---------------------------------------------------------------------------
 
 
-@tool
+@ai.tool
 async def contact_mothership(question: str) -> str:
     """Contact the mothership for important decisions."""
     return "Soon."
 
 
-@tool
+@ai.tool
 async def contact_data_centers(question: str) -> str:
     """Contact the data centers for status updates."""
     return "We are not sure yet."
@@ -77,7 +76,7 @@ MODEL = ai.Model(
 
 
 async def _branch_loop(
-    context: Context,
+    context: ai.Context,
     *,
     label: str,
     approval_tool: str,
@@ -108,7 +107,7 @@ async def _branch_loop(
         results: list[ai.ToolResultPart] = []
         for tc in tool_calls:
             if tc.name == approval_tool:
-                approval = await hook(
+                approval = await ai.hook(
                     f"{label}_{tc.id}",
                     payload=Approval,
                     metadata={"branch": label, "tool": tc.name},
@@ -138,16 +137,16 @@ async def _branch_loop(
 # ---------------------------------------------------------------------------
 
 
-orchestrator = agent()
+orchestrator = ai.agent()
 
 
 @orchestrator.loop
-async def multiagent_loop(context: Context) -> AsyncGenerator[ai.Message]:
+async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
     """Run two gated agents in parallel, then summarise their results."""
     query = context.messages[-1].text
 
     async def run_mothership() -> str:
-        ctx = Context(
+        ctx = ai.Context(
             model=context.model,
             messages=[
                 ai.system_message(
@@ -163,7 +162,7 @@ async def multiagent_loop(context: Context) -> AsyncGenerator[ai.Message]:
         )
 
     async def run_data_centers() -> str:
-        ctx = Context(
+        ctx = ai.Context(
             model=context.model,
             messages=[
                 ai.system_message(
@@ -231,7 +230,7 @@ async def ws_endpoint(websocket: fastapi.WebSocket) -> None:
                 raw = await websocket.receive_text()
                 data = json.loads(raw)
                 print(f"  Resolution received: {data['hook_id']}")
-                resolve_hook(
+                ai.resolve_hook(
                     data["hook_id"],
                     Approval(granted=data["granted"], reason=data["reason"]),
                 )

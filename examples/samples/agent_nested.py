@@ -4,7 +4,6 @@ import asyncio
 from collections.abc import AsyncGenerator
 
 import ai
-from ai.agents import agent, tool
 
 model = ai.Model(
     id="anthropic/claude-sonnet-4-20250514",
@@ -13,7 +12,7 @@ model = ai.Model(
 )
 
 
-@tool
+@ai.tool
 async def get_facts(topic: str) -> str:
     """Look up facts about a topic."""
     facts = {
@@ -25,10 +24,10 @@ async def get_facts(topic: str) -> str:
 
 # This tool is an async generator — it streams intermediate messages
 # through the runtime sink, then returns the final result.
-@tool  # type: ignore[arg-type]  # async generator tools are supported at runtime
+@ai.tool  # type: ignore[arg-type]  # async generator tools are supported at runtime
 async def research(topic: str) -> AsyncGenerator[ai.Message]:
     """Research a topic in depth using a sub-agent."""
-    researcher = agent(tools=[get_facts])
+    researcher = ai.agent(tools=[get_facts])
 
     messages = [
         ai.system_message("You are a research assistant. Be concise."),
@@ -40,7 +39,7 @@ async def research(topic: str) -> AsyncGenerator[ai.Message]:
 
 
 async def main() -> None:
-    orchestrator = agent(tools=[research])
+    orchestrator = ai.agent(tools=[research])
 
     messages = [
         ai.system_message(

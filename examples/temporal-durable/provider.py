@@ -24,11 +24,6 @@ with temporalio.workflow.unsafe.imports_passed_through():
     import activities
 
     import ai
-    from ai.agents import (
-        Checkpoint,
-        agent,
-        tool,
-    )
 
 
 # ── Tools ────────────────────────────────────────────────────────
@@ -38,13 +33,13 @@ with temporalio.workflow.unsafe.imports_passed_through():
 # and routes to Temporal activities instead.
 
 
-@tool
+@ai.tool
 async def get_weather(city: str) -> str:
     """Get current weather for a city."""
     raise RuntimeError("should not be called inside workflow")
 
 
-@tool
+@ai.tool
 async def get_population(city: str) -> int:
     """Get population of a city."""
     raise RuntimeError("should not be called inside workflow")
@@ -157,14 +152,14 @@ class TemporalDurabilityProvider:
         self._messages.append(ai.tool_message(tool_result))
         return tool_result
 
-    def checkpoint(self) -> Checkpoint:
+    def checkpoint(self) -> ai.Checkpoint:
         """Temporal is the event store — no checkpoint needed."""
-        return Checkpoint()
+        return ai.Checkpoint()
 
 
 # ── Agent (uses default loop) ────────────────────────────────────
 
-weather_agent = agent(tools=[get_weather, get_population])
+weather_agent = ai.agent(tools=[get_weather, get_population])
 
 
 # ── Workflow ─────────────────────────────────────────────────────

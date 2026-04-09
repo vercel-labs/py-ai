@@ -12,8 +12,6 @@ import pydantic
 import storage
 
 import ai
-from ai import ai_sdk_ui
-from ai.agents import EventLogProvider
 
 app = fastapi.FastAPI(
     title="py-ai-fastapi-chat",
@@ -41,14 +39,14 @@ file_storage = storage.FileStorage()
 class ChatRequest(pydantic.BaseModel):
     """Request body for the chat endpoint."""
 
-    messages: list[ai_sdk_ui.UIMessage]
+    messages: list[ai.ai_sdk_ui.UIMessage]
     session_id: str | None = None
 
 
 @app.post("/chat")
 async def chat(request: ChatRequest) -> fastapi.responses.StreamingResponse:
     """Handle chat requests and stream responses."""
-    messages = ai_sdk_ui.to_messages(request.messages)
+    messages = ai.ai_sdk_ui.to_messages(request.messages)
     session_id = request.session_id or "default"
     checkpoint_key = f"checkpoint:{session_id}"
 
@@ -57,11 +55,11 @@ async def chat(request: ChatRequest) -> fastapi.responses.StreamingResponse:
     if saved:
         checkpoint = ai.Checkpoint.model_validate(saved)
 
-    durability = EventLogProvider(checkpoint)
+    durability = ai.EventLogProvider(checkpoint)
     result = agent_.chat_agent.run(agent_.MODEL, messages, durability=durability)
 
     async def stream_response() -> AsyncGenerator[str]:
-        async for chunk in ai_sdk_ui.to_sse_stream(result):
+        async for chunk in ai.ai_sdk_ui.to_sse_stream(result):
             yield chunk
 
         # Persist checkpoint so interrupted runs (approval hooks with
@@ -77,5 +75,5 @@ async def chat(request: ChatRequest) -> fastapi.responses.StreamingResponse:
 
     return fastapi.responses.StreamingResponse(
         stream_response(),
-        headers=ai_sdk_ui.UI_MESSAGE_STREAM_HEADERS,
+        headers=ai.ai_sdk_ui.UI_MESSAGE_STREAM_HEADERS,
     )

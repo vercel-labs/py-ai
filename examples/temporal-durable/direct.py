@@ -23,7 +23,6 @@ with temporalio.workflow.unsafe.imports_passed_through():
     import activities
 
     import ai
-    from ai.agents import Context, agent, tool
 
 
 # ── Tools ────────────────────────────────────────────────────────
@@ -33,13 +32,13 @@ with temporalio.workflow.unsafe.imports_passed_through():
 # goes through Temporal activities instead.
 
 
-@tool
+@ai.tool
 async def get_weather(city: str) -> str:
     """Get current weather for a city."""
     raise RuntimeError("should not be called inside workflow")
 
 
-@tool
+@ai.tool
 async def get_population(city: str) -> int:
     """Get population of a city."""
     raise RuntimeError("should not be called inside workflow")
@@ -47,11 +46,11 @@ async def get_population(city: str) -> int:
 
 # ── Agent with custom loop ───────────────────────────────────────
 
-weather_agent = agent(tools=[get_weather, get_population])
+weather_agent = ai.agent(tools=[get_weather, get_population])
 
 
 @weather_agent.loop
-async def temporal_loop(context: Context) -> AsyncGenerator[ai.Message]:
+async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
     """Agent loop where every I/O call is a durable Temporal activity."""
     tool_schemas = [
         {

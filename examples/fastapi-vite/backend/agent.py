@@ -9,7 +9,6 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 import ai
-from ai.agents import Context, agent, hook, tool
 
 MODEL = ai.Model(
     id="anthropic/claude-sonnet-4-20250514",
@@ -18,7 +17,7 @@ MODEL = ai.Model(
 )
 
 
-@tool
+@ai.tool
 async def talk_to_mothership(question: str) -> str:
     """Contact the mothership for important decisions."""
     return f"Mothership says: {question} -> Soon."
@@ -26,11 +25,11 @@ async def talk_to_mothership(question: str) -> str:
 
 TOOLS: list[ai.Tool[..., Any]] = [talk_to_mothership]
 
-chat_agent = agent(tools=TOOLS)
+chat_agent = ai.agent(tools=TOOLS)
 
 
 @chat_agent.loop
-async def graph(context: Context) -> AsyncGenerator[ai.Message]:
+async def graph(context: ai.Context) -> AsyncGenerator[ai.Message]:
     """Agent graph with human-in-the-loop tool approval.
 
     Loops: stream LLM -> request approval -> execute tools -> repeat.
@@ -59,7 +58,7 @@ async def _execute_with_approval(tc: ai.ToolCall) -> ai.ToolResultPart:
     Creates a ToolApproval hook that suspends execution until the
     frontend responds with an approve/reject decision.
     """
-    approval = await hook(
+    approval = await ai.hook(
         f"approve_{tc.id}",
         payload=ai.ToolApproval,
         metadata={"tool_name": tc.name, "tool_args": tc.args},

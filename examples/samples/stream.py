@@ -3,9 +3,8 @@
 import asyncio
 
 import ai
-from ai import models as m
 
-model = m.Model(
+model = ai.Model(
     id="anthropic/claude-sonnet-4",
     adapter="ai-gateway-v3",
     provider="ai-gateway",
@@ -18,7 +17,7 @@ messages = [
 
 
 async def main() -> None:
-    async for msg in await m.stream(model, messages):
+    async for msg in await ai.stream(model, messages):
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)
     print()

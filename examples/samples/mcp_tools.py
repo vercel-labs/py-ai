@@ -5,7 +5,6 @@ import os
 from typing import Any
 
 import ai
-from ai.agents import agent
 
 
 async def main() -> None:
@@ -21,7 +20,7 @@ async def main() -> None:
         tool_prefix="context7",
     )
 
-    my_agent = agent(tools=context7_tools)
+    my_agent = ai.agent(tools=context7_tools)
 
     messages = [
         ai.system_message(

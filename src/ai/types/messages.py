@@ -432,12 +432,3 @@ class Message(pydantic.BaseModel):
             ):
                 return part
         return None
-
-
-def make_messages(*, system: str | None = None, user: str) -> list[Message]:
-    """Convenience builder for common system + user message pattern."""
-    result: list[Message] = []
-    if system is not None:
-        result.append(Message(role="system", parts=[TextPart(text=system)]))
-    result.append(Message(role="user", parts=[TextPart(text=user)]))
-    return result

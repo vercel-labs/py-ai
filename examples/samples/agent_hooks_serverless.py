@@ -17,14 +17,6 @@ from collections.abc import AsyncGenerator
 import pydantic
 
 import ai
-from ai.agents import (
-    Context,
-    EventLogProvider,
-    agent,
-    hook,
-    resolve_hook,
-    tool,
-)
 
 
 class Confirmation(pydantic.BaseModel):
@@ -32,7 +24,7 @@ class Confirmation(pydantic.BaseModel):
     reason: str = ""
 
 
-@tool
+@ai.tool
 async def delete_file(path: str) -> str:
     """Delete a file at the given path."""
     return f"Deleted {path}"
@@ -45,10 +37,10 @@ async def main() -> None:
         provider="ai-gateway",
     )
 
-    my_agent = agent(tools=[delete_file])
+    my_agent = ai.agent(tools=[delete_file])
 
     @my_agent.loop
-    async def with_confirmation(context: Context) -> AsyncGenerator[ai.Message]:
+    async def with_confirmation(context: ai.Context) -> AsyncGenerator[ai.Message]:
         while True:
             s = await ai.models.stream(
                 context.model, context.messages, tools=context.tools
@@ -63,7 +55,7 @@ async def main() -> None:
             results = []
             for tc in tool_calls:
                 try:
-                    confirmation = await hook(
+                    confirmation = await ai.hook(
                         f"confirm_{tc.id}",
                         payload=Confirmation,
                         metadata={"tool": tc.name, "args": tc.args},
@@ -97,7 +89,7 @@ async def main() -> None:
     print("--- Run 1: hook fires, no resolution, run suspends ---")
     pending_hook_labels: list[str] = []
 
-    durability = EventLogProvider()
+    durability = ai.EventLogProvider()
     async for msg in my_agent.run(model, messages, durability=durability):
         if msg.role == "signal":
             hook_part = msg.get_hook_part()
@@ -116,9 +108,9 @@ async def main() -> None:
     # -- Second run: pre-register resolution, replay from checkpoint --
     print("--- Run 2: pre-register approval, resume from checkpoint ---")
     for label in pending_hook_labels:
-        resolve_hook(label, Confirmation(approved=True, reason="user approved"))
+        ai.resolve_hook(label, Confirmation(approved=True, reason="user approved"))
 
-    durability = EventLogProvider(saved_checkpoint)
+    durability = ai.EventLogProvider(saved_checkpoint)
     async for msg in my_agent.run(model, messages, durability=durability):
         if msg.role == "signal":
             hook_part = msg.get_hook_part()

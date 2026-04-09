@@ -9,10 +9,9 @@ import asyncio
 from collections.abc import AsyncGenerator
 
 import ai
-from ai.agents import agent, tool
 
 
-@tool  # type: ignore[arg-type]  # async generator tools are supported at runtime
+@ai.tool  # type: ignore[arg-type]  # async generator tools are supported at runtime
 async def talk_to_mothership(question: str) -> AsyncGenerator[ai.Message]:
     """Ask the mothership a question. Streams progress back to the caller."""
     for step in ["Connecting...", "Transmitting...", "Awaiting response..."]:
@@ -37,7 +36,7 @@ async def main() -> None:
         provider="ai-gateway",
     )
 
-    my_agent = agent(tools=[talk_to_mothership])
+    my_agent = ai.agent(tools=[talk_to_mothership])
 
     messages = [
         ai.system_message("Use the mothership tool when asked about the future."),

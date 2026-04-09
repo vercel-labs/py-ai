@@ -4,7 +4,6 @@ import asyncio
 
 import ai
 from ai import models as m
-from ai.types import tools as tools_
 
 model = m.Model(
     id="anthropic/claude-sonnet-4",
@@ -13,7 +12,7 @@ model = m.Model(
 )
 
 # Define a tool schema — anything matching the ToolLike protocol works.
-get_weather = tools_.ToolSchema(
+get_weather = ai.ToolSchema(
     name="get_weather",
     description="Get the current weather for a city.",
     param_schema={

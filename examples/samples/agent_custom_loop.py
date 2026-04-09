@@ -4,16 +4,15 @@ import asyncio
 from collections.abc import AsyncGenerator
 
 import ai
-from ai.agents import Context, agent, tool
 
 
-@tool
+@ai.tool
 async def get_weather(city: str) -> str:
     """Get current weather for a city."""
     return f"Sunny, 72F in {city}"
 
 
-@tool
+@ai.tool
 async def get_population(city: str) -> int:
     """Get population of a city."""
     return {"new york": 8_336_817, "tokyo": 13_960_000}.get(city.lower(), 1_000_000)
@@ -27,10 +26,10 @@ async def main() -> None:
     )
 
     tools = [get_weather, get_population]
-    my_agent = agent(tools=tools)
+    my_agent = ai.agent(tools=tools)
 
     @my_agent.loop
-    async def custom(context: Context) -> AsyncGenerator[ai.Message]:
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.Message]:
         """Stream, execute tools with logging, repeat."""
         while True:
             s = await ai.models.stream(

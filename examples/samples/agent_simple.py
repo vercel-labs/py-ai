@@ -3,10 +3,9 @@
 import asyncio
 
 import ai
-from ai.agents import agent, tool
 
 
-@tool
+@ai.tool
 async def get_weather(city: str) -> str:
     """Get current weather for a city."""
     return f"Sunny, 72F in {city}"
@@ -19,7 +18,7 @@ async def main() -> None:
         provider="ai-gateway",
     )
 
-    my_agent = agent(tools=[get_weather])
+    my_agent = ai.agent(tools=[get_weather])
 
     messages = [
         ai.system_message("You are a helpful weather assistant."),
