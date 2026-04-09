@@ -12,7 +12,7 @@ import asyncio
 import base64
 import pathlib
 
-import vercel_ai_sdk as ai
+import ai
 
 
 async def main() -> None:

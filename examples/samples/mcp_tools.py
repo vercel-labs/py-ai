@@ -6,7 +6,7 @@ from typing import Any
 
 import rich
 
-import vercel_ai_sdk as ai
+import ai
 
 
 async def main() -> None:

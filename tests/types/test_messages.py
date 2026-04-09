@@ -4,7 +4,7 @@ Message.replace, make_messages, StructuredOutputPart, FilePart."""
 import pydantic
 import pytest
 
-from vercel_ai_sdk.types.messages import (
+from ai.types.messages import (
     FilePart,
     HookPart,
     Message,

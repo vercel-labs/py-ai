@@ -11,8 +11,8 @@ import fastapi.responses
 import pydantic
 import storage
 
-import vercel_ai_sdk as ai
-import vercel_ai_sdk.ai_sdk_ui
+import ai
+import ai.ai_sdk_ui
 
 app = fastapi.FastAPI(
     title="py-ai-fastapi-chat",

@@ -3,8 +3,8 @@
 import asyncio
 from collections.abc import AsyncGenerator
 
-import vercel_ai_sdk as ai
-from vercel_ai_sdk.agents import Context, agent, tool
+import ai
+from ai.agents import Context, agent, tool
 
 
 @tool

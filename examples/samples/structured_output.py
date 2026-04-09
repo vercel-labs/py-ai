@@ -2,7 +2,7 @@ import asyncio
 
 import pydantic
 
-import vercel_ai_sdk as ai
+import ai
 
 
 class WeatherForecast(pydantic.BaseModel):

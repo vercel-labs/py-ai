@@ -22,14 +22,14 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from vercel_ai_sdk.models.ai_gateway import errors
-from vercel_ai_sdk.models.ai_gateway.generate import (
+from ai.models.ai_gateway import errors
+from ai.models.ai_gateway.generate import (
     VideoParams,
     generate,
 )
-from vercel_ai_sdk.models.core import client as client_
-from vercel_ai_sdk.models.core import model as model_
-from vercel_ai_sdk.types import messages
+from ai.models.core import client as client_
+from ai.models.core import model as model_
+from ai.types import messages
 
 # MP4 magic bytes (ftyp box)
 _MP4_HEADER = bytes(
@@ -130,7 +130,7 @@ class TestGenerate:
         client = _client(httpx.MockTransport(handler))
 
         with patch(
-            "vercel_ai_sdk.models.core.helpers.files.download",
+            "ai.models.core.helpers.files.download",
             new_callable=AsyncMock,
             return_value=(_MP4_HEADER, "video/mp4"),
         ) as mock_dl:

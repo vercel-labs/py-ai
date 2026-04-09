@@ -2,8 +2,8 @@
 
 import asyncio
 
-import vercel_ai_sdk as ai
-from vercel_ai_sdk.agents import agent, tool
+import ai
+from ai.agents import agent, tool
 
 
 @tool

@@ -9,13 +9,13 @@ Requires the ``opentelemetry-api`` package::
 
 Usage::
 
-    import vercel_ai_sdk as ai
+    import ai
 
     # Uses OtelHandler by default
     ai.telemetry.enable()
 
     # Or configure explicitly
-    from vercel_ai_sdk.otel import OtelHandler
+    from ai.otel import OtelHandler
     ai.telemetry.enable(OtelHandler(record_inputs=False))
 """
 

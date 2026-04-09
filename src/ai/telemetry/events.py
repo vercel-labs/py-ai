@@ -2,7 +2,7 @@
 
 Enable the built-in OpenTelemetry handler::
 
-    import vercel_ai_sdk as ai
+    import ai
 
     ai.telemetry.enable()
 

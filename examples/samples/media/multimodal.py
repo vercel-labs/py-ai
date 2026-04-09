@@ -6,7 +6,7 @@ Usage:
 
 import asyncio
 
-import vercel_ai_sdk as ai
+import ai
 
 IMAGE_URL = (
     "https://4kwallpapers.com/images/wallpapers/hatsune-miku-3840x2160-15479.jpg"

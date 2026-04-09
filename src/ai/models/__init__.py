@@ -2,8 +2,8 @@
 
 Usage::
 
-    from vercel_ai_sdk import models
-    from vercel_ai_sdk.types import Message, TextPart
+    from ai import models
+    from ai.types import Message, TextPart
 
     model = models.Model(
         id="anthropic/claude-sonnet-4",
@@ -169,7 +169,7 @@ async def stream(
     the final ``Message``.  After iteration, access ``.text``,
     ``.tool_calls``, ``.usage``, etc.
 
-    If a :class:`~vercel_ai_sdk.agents.durability.DurabilityProvider` is
+    If a :class:`~ai.agents.durability.DurabilityProvider` is
     active (set by ``Agent.run()``), the stream is routed through the
     provider for recording or replay.
     """

@@ -1,7 +1,7 @@
 """Network IO for media — download with size limits and SSRF prevention.
 
 Pure media utilities (detection, encoding, inference) live in
-:mod:`vercel_ai_sdk.types.media`.
+:mod:`ai.types.media`.
 """
 
 from __future__ import annotations

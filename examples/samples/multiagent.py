@@ -2,7 +2,7 @@
 
 import asyncio
 
-import vercel_ai_sdk as ai
+import ai
 
 
 @ai.tool

@@ -2,14 +2,14 @@
 
 import pytest
 
-from vercel_ai_sdk.types.builders import (
+from ai.types.builders import (
     assistant_message,
     file_part,
     system_message,
     thinking,
     user_message,
 )
-from vercel_ai_sdk.types.messages import (
+from ai.types.messages import (
     FilePart,
     ReasoningPart,
     TextPart,

@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator
 import pydantic
 import pytest
 
-import vercel_ai_sdk as ai
+import ai
 
 from ..conftest import MOCK_MODEL, mock_llm, text_msg
 

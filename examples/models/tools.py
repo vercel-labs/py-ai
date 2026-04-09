@@ -2,9 +2,9 @@
 
 import asyncio
 
-import vercel_ai_sdk as ai
-from vercel_ai_sdk import models as m
-from vercel_ai_sdk.types import tools as tools_
+import ai
+from ai import models as m
+from ai.types import tools as tools_
 
 model = m.Model(
     id="anthropic/claude-sonnet-4",

@@ -16,8 +16,8 @@ from collections.abc import AsyncGenerator
 
 import pydantic
 
-import vercel_ai_sdk as ai
-from vercel_ai_sdk.agents import (
+import ai
+from ai.agents import (
     Context,
     EventLogProvider,
     agent,

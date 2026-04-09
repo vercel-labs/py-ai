@@ -2,7 +2,7 @@
 
 Usage::
 
-    import vercel_ai_sdk as ai
+    import ai
 
     ai.telemetry.enable()          # OTel handler (default)
     ai.telemetry.enable(handler)   # custom handler

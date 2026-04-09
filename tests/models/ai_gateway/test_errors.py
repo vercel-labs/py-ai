@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-from vercel_ai_sdk.models.ai_gateway import errors
+from ai.models.ai_gateway import errors
 
 
 class TestGatewayErrorBase:

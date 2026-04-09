@@ -22,15 +22,15 @@ from typing import Any
 import httpx
 import pytest
 
-import vercel_ai_sdk as ai
-from vercel_ai_sdk.models.ai_gateway import errors
-from vercel_ai_sdk.models.core import client as client_
-from vercel_ai_sdk.models.core import model as model_
-from vercel_ai_sdk.types import messages
+import ai
+from ai.models.ai_gateway import errors
+from ai.models.core import client as client_
+from ai.models.core import model as model_
+from ai.types import messages
 
 # The ai_gateway __init__.py re-exports `stream` as a function, which
 # shadows the module.  Use importlib to get the actual module.
-stream_mod = importlib.import_module("vercel_ai_sdk.models.ai_gateway.stream")
+stream_mod = importlib.import_module("ai.models.ai_gateway.stream")
 
 # ---------------------------------------------------------------------------
 # Helpers

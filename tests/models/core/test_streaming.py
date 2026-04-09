@@ -1,6 +1,6 @@
 """StreamHandler: event accumulation, state transitions, message building."""
 
-from vercel_ai_sdk.models.core.helpers.streaming import (
+from ai.models.core.helpers.streaming import (
     FileEvent,
     MessageDone,
     ReasoningDelta,
@@ -14,7 +14,7 @@ from vercel_ai_sdk.models.core.helpers.streaming import (
     ToolEnd,
     ToolStart,
 )
-from vercel_ai_sdk.types.messages import (
+from ai.types.messages import (
     FilePart,
     ReasoningPart,
     TextPart,

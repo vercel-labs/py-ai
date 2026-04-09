@@ -18,7 +18,7 @@ from typing import Any
 import fastapi
 import pydantic
 
-import vercel_ai_sdk as ai
+import ai
 
 # ToolPart.result is typed as dict but tools can return plain strings.
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")

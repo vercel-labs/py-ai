@@ -23,8 +23,8 @@ import temporalio.workflow
 with temporalio.workflow.unsafe.imports_passed_through():
     import activities
 
-    import vercel_ai_sdk as ai
-    from vercel_ai_sdk.agents import (
+    import ai
+    from ai.agents import (
         Checkpoint,
         agent,
         tool,

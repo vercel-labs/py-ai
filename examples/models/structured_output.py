@@ -4,8 +4,8 @@ import asyncio
 
 import pydantic
 
-import vercel_ai_sdk as ai
-from vercel_ai_sdk import models as m
+import ai
+from ai import models as m
 
 model = m.Model(
     id="anthropic/claude-sonnet-4",
