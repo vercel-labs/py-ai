@@ -11,18 +11,21 @@ behind user confirmation before execution.
 
 ## Human-in-the-Loop
 
-The agent graph in `backend/agent.py` uses the `ToolApproval` hook to
-suspend execution whenever the LLM wants to call a tool.  The flow is:
+The agent graph in `backend/agent.py` uses the function-based hook API
+to suspend execution whenever the LLM wants to call a tool. The flow is:
 
 1. LLM emits a tool call
-2. Backend creates a `ToolApproval` hook — this emits an
-   `approval-requested` event on the SSE stream and suspends execution
-3. The frontend renders Approve / Reject buttons via the
+2. Backend calls `await ai.hook(...)` with `payload=ai.ToolApproval`
+3. The runtime emits a `role="signal"` message containing a pending `HookPart`
+4. The frontend renders Approve / Reject buttons via the
    `<Confirmation>` component (from AI Elements)
-4. When the user clicks a button, `addToolApprovalResponse()` patches
+5. When the user clicks a button, `addToolApprovalResponse()` patches
    the message and sends a new request with the decision
-5. The backend resumes from the checkpoint and either executes the tool
-   or marks it as denied
+6. The backend resumes from the checkpoint, calls `ai.resolve_hook(...)`,
+   and either executes the tool or returns an error tool-result message
+
+Tool results are appended as separate `role="tool"` messages. The
+assistant tool-call message remains immutable.
 
 ## Setup
 

@@ -5,6 +5,13 @@ run in parallel — each gated by an approval hook — then a third agent
 summarises their results.  Hook approvals happen interactively in the
 terminal.
 
+The current implementation uses:
+
+- `ai.agent(...)` for each branch and the orchestrator
+- `await ai.hook(...)` for branch-specific approvals
+- `ai.yield_from(...)` to forward nested agent output into the outer run
+- `role="signal"` messages for hook state updates over the WebSocket
+
 ## Setup
 
 ```bash
