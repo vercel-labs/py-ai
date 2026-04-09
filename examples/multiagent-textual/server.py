@@ -21,7 +21,6 @@ import fastapi
 import pydantic
 
 import ai
-from ai.agents import runtime as runtime_
 
 # ToolResultPart.result is typed as dict but tools can return plain strings.
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
@@ -67,75 +66,75 @@ MODEL = ai.Model(
 
 
 # ---------------------------------------------------------------------------
-# Sub-agent branch loops
+# Gated agent factory
 #
-# These are plain async generators that run within the orchestrator's
-# runtime. They call models.stream() and hook() directly, which auto-
-# detect the active runtime via context var.
+# Creates an agent whose loop gates one tool behind an approval hook.
+# Everything else (streaming, tool execution, history) uses the
+# standard stream → tool → stream cycle.
 # ---------------------------------------------------------------------------
 
 
-async def _branch_loop(
-    context: ai.Context,
-    *,
-    label: str,
+def _gated_agent(
+    tools: list[ai.Tool[..., Any]],
     approval_tool: str,
-) -> str:
-    """Generic branch: stream with tools, gate one tool behind an approval hook.
+    label: str,
+) -> ai.Agent:
+    gated = ai.agent(tools=tools)
 
-    Returns the final assistant text.
-    """
-    last_text = ""
+    @gated.loop
+    async def gated_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
+        while True:
+            s = await ai.stream(context.model, context.messages, tools=context.tools)
+            async for msg in s:
+                yield msg
 
-    while True:
-        s = await ai.models.stream(
-            context.model,
-            context.messages,
-            tools=context.tools,
-        )
-        async for msg in s:
-            # Tag each message with the branch label for the TUI router.
-            labeled = msg.model_copy(update={"label": label})
-            await runtime_.get_runtime().put_message(labeled)
-            if msg.text:
-                last_text = msg.text
+            tool_calls = context.resolve(s.tool_calls)
+            if not tool_calls:
+                break
 
-        tool_calls = context.resolve(s.tool_calls)
-        if not tool_calls:
-            break
-
-        results: list[ai.ToolResultPart] = []
-        for tc in tool_calls:
-            if tc.name == approval_tool:
-                approval = await ai.hook(
-                    f"{label}_{tc.id}",
-                    payload=Approval,
-                    metadata={"branch": label, "tool": tc.name},
-                )
-                if approval.granted:
-                    results.append(await tc())
-                else:
-                    results.append(
-                        ai.ToolResultPart(
-                            tool_call_id=tc.id,
-                            tool_name=tc.name,
-                            result=f"Denied: {approval.reason}",
-                            is_error=True,
-                        )
+            results: list[ai.ToolResultPart] = []
+            for tc in tool_calls:
+                if tc.name == approval_tool:
+                    approval = await ai.hook(
+                        f"{label}_{tc.id}",
+                        payload=Approval,
+                        metadata={"branch": label, "tool": tc.name},
                     )
-            else:
-                results.append(await tc())
+                    if approval.granted:
+                        results.append(await tc())
+                    else:
+                        results.append(
+                            ai.ToolResultPart(
+                                tool_call_id=tc.id,
+                                tool_name=tc.name,
+                                result=f"Denied: {approval.reason}",
+                                is_error=True,
+                            )
+                        )
+                else:
+                    results.append(await tc())
 
-        tool_msg = ai.tool_message(*results)
-        context.messages.append(tool_msg)
+            yield ai.tool_message(*results)
 
-    return last_text
+    return gated
+
+
+mothership_agent = _gated_agent(
+    tools=[contact_mothership],
+    approval_tool="contact_mothership",
+    label="mothership",
+)
+
+data_centers_agent = _gated_agent(
+    tools=[contact_data_centers],
+    approval_tool="contact_data_centers",
+    label="data_centers",
+)
 
 
 # ---------------------------------------------------------------------------
 # Orchestrator — fan-out, hooks, fan-in
 # ---------------------------------------------------------------------------
-
 
 orchestrator = ai.agent()
 
@@ -145,45 +144,42 @@ async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
     """Run two gated agents in parallel, then summarise their results."""
     query = context.messages[-1].text
 
-    async def run_mothership() -> str:
-        ctx = ai.Context(
-            model=context.model,
-            messages=[
-                ai.system_message(
-                    "You are assistant 1. Use contact_mothership "
-                    "when asked about the future."
-                ),
-                ai.user_message(query),
-            ],
-            tools=[contact_mothership],
-        )
-        return await _branch_loop(
-            ctx, label="mothership", approval_tool="contact_mothership"
-        )
-
-    async def run_data_centers() -> str:
-        ctx = ai.Context(
-            model=context.model,
-            messages=[
-                ai.system_message(
-                    "You are assistant 2. Use contact_data_centers "
-                    "when asked about the future."
-                ),
-                ai.user_message(query),
-            ],
-            tools=[contact_data_centers],
-        )
-        return await _branch_loop(
-            ctx, label="data_centers", approval_tool="contact_data_centers"
-        )
-
-    # Fan out: run both branches concurrently within this runtime.
-    r1, r2 = await asyncio.gather(run_mothership(), run_data_centers())
+    # Fan out: both branches stream concurrently via yield_from.
+    # Messages are forwarded to the runtime automatically and labelled
+    # so the TUI can route them to the correct panel.
+    r1, r2 = await asyncio.gather(
+        ai.yield_from(
+            mothership_agent.run(
+                context.model,
+                [
+                    ai.system_message(
+                        "You are assistant 1. Use contact_mothership "
+                        "when asked about the future."
+                    ),
+                    ai.user_message(query),
+                ],
+                label="mothership",
+            )
+        ),
+        ai.yield_from(
+            data_centers_agent.run(
+                context.model,
+                [
+                    ai.system_message(
+                        "You are assistant 2. Use contact_data_centers "
+                        "when asked about the future."
+                    ),
+                    ai.user_message(query),
+                ],
+                label="data_centers",
+            )
+        ),
+    )
 
     combined = f"Mothership: {r1}\nData centers: {r2}"
 
     # Fan in: summarise.
-    s = await ai.models.stream(
+    s = await ai.stream(
         context.model,
         [
             ai.system_message(

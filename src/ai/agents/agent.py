@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable
 from typing import Any, Protocol, get_type_hints
 
 import pydantic
@@ -45,14 +45,9 @@ class Tool[**P, R]:
             return await self._fn(**kwargs)  # type: ignore[call-arg]
 
         # Generator tool (e.g. agent-as-a-tool): drain the async
-        # generator, pipe each yielded message to the runtime for
+        # generator, forward each yielded message to the runtime for
         # real-time streaming, and return the final text as the result.
-        rt = runtime.get_runtime()
-        last: types.Message | None = None
-        async for message in self._fn(**kwargs):  # type: ignore[call-arg,attr-defined]
-            await rt.put_message(message)
-            last = message
-        return last.text if last else ""  # type: ignore[return-value]
+        return await yield_from(self._fn(**kwargs))  # type: ignore[arg-type,call-arg,return-value]
 
     @property
     def name(self) -> str:
@@ -250,6 +245,31 @@ async def _collect_messages(
         yield message
 
 
+async def yield_from(source: AsyncIterable[types.Message]) -> str:
+    """Drain *source*, forwarding each message to the current runtime.
+
+    Use inside a custom loop to stream messages from a sub-agent to the
+    consumer without adding them to the parent agent's message history::
+
+        result = await yield_from(sub.run(model, msgs, label="researcher"))
+
+    Works with :func:`asyncio.gather` for concurrent fan-out::
+
+        r1, r2 = await asyncio.gather(
+            yield_from(a.run(model, m1, label="a")),
+            yield_from(b.run(model, m2, label="b")),
+        )
+
+    Returns the final message's text (empty string if no messages).
+    """
+    rt = runtime.get_runtime()
+    last: types.Message | None = None
+    async for message in source:
+        await rt.put_message(message)
+        last = message
+    return last.text if last else ""
+
+
 class Agent:
     """Bag of configuration: model + tools + loop."""
 
@@ -271,6 +291,7 @@ class Agent:
         model: models.Model,
         messages: list[types.Message],
         *,
+        label: str | None = None,
         durability: durability_.DurabilityProvider | None = None,
         checkpoint: checkpoint_.Checkpoint | None = None,
     ) -> AsyncGenerator[types.Message]:
@@ -279,6 +300,9 @@ class Agent:
         Args:
             model: The model to use for LLM calls.
             messages: Initial conversation messages.
+            label: Optional label applied to every yielded message.
+                Useful for multi-agent graphs where the consumer needs
+                to route messages by source.
             durability: Explicit durability provider.  If ``None`` but
                 *checkpoint* is given, an :class:`EventLogProvider` is
                 created automatically.
@@ -297,6 +321,8 @@ class Agent:
         try:
             source = _collect_messages(self._loop_fn(context), context.messages)
             async for message in runtime.run(source):
+                if label is not None:
+                    message = message.model_copy(update={"label": label})
                 yield message
         finally:
             if token is not None:

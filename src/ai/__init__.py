@@ -20,6 +20,7 @@ from .agents import (
     mcp,
     resolve_hook,
     tool,
+    yield_from,
 )
 from .models import Client, Model, ModelCost, generate, stream
 
@@ -89,6 +90,8 @@ __all__ = [
     "Tool",
     "ToolCall",
     "tool",
+    # Agents — composition
+    "yield_from",
     # Agents — hooks
     "hook",
     "resolve_hook",

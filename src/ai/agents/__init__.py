@@ -1,5 +1,5 @@
 from . import mcp
-from .agent import Agent, Context, Tool, ToolCall, agent, tool
+from .agent import Agent, Context, Tool, ToolCall, agent, tool, yield_from
 from .checkpoint import Checkpoint, HookEvent, PendingHookInfo, StepEvent, ToolEvent
 from .durability import DurabilityProvider, EventLogProvider
 from .hooks import (
@@ -28,6 +28,7 @@ __all__ = [
     "mcp",
     "resolve_hook",
     "tool",
+    "yield_from",
     "ToolApproval",
     "TOOL_APPROVAL_HOOK_TYPE",
 ]
