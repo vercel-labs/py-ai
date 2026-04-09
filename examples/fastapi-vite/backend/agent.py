@@ -62,14 +62,9 @@ async def _execute_with_approval(tc: ai.ToolCall) -> ai.Message:
     if approval.granted:
         return await tc()
 
-    return ai.Message(
-        role="tool",
-        parts=[
-            ai.ToolResultPart(
-                tool_call_id=tc.id,
-                tool_name=tc.name,
-                result="Tool call was denied by the user.",
-                is_error=True,
-            )
-        ],
+    return ai.tool_message(
+        tool_call_id=tc.id,
+        tool_name=tc.name,
+        result="Tool call was denied by the user.",
+        is_error=True,
     )

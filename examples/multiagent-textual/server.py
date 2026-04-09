@@ -100,16 +100,11 @@ def _gated_agent(
                         results.append(await tc())
                     else:
                         results.append(
-                            ai.Message(
-                                role="tool",
-                                parts=[
-                                    ai.ToolResultPart(
-                                        tool_call_id=tc.id,
-                                        tool_name=tc.name,
-                                        result=f"Denied: {approval.reason}",
-                                        is_error=True,
-                                    )
-                                ],
+                            ai.tool_message(
+                                tool_call_id=tc.id,
+                                tool_name=tc.name,
+                                result=f"Denied: {approval.reason}",
+                                is_error=True,
                             )
                         )
                 else:

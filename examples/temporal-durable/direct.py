@@ -90,16 +90,11 @@ async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
                 ),
                 start_to_close_timeout=datetime.timedelta(minutes=2),
             )
-            return ai.Message(
-                role="tool",
-                parts=[
-                    ai.ToolResultPart(
-                        tool_call_id=tc.tool_call_id,
-                        tool_name=tc.tool_name,
-                        result=dispatch_result.result,
-                        is_error=dispatch_result.is_error,
-                    )
-                ],
+            return ai.tool_message(
+                tool_call_id=tc.tool_call_id,
+                tool_name=tc.tool_name,
+                result=dispatch_result.result,
+                is_error=dispatch_result.is_error,
             )
 
         tasks = [asyncio.ensure_future(_run_tool(tc)) for tc in tool_call_parts]

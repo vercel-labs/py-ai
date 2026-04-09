@@ -155,7 +155,7 @@ class ToolCall:
         try:
             final_kwargs = self._tool.validate_kwargs({**base_kwargs, **overrides})
             prep_error = None
-        except Exception as exc:
+        except Exception:
             if prep_error is None or overrides:
                 raise
             final_kwargs = None
@@ -212,9 +212,7 @@ class ToolCall:
                 duration_ms=telemetry.time_ms() - t0,
             )
         )
-        return builders.tool_message(
-            types.Message(role="tool", parts=[result_part])
-        )
+        return builders.tool_message(result_part)
 
 
 class Context(pydantic.BaseModel):
