@@ -4,8 +4,8 @@ import asyncio
 import base64
 import pathlib
 
-import vercel_ai_sdk as ai
-from vercel_ai_sdk import models as m
+import ai
+from ai import models as m
 
 model = m.Model(
     id="google/veo-3.0-generate-001",

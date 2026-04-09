@@ -2,7 +2,7 @@
 
 import pytest
 
-import vercel_ai_sdk as ai
+import ai
 
 # -- Schema extraction from type hints ------------------------------------
 

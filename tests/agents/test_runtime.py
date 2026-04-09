@@ -2,8 +2,8 @@
 
 import pytest
 
-import vercel_ai_sdk as ai
-from vercel_ai_sdk.types import messages
+import ai
+from ai.types import messages
 
 from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_call_msg
 

@@ -11,7 +11,7 @@ from typing import Any
 
 import temporalio.activity
 
-import vercel_ai_sdk as ai
+import ai
 
 # ── Tool activities ──────────────────────────────────────────────
 

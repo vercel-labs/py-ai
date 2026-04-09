@@ -6,8 +6,8 @@ from typing import Any
 import mcp.types
 import pytest
 
-import vercel_ai_sdk as ai
-from vercel_ai_sdk.agents.mcp.client import _mcp_tool_to_native
+import ai
+from ai.agents.mcp.client import _mcp_tool_to_native
 
 from ...conftest import MOCK_MODEL, mock_llm, text_msg, tool_call_msg
 

@@ -11,8 +11,8 @@ from collections.abc import AsyncGenerator
 
 import pydantic
 
-import vercel_ai_sdk as ai
-from vercel_ai_sdk.agents import Context, agent, hook, resolve_hook, tool
+import ai
+from ai.agents import Context, agent, hook, resolve_hook, tool
 
 
 class Approval(pydantic.BaseModel):

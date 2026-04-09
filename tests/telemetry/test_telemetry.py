@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-import vercel_ai_sdk as ai
-from vercel_ai_sdk.telemetry.events import (
+import ai
+from ai.telemetry.events import (
     RunFinishEvent,
     RunStartEvent,
     TelemetryEvent,

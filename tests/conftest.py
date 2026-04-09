@@ -5,9 +5,9 @@ from typing import Any
 
 import pydantic
 
-import vercel_ai_sdk as ai
-from vercel_ai_sdk import models
-from vercel_ai_sdk.types import messages as messages_
+import ai
+from ai import models
+from ai.types import messages as messages_
 
 # A fixed Model used in tests — adapter="mock" dispatches to the mock adapter.
 MOCK_MODEL = models.Model(id="mock-model", adapter="mock", provider="mock")
@@ -45,7 +45,7 @@ class MockAdapter:
         seq = self._responses[self._call_index]
         self._call_index += 1
 
-        from vercel_ai_sdk.models.core.helpers import streaming as streaming_
+        from ai.models.core.helpers import streaming as streaming_
 
         handler = streaming_.StreamHandler()
 

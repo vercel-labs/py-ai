@@ -7,7 +7,7 @@ Every tool call is gated behind user approval before execution.
 import asyncio
 from typing import Any
 
-import vercel_ai_sdk as ai
+import ai
 
 
 @ai.tool

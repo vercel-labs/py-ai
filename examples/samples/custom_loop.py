@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import AsyncGenerator
 from typing import Any
 
-import vercel_ai_sdk as ai
+import ai
 
 
 @ai.tool

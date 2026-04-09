@@ -5,8 +5,8 @@ from collections.abc import AsyncGenerator
 import pydantic
 import pytest
 
-import vercel_ai_sdk as ai
-from vercel_ai_sdk.agents.checkpoint import Checkpoint, HookEvent, StepEvent, ToolEvent
+import ai
+from ai.agents.checkpoint import Checkpoint, HookEvent, StepEvent, ToolEvent
 
 from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_call_msg
 

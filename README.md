@@ -12,7 +12,7 @@ uv add vercel-ai-sdk
 ```
 
 ```python
-import vercel_ai_sdk as ai
+import ai
 
 @ai.tool
 async def talk_to_mothership(question: str) -> str:
@@ -262,7 +262,7 @@ Events: `RunStartEvent`, `RunFinishEvent` (with accumulated `usage`), `StepStart
 Built-in `OtelHandler` creates spans following `gen_ai.*` semantic conventions:
 
 ```python
-from vercel_ai_sdk.otel import OtelHandler
+from ai.otel import OtelHandler
 ai.telemetry.enable(OtelHandler(record_inputs=True, record_outputs=False))
 ```
 
@@ -340,7 +340,7 @@ MCP connections are pooled per `ai.run()` and cleaned up automatically.
 For streaming to AI SDK frontend (`useChat`, etc.):
 
 ```python
-from vercel_ai_sdk.ai_sdk_ui import to_sse_stream, to_messages, UI_MESSAGE_STREAM_HEADERS
+from ai.ai_sdk_ui import to_sse_stream, to_messages, UI_MESSAGE_STREAM_HEADERS
 
 # Convert incoming UI messages
 messages = to_messages(request.messages)

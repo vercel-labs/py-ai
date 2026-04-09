@@ -20,7 +20,7 @@ import textual.widgets
 import textual.worker
 import websockets
 
-import vercel_ai_sdk as ai
+import ai
 
 WS_URL = "ws://localhost:8000/ws"
 

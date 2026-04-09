@@ -21,14 +21,14 @@ from typing import Any
 import httpx
 import pytest
 
-from vercel_ai_sdk.models.ai_gateway import errors
-from vercel_ai_sdk.models.ai_gateway.generate import (
+from ai.models.ai_gateway import errors
+from ai.models.ai_gateway.generate import (
     ImageParams,
     generate,
 )
-from vercel_ai_sdk.models.core import client as client_
-from vercel_ai_sdk.models.core import model as model_
-from vercel_ai_sdk.types import messages
+from ai.models.core import client as client_
+from ai.models.core import model as model_
+from ai.types import messages
 
 # 1x1 transparent PNG (minimal valid PNG for magic-byte detection)
 _PNG_HEADER = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])

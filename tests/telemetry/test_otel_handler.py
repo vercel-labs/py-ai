@@ -9,8 +9,8 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-import vercel_ai_sdk as ai
-from vercel_ai_sdk.telemetry.otel import OtelHandler
+import ai
+from ai.telemetry.otel import OtelHandler
 
 from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_call_msg
 

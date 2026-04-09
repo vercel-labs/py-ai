@@ -7,10 +7,10 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-import vercel_ai_sdk as ai
-from vercel_ai_sdk.adapters.ai_sdk_ui import adapter, ui_message
-from vercel_ai_sdk.agents import hooks
-from vercel_ai_sdk.types import messages
+import ai
+from ai.adapters.ai_sdk_ui import adapter, ui_message
+from ai.agents import hooks
+from ai.types import messages
 
 from ...conftest import MOCK_MODEL, mock_llm, tool_call_msg
 
