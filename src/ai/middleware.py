@@ -1,20 +1,21 @@
 """Middleware: composable wrappers around all execution surfaces.
 
-Register middleware globally with :func:`use`::
+Middleware is run-scoped — pass it to :meth:`Agent.run`::
 
-    ai.use(LoggingMiddleware(), RetryMiddleware())
+    agent.run(model, messages, middleware=[LoggingMiddleware()])
 
 Middleware wraps agent runs, model calls, generate calls, tool calls, and
 hook calls.  Subclass :class:`Middleware` and override the methods you care
 about — unimplemented methods pass through to the next middleware (or the
 real implementation).
 
-Ordering: first registered = outermost.  ``ai.use(A(), B())`` means A
-wraps B wraps the real call.  A sees the call first and the result last.
+Ordering: first in the list = outermost.  ``[A(), B()]`` means A wraps B
+wraps the real call.  A sees the call first and the result last.
 """
 
 from __future__ import annotations
 
+import contextvars
 import dataclasses
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any
@@ -201,20 +202,32 @@ class Middleware:
 
 
 # ---------------------------------------------------------------------------
-# Global registry
+# Run-scoped middleware via ContextVar
 # ---------------------------------------------------------------------------
 
-_middleware: list[Middleware] = []
+_active: contextvars.ContextVar[list[Middleware]] = contextvars.ContextVar(
+    "middleware",
+)
+
+_EMPTY: list[Middleware] = []
 
 
-def use(*mw: Middleware) -> None:
-    """Register global middleware.  First registered = outermost."""
-    _middleware.extend(mw)
+def get() -> list[Middleware]:
+    """Return the middleware stack for the current run (empty if none)."""
+    return _active.get(_EMPTY)
 
 
-def clear() -> None:
-    """Remove all registered middleware.  Intended for tests."""
-    _middleware.clear()
+Token = contextvars.Token[list[Middleware]]
+
+
+def activate(mw: list[Middleware]) -> Token:
+    """Set the middleware stack for the current run.  Returns a token for reset."""
+    return _active.set(mw)
+
+
+def deactivate(token: Token) -> None:
+    """Restore the previous middleware stack."""
+    _active.reset(token)
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +236,7 @@ def clear() -> None:
 # Each builder takes the *real* implementation as a callable and returns
 # a callable with the same signature that routes through middleware.
 #
-# When no middleware is registered, the real implementation is returned
+# When no middleware is active, the real implementation is returned
 # directly — zero overhead.
 # ---------------------------------------------------------------------------
 
@@ -231,11 +244,12 @@ def clear() -> None:
 def _build_model_chain(
     real: Callable[[ModelContext], Awaitable[_StreamResult]],
 ) -> Callable[[ModelContext], Awaitable[_StreamResult]]:
-    if not _middleware:
+    mw = get()
+    if not mw:
         return real
 
     chain = real
-    for mw in reversed(_middleware):
+    for m in reversed(mw):
 
         def _make(
             m: Middleware, nxt: Callable[[ModelContext], Awaitable[_StreamResult]]
@@ -245,18 +259,19 @@ def _build_model_chain(
 
             return _wrapped
 
-        chain = _make(mw, chain)
+        chain = _make(m, chain)
     return chain
 
 
 def _build_generate_chain(
     real: Callable[[GenerateContext], Awaitable[_Message]],
 ) -> Callable[[GenerateContext], Awaitable[_Message]]:
-    if not _middleware:
+    mw = get()
+    if not mw:
         return real
 
     chain = real
-    for mw in reversed(_middleware):
+    for m in reversed(mw):
 
         def _make(
             m: Middleware, nxt: Callable[[GenerateContext], Awaitable[_Message]]
@@ -266,18 +281,19 @@ def _build_generate_chain(
 
             return _wrapped
 
-        chain = _make(mw, chain)
+        chain = _make(m, chain)
     return chain
 
 
 def _build_tool_chain(
     real: Callable[[ToolContext], Awaitable[_Message]],
 ) -> Callable[[ToolContext], Awaitable[_Message]]:
-    if not _middleware:
+    mw = get()
+    if not mw:
         return real
 
     chain = real
-    for mw in reversed(_middleware):
+    for m in reversed(mw):
 
         def _make(
             m: Middleware, nxt: Callable[[ToolContext], Awaitable[_Message]]
@@ -287,18 +303,19 @@ def _build_tool_chain(
 
             return _wrapped
 
-        chain = _make(mw, chain)
+        chain = _make(m, chain)
     return chain
 
 
 def _build_hook_chain(
     real: Callable[[HookContext], Awaitable[pydantic.BaseModel]],
 ) -> Callable[[HookContext], Awaitable[pydantic.BaseModel]]:
-    if not _middleware:
+    mw = get()
+    if not mw:
         return real
 
     chain = real
-    for mw in reversed(_middleware):
+    for m in reversed(mw):
 
         def _make(
             m: Middleware,
@@ -309,18 +326,19 @@ def _build_hook_chain(
 
             return _wrapped
 
-        chain = _make(mw, chain)
+        chain = _make(m, chain)
     return chain
 
 
 def _build_agent_run_chain(
     real: _AgentRunNext,
 ) -> _AgentRunNext:
-    if not _middleware:
+    mw = get()
+    if not mw:
         return real
 
     chain = real
-    for mw in reversed(_middleware):
+    for m in reversed(mw):
 
         def _make(m: Middleware, nxt: _AgentRunNext) -> _AgentRunNext:
             async def _wrapped(call: AgentRunContext) -> AsyncGenerator[_Message]:
@@ -329,7 +347,7 @@ def _build_agent_run_chain(
 
             return _wrapped
 
-        chain = _make(mw, chain)
+        chain = _make(m, chain)
     return chain
 
 
@@ -340,6 +358,7 @@ __all__ = [
     "Middleware",
     "ModelContext",
     "ToolContext",
-    "clear",
-    "use",
+    "activate",
+    "deactivate",
+    "get",
 ]

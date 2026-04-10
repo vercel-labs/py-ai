@@ -1,8 +1,8 @@
 """Entry point — starts a Temporal worker and executes the agent workflow.
 
 Two examples in one project:
-  - ``direct``   — custom loop, each I/O call is a Temporal activity
-  - ``provider`` — default loop, DurabilityProvider routes I/O to activities
+  - ``direct``     — custom loop, each I/O call is a Temporal activity
+  - ``middleware`` — default loop, TemporalMiddleware routes I/O to activities
 
 Prerequisites:
     1. Temporal dev server: temporal server start-dev
@@ -10,9 +10,9 @@ Prerequisites:
 
 Usage:
     uv run python main.py direct
-    uv run python main.py provider
+    uv run python main.py middleware
     uv run python main.py direct "What is the weather in Tokyo?"
-    uv run python main.py provider "Compare weather in NYC and LA"
+    uv run python main.py middleware "Compare weather in NYC and LA"
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ async def main(mode: str, user_query: str) -> None:
 
     workflows = {
         "direct": direct.DirectWorkflow,
-        "provider": provider.ProviderWorkflow,
+        "middleware": provider.ProviderWorkflow,
     }
     workflow_cls = workflows[mode]
 
@@ -65,8 +65,8 @@ async def main(mode: str, user_query: str) -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2 or sys.argv[1] not in ("direct", "provider"):
-        print("Usage: python main.py <direct|provider> [query]")
+    if len(sys.argv) < 2 or sys.argv[1] not in ("direct", "middleware"):
+        print("Usage: python main.py <direct|middleware> [query]")
         sys.exit(1)
 
     mode = sys.argv[1]

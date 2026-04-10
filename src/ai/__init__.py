@@ -15,7 +15,7 @@ from .agents import (
     tool,
     yield_from,
 )
-from .middleware import AgentRunContext, Middleware, use
+from .middleware import AgentRunContext, Middleware
 from .models import (
     Client,
     ImageParams,
@@ -110,7 +110,6 @@ __all__ = [
     "AgentRunContext",
     "Middleware",
     "middleware",
-    "use",
     # Submodules
     "mcp",
     "ai_sdk_ui",

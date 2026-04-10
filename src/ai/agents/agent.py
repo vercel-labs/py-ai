@@ -292,6 +292,7 @@ class Agent:
         messages: list[types.Message],
         *,
         label: str | None = None,
+        middleware: list[middleware_.Middleware] | None = None,
     ) -> AsyncGenerator[types.Message]:
         """Run the agent loop, yielding messages to the consumer.
 
@@ -301,6 +302,9 @@ class Agent:
             label: Optional label applied to every yielded message.
                 Useful for multi-agent graphs where the consumer needs
                 to route messages by source.
+            middleware: Optional list of middleware to apply to this run.
+                First in the list = outermost.  Middleware wraps model
+                calls, tool calls, hooks, and the run itself.
         """
         call = middleware_.AgentRunContext(
             model=model,
@@ -325,9 +329,19 @@ class Agent:
                     message = message.model_copy(update={"label": call.label})
                 yield message
 
-        chain = middleware_._build_agent_run_chain(_real)
-        async for message in chain(call):
-            yield message
+        # Activate middleware for this run (and everything it calls).
+        # When middleware is None (default), inherit the parent's middleware
+        # from the context var — this lets nested agents share middleware.
+        mw_token: middleware_.Token | None = None
+        if middleware is not None:
+            mw_token = middleware_.activate(middleware)
+        try:
+            chain = middleware_._build_agent_run_chain(_real)
+            async for message in chain(call):
+                yield message
+        finally:
+            if mw_token is not None:
+                middleware_.deactivate(mw_token)
 
 
 def agent(

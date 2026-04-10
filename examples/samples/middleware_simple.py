@@ -7,8 +7,8 @@ Demonstrates all five middleware surfaces:
 - wrap_tool       — each tool execution
 - wrap_hook       — each hook suspension point
 
-The middleware is registered globally with ai.use() and applies to all agent
-runs without any changes to the agent code itself.
+Middleware is passed to agent.run() and applies to all execution surfaces
+within that run — including nested model calls, tool calls, and hooks.
 """
 
 import asyncio
@@ -75,10 +75,6 @@ class PrintMiddleware(ai.Middleware):
         return result
 
 
-# Register globally — applies to all agents.
-ai.use(PrintMiddleware())
-
-
 @ai.tool
 async def get_weather(city: str) -> str:
     """Get current weather for a city."""
@@ -102,7 +98,7 @@ async def main() -> None:
     ]
 
     print("--- starting agent run ---\n")
-    async for msg in my_agent.run(model, messages):
+    async for msg in my_agent.run(model, messages, middleware=[PrintMiddleware()]):
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)
     print("\n\n--- done ---")

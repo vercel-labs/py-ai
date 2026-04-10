@@ -1,20 +1,20 @@
-"""Provider-based durability: a DurabilityProvider backed by Temporal activities.
+"""Middleware-based durability: a Middleware subclass backed by Temporal activities.
 
-The agent uses the **default loop** unchanged. A TemporalDurabilityProvider
-is passed to ``agent.run(durability=...)``, and the framework auto-routes
-``models.stream()`` and ``ToolCall.__call__()`` through the provider via
-context var.
+The agent uses the **default loop** unchanged.  A ``TemporalMiddleware`` is
+passed to ``agent.run(middleware=[...])`` and intercepts ``wrap_model`` and
+``wrap_tool`` to route all I/O through Temporal activities.  Temporal's event
+history provides automatic replay — on crash recovery, activities return
+cached results without re-executing.
 
-The provider ignores the factory closures it receives (they can't be
-serialized to a Temporal activity) and calls its own Temporal activities
-instead. It tracks the conversation internally so it can serialize the
-correct messages to the LLM activity at each turn.
+This is the recommended pattern for Temporal durability: no custom loop, no
+special framework hooks — just a middleware that replaces I/O with activities.
 """
 
 from __future__ import annotations
 
 import datetime
-from collections.abc import AsyncGenerator, Awaitable, Callable
+import json
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import temporalio.common
@@ -29,7 +29,7 @@ with temporalio.workflow.unsafe.imports_passed_through():
 # ── Tools ────────────────────────────────────────────────────────
 #
 # Defined with @tool for schema extraction.  The default loop will
-# try to call them via ToolCall.__call__(), but the provider intercepts
+# try to call them via ToolCall.__call__(), but the middleware intercepts
 # and routes to Temporal activities instead.
 
 
@@ -45,11 +45,72 @@ async def get_population(city: str) -> int:
     raise RuntimeError("should not be called inside workflow")
 
 
-# ── Temporal durability provider ─────────────────────────────────
+# ── Temporal middleware ──────────────────────────────────────────
 
 
-class _ActivityStreamResult:
-    """StreamResult-like wrapper around a buffered message from an activity."""
+class TemporalMiddleware(ai.Middleware):
+    """Middleware that routes LLM and tool I/O through Temporal activities.
+
+    Temporal's event history provides durability — on replay, activities
+    return cached results automatically.  No checkpoint needed on our side.
+
+    The middleware maintains its own copy of the conversation so it can
+    serialize the correct messages to the LLM activity at each step.
+    """
+
+    def __init__(
+        self,
+        initial_messages: list[ai.Message],
+        tool_schemas: list[dict[str, Any]],
+    ) -> None:
+        self._messages: list[ai.Message] = list(initial_messages)
+        self._tool_schemas = tool_schemas
+
+    async def wrap_model(self, call: ai.middleware.ModelContext, next: Any) -> Any:
+        """Call the LLM via a Temporal activity instead of the real adapter."""
+        result = await temporalio.workflow.execute_activity(
+            activities.llm_call_activity,
+            activities.LLMCallParams(
+                messages=[m.model_dump() for m in self._messages],
+                tool_schemas=self._tool_schemas,
+            ),
+            start_to_close_timeout=datetime.timedelta(minutes=5),
+            retry_policy=temporalio.common.RetryPolicy(maximum_attempts=3),
+        )
+        msg = ai.Message.model_validate(result.message)
+        # Track the assistant response.
+        self._messages.append(msg)
+
+        # Return a StreamResult-compatible wrapper so the default loop
+        # can iterate it like a normal stream.
+        return _BufferedStreamResult(msg)
+
+    async def wrap_tool(self, call: ai.middleware.ToolContext, next: Any) -> Any:
+        """Execute a tool via a Temporal activity instead of the real function."""
+        result = await temporalio.workflow.execute_activity(
+            activities.tool_dispatch_activity,
+            activities.ToolDispatchParams(
+                tool_name=call.tool_name,
+                tool_args=json.dumps(call.kwargs),
+            ),
+            start_to_close_timeout=datetime.timedelta(minutes=2),
+        )
+
+        tool_result_msg = ai.tool_message(
+            ai.ToolResultPart(
+                tool_call_id=call.tool_call_id,
+                tool_name=call.tool_name,
+                result=result.result,
+                is_error=result.is_error,
+            )
+        )
+        # Track the tool result so the next LLM call has the full conversation.
+        self._messages.append(tool_result_msg)
+        return tool_result_msg
+
+
+class _BufferedStreamResult:
+    """StreamResult-like wrapper around a single buffered message."""
 
     def __init__(self, message: ai.Message) -> None:
         self._message = message
@@ -75,86 +136,6 @@ class _ActivityStreamResult:
     @property
     def output(self) -> Any:
         return self._message.output
-
-
-class TemporalDurabilityProvider:
-    """DurabilityProvider that routes LLM and tool I/O through Temporal activities.
-
-    Temporal's event history provides durability — on replay, activities
-    return cached results automatically.  No checkpoint needed on our side.
-
-    The provider maintains its own copy of the conversation so it can
-    serialize the correct messages to the LLM activity at each step.
-    """
-
-    def __init__(
-        self,
-        initial_messages: list[ai.Message],
-        tool_schemas: list[dict[str, Any]],
-    ) -> None:
-        self._messages: list[ai.Message] = list(initial_messages)
-        self._tool_schemas = tool_schemas
-
-    async def execute_stream(
-        self,
-        fn: Callable[[], Awaitable[Any]],
-    ) -> _ActivityStreamResult:
-        """Call the LLM via a Temporal activity instead of fn()."""
-        result = await temporalio.workflow.execute_activity(
-            activities.llm_call_activity,
-            activities.LLMCallParams(
-                messages=[m.model_dump() for m in self._messages],
-                tool_schemas=self._tool_schemas,
-            ),
-            start_to_close_timeout=datetime.timedelta(minutes=5),
-            retry_policy=temporalio.common.RetryPolicy(maximum_attempts=3),
-        )
-        msg = ai.Message.model_validate(result.message)
-        # Track the assistant response.
-        self._messages.append(msg)
-        return _ActivityStreamResult(msg)
-
-    async def execute_tool(
-        self,
-        fn: Callable[[], Awaitable[ai.ToolResultPart]],
-        *,
-        tool_call_id: str,
-        tool_name: str,
-    ) -> ai.ToolResultPart:
-        """Execute a tool via a Temporal activity instead of fn()."""
-        # Find tool_args from the last assistant message we recorded.
-        tool_args = ""
-        for msg in reversed(self._messages):
-            for tc in msg.tool_calls:
-                if tc.tool_call_id == tool_call_id:
-                    tool_args = tc.tool_args
-                    break
-
-        result = await temporalio.workflow.execute_activity(
-            activities.tool_dispatch_activity,
-            activities.ToolDispatchParams(
-                tool_name=tool_name,
-                tool_args=tool_args,
-            ),
-            start_to_close_timeout=datetime.timedelta(minutes=2),
-        )
-
-        tool_result = ai.ToolResultPart(
-            tool_call_id=tool_call_id,
-            tool_name=tool_name,
-            result=result.result,
-            is_error=result.is_error,
-        )
-        # Track the tool result. The default loop yields a tool_message
-        # after gathering all results, and _collect_messages appends it
-        # to context.messages. We mirror that here so our next LLM call
-        # has the full conversation.
-        self._messages.append(ai.tool_message(tool_result))
-        return tool_result
-
-    def checkpoint(self) -> ai.Checkpoint:
-        """Temporal is the event store — no checkpoint needed."""
-        return ai.Checkpoint()
 
 
 # ── Agent (uses default loop) ────────────────────────────────────
@@ -186,10 +167,10 @@ class ProviderWorkflow:
             for t in weather_agent._tools
         ]
 
-        provider = TemporalDurabilityProvider(messages, tool_schemas)
+        temporal_mw = TemporalMiddleware(messages, tool_schemas)
 
         final_text = ""
-        async for msg in weather_agent.run(model, messages, durability=provider):
+        async for msg in weather_agent.run(model, messages, middleware=[temporal_mw]):
             if msg.text:
                 final_text = msg.text
         return final_text
