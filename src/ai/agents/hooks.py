@@ -22,7 +22,7 @@ resolve_hook() is called from outside (e.g. websocket handler, API endpoint).
 interrupt_loop=True (serverless): if no resolution is available, the
 hook's future is cancelled. The branch receives CancelledError and dies
 cleanly. On re-entry, call resolve_hook() before agent.run() to
-pre-register the resolution, then pass checkpoint= to replay.
+pre-register the resolution.
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ from typing import Any
 
 import pydantic
 
-from .. import _durability as _dctx
 from ..types import messages as messages_
 from . import runtime as runtime_
 
@@ -94,23 +93,12 @@ async def hook[T: pydantic.BaseModel](
     rt = runtime_.get_runtime()
     hook_metadata = metadata or {}
 
-    provider = _dctx.get_provider()
-
-    # Path 1: pre-registered resolution (serverless re-entry).
+    # Pre-registered resolution (serverless re-entry).
     pre_registered = _pending_resolutions.pop(label, None)
     if pre_registered is not None:
-        if provider is not None:
-            provider.record_hook(label, pre_registered)
         return payload(**pre_registered)
 
-    # Path 2: cached resolution from checkpoint (durability replay).
-    if provider is not None:
-        cached = provider.get_hook_resolution(label)
-        if cached is not None:
-            provider.record_hook(label, cached)
-            return payload(**cached)
-
-    # Path 3: no resolution available — suspend.
+    # No resolution available — suspend.
     future: asyncio.Future[dict[str, Any]] = asyncio.Future()
 
     _live_hooks[label] = (future, hook_metadata, rt)
@@ -143,10 +131,6 @@ async def hook[T: pydantic.BaseModel](
 
     # Clean up live registry.
     _live_hooks.pop(label, None)
-
-    # Record for checkpoint.
-    if provider is not None:
-        provider.record_hook(label, resolution)
 
     # Emit resolved signal message.
     await rt.put_message(

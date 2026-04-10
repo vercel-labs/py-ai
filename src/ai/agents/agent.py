@@ -10,12 +10,8 @@ from typing import Any, Protocol, get_type_hints
 
 import pydantic
 
-from .. import _durability as _dctx
 from .. import models, types
-from ..telemetry import events as telemetry
 from ..types import builders
-from . import checkpoint as checkpoint_
-from . import durability as durability_
 from . import runtime
 
 
@@ -139,12 +135,7 @@ class ToolCall:
         return dict(self._kwargs)
 
     async def __call__(self, **overrides: Any) -> types.Message:
-        """Execute the tool and return a single tool-result message.
-
-        If a durability provider is active, the call is routed through
-        it for recording or replay.
-        """
-        provider = _dctx.get_provider()
+        """Execute the tool and return a single tool-result message."""
         prep_error: Exception | None = None
         try:
             base_kwargs = self.kwargs
@@ -160,59 +151,26 @@ class ToolCall:
                 raise
             final_kwargs = None
 
-        telemetry.handle(
-            telemetry.ToolCallStartEvent(
-                tool_name=self.name,
-                tool_call_id=self.id,
-                args=(
-                    json.dumps(final_kwargs)
-                    if final_kwargs is not None
-                    else self._part.tool_args
-                ),
-            )
-        )
-        t0 = telemetry.time_ms()
-        error_str: str | None = None
-
-        async def _execute() -> types.ToolResultPart:
-            nonlocal error_str
-            try:
-                if prep_error is not None or final_kwargs is None:
-                    raise prep_error or ValueError("Failed to prepare tool kwargs")
-                result = await self._tool.execute_kwargs(final_kwargs)
-            except Exception as exc:
-                error_str = str(exc)
-                return types.ToolResultPart(
+        try:
+            if prep_error is not None or final_kwargs is None:
+                raise prep_error or ValueError("Failed to prepare tool kwargs")
+            result = await self._tool.execute_kwargs(final_kwargs)
+        except Exception as exc:
+            return builders.tool_message(
+                types.ToolResultPart(
                     tool_call_id=self._part.tool_call_id,
                     tool_name=self._part.tool_name,
                     result=str(exc),
                     is_error=True,
                 )
-            return types.ToolResultPart(
+            )
+        return builders.tool_message(
+            types.ToolResultPart(
                 tool_call_id=self._part.tool_call_id,
                 tool_name=self._part.tool_name,
                 result=result,
             )
-
-        if provider is not None:
-            result_part = await provider.execute_tool(
-                _execute,
-                tool_call_id=self.id,
-                tool_name=self.name,
-            )
-        else:
-            result_part = await _execute()
-
-        telemetry.handle(
-            telemetry.ToolCallFinishEvent(
-                tool_name=self.name,
-                tool_call_id=self.id,
-                result=result_part.result,
-                error=error_str,
-                duration_ms=telemetry.time_ms() - t0,
-            )
         )
-        return builders.tool_message(result_part)
 
 
 class Context(pydantic.BaseModel):
@@ -237,23 +195,12 @@ class LoopFn(Protocol):
 
 
 async def _default_loop(context: Context) -> AsyncGenerator[types.Message]:
-    step_index = 0
     while True:
-        telemetry.handle(telemetry.StepStartEvent(step_index=step_index))
-
         stream = await models.stream(
             context.model, context.messages, tools=context.tools
         )
-        done_message: types.Message | None = None
         async for message in stream:
-            done_message = message
             yield message
-
-        if done_message is not None:
-            telemetry.handle(
-                telemetry.StepFinishEvent(step_index=step_index, message=done_message)
-            )
-        step_index += 1
 
         tool_calls = context.resolve(stream.tool_calls)
         if not tool_calls:
@@ -336,8 +283,6 @@ class Agent:
         messages: list[types.Message],
         *,
         label: str | None = None,
-        durability: durability_.DurabilityProvider | None = None,
-        checkpoint: checkpoint_.Checkpoint | None = None,
     ) -> AsyncGenerator[types.Message]:
         """Run the agent loop, yielding messages to the consumer.
 
@@ -347,30 +292,14 @@ class Agent:
             label: Optional label applied to every yielded message.
                 Useful for multi-agent graphs where the consumer needs
                 to route messages by source.
-            durability: Explicit durability provider.  If ``None`` but
-                *checkpoint* is given, an :class:`EventLogProvider` is
-                created automatically.
-            checkpoint: Checkpoint to resume from.  Implies eventlog
-                durability when no explicit *durability* is provided.
         """
-        # Convenience: checkpoint implies eventlog provider.
-        if checkpoint is not None and durability is None:
-            durability = durability_.EventLogProvider(checkpoint)
-
         context = Context(model=model, messages=list(messages), tools=self._tools)
 
-        # Set the durability provider on the shared context var so that
-        # models.stream() and ToolCall.__call__() auto-detect it.
-        token = _dctx.set_provider(durability) if durability is not None else None
-        try:
-            source = _collect_messages(self._loop_fn(context), context.messages)
-            async for message in runtime.run(source):
-                if label is not None:
-                    message = message.model_copy(update={"label": label})
-                yield message
-        finally:
-            if token is not None:
-                _dctx.reset_provider(token)
+        source = _collect_messages(self._loop_fn(context), context.messages)
+        async for message in runtime.run(source):
+            if label is not None:
+                message = message.model_copy(update={"label": label})
+            yield message
 
 
 def agent(

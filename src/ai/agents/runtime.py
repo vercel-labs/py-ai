@@ -7,7 +7,6 @@ import contextvars
 from collections.abc import AsyncGenerator, AsyncIterable, Awaitable
 
 from .. import types
-from ..telemetry import events as telemetry
 
 
 class Runtime:
@@ -70,12 +69,6 @@ async def run(
     mcp_pool: dict[str, mcp_client._Connection] = {}
     mcp_token = mcp_client._pool.set(mcp_pool)
 
-    token_run_id = telemetry.start_run()
-    telemetry.handle(telemetry.RunStartEvent())
-
-    run_error: BaseException | None = None
-    total_usage: types.Usage | None = None
-
     async def _drain() -> None:
         async for message in source:
             await rt.put_message(message)
@@ -88,21 +81,9 @@ async def run(
                 item = await rt._message_queue.get()
                 if isinstance(item, Runtime._Sentinel):
                     return
-                # Track usage from done messages.
-                if item.is_done and item.usage is not None:
-                    total_usage = (
-                        item.usage if total_usage is None else total_usage + item.usage
-                    )
                 yield item
 
-    except BaseException as exc:
-        run_error = exc
-        raise
-
     finally:
-        telemetry.handle(telemetry.RunFinishEvent(usage=total_usage, error=run_error))
-        telemetry.end_run(token_run_id)
-
         rt.cleanup_hooks()
 
         await mcp_client.close_connections()

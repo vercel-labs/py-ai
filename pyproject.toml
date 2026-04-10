@@ -12,7 +12,6 @@ dependencies = [
     "httpx>=0.28.1",
     "mcp>=1.18.0",
     "openai>=2.14.0",
-    "opentelemetry-api>=1.0",
     "pydantic>=2.12.5",
     "vercel>=0.3.8",
 ]
@@ -32,7 +31,6 @@ dev = [
     "rich>=14.2.0",
     "mypy>=1.11",
     "ruff>=0.8",
-    "opentelemetry-sdk>=1.0",
     "pyright>=1.1.408",
 ]
 

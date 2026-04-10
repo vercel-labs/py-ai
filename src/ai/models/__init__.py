@@ -202,39 +202,19 @@ async def stream(
     Returns a :class:`StreamResult` that is async-iterable and collects
     the final ``Message``.  After iteration, access ``.text``,
     ``.tool_calls``, ``.usage``, etc.
-
-    If a :class:`~ai.agents.durability.DurabilityProvider` is
-    active (set by ``Agent.run()``), the stream is routed through the
-    provider for recording or replay.
     """
-    # Lazy import to avoid circular dependency at module level.
-    from .._durability import get_provider
-
-    provider = get_provider()
-
-    async def _make_raw() -> StreamResult:
-        _ensure_adapters()
-        c = client or _auto_client(model)
-        adapter_fn = _stream_adapters.get(model.adapter)
-        if adapter_fn is None:
-            registered = ", ".join(sorted(_stream_adapters)) or "(none)"
-            raise KeyError(
-                f"No stream adapter registered for adapter={model.adapter!r}. "
-                f"Registered: {registered}"
-            )
-        return StreamResult(
-            adapter_fn(
-                c, model, messages, tools=tools, output_type=output_type, **kwargs
-            )
+    _ensure_adapters()
+    c = client or _auto_client(model)
+    adapter_fn = _stream_adapters.get(model.adapter)
+    if adapter_fn is None:
+        registered = ", ".join(sorted(_stream_adapters)) or "(none)"
+        raise KeyError(
+            f"No stream adapter registered for adapter={model.adapter!r}. "
+            f"Registered: {registered}"
         )
-
-    if provider is not None:
-        # Provider returns a StreamResultLike — may be a replay or
-        # a recording wrapper.  We return it typed as StreamResult;
-        # callers only use the shared protocol surface (.tool_calls, etc.).
-        return await provider.execute_stream(_make_raw)  # type: ignore[return-value]
-
-    return await _make_raw()
+    return StreamResult(
+        adapter_fn(c, model, messages, tools=tools, output_type=output_type, **kwargs)
+    )
 
 
 async def generate(
