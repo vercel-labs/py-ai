@@ -17,31 +17,35 @@ from .model import Model
 # ---------------------------------------------------------------------------
 
 _catalogs: dict[str, dict[str, Model]] = {}
-_catalogs_loaded = False
 
 
 def register_catalog(provider: str, models: dict[str, Model]) -> None:
     """Register a provider's model catalog.
 
-    Called by each provider's ``catalog`` module during lazy initialisation.
+    Called by each provider's ``catalog`` module during initialisation,
+    and by users who want to add custom providers.
     """
     _catalogs[provider] = models
 
 
-def _ensure_catalogs() -> None:
-    """Lazily import and register all built-in provider catalogs."""
-    global _catalogs_loaded  # noqa: PLW0603
-    if _catalogs_loaded:
-        return
-    _catalogs_loaded = True
+def _load_builtin_catalogs() -> None:
+    """Import and register all built-in provider catalogs.
 
-    from ..ai_gateway import catalog as ai_gw_catalog
-    from ..anthropic import catalog as anthropic_catalog
-    from ..openai import catalog as openai_catalog
+    Catalog submodules only depend on :mod:`..core.model` (pure
+    dataclasses) — no ``httpx``, ``anthropic``, or ``openai`` imports.
+    This makes it safe to run eagerly at import time, including inside
+    sandboxed runtimes (e.g. Temporal workflow workers).
+    """
+    from ..ai_gateway.catalog import CATALOG as ai_gw_catalog
+    from ..anthropic.catalog import CATALOG as anthropic_catalog
+    from ..openai.catalog import CATALOG as openai_catalog
 
-    register_catalog("ai-gateway", ai_gw_catalog.CATALOG)
-    register_catalog("anthropic", anthropic_catalog.CATALOG)
-    register_catalog("openai", openai_catalog.CATALOG)
+    register_catalog("ai-gateway", ai_gw_catalog)
+    register_catalog("anthropic", anthropic_catalog)
+    register_catalog("openai", openai_catalog)
+
+
+_load_builtin_catalogs()
 
 
 # ---------------------------------------------------------------------------
@@ -61,8 +65,6 @@ def model(provider: str, model_id: str) -> Model:
         model("anthropic", "claude-opus-4-6")
         model("openai", "gpt-5.4")
     """
-    _ensure_catalogs()
-
     provider_catalog = _catalogs.get(provider)
     if provider_catalog is None:
         available = ", ".join(sorted(_catalogs)) or "(none)"
@@ -83,7 +85,6 @@ def model(provider: str, model_id: str) -> Model:
 
 def get_providers() -> list[str]:
     """Return all registered provider names."""
-    _ensure_catalogs()
     return sorted(_catalogs)
 
 
@@ -92,8 +93,6 @@ def get_models(provider: str) -> dict[str, Model]:
 
     Raises :class:`KeyError` if the provider is not registered.
     """
-    _ensure_catalogs()
-
     provider_catalog = _catalogs.get(provider)
     if provider_catalog is None:
         available = ", ".join(sorted(_catalogs)) or "(none)"

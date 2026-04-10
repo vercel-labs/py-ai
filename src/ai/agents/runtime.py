@@ -7,6 +7,8 @@ import contextvars
 from collections.abc import AsyncGenerator, AsyncIterable, Awaitable
 
 from .. import types
+from . import hooks as hooks_
+from .mcp import client as mcp_client
 
 
 class Runtime:
@@ -35,8 +37,6 @@ class Runtime:
 
     def cleanup_hooks(self) -> None:
         """Remove all hook registry entries for this run."""
-        from . import hooks as hooks_
-
         hooks_.cleanup_run(self._hook_labels)
         self._hook_labels.clear()
 
@@ -60,8 +60,6 @@ async def run(
     source: AsyncIterable[types.Message],
 ) -> AsyncGenerator[types.Message]:
     """Run *source* and yield every message that gets put into the Runtime queue."""
-    from .mcp import client as mcp_client
-
     rt = Runtime()
     token = _runtime.set(rt)
 

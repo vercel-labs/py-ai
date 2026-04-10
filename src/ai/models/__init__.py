@@ -39,7 +39,7 @@ import pydantic
 from .. import middleware as middleware_
 from ..types import messages as messages_
 from ..types import tools as tools_
-from .ai_gateway.generate import GenerateParams, ImageParams, VideoParams
+from .ai_gateway.types import GenerateParams, ImageParams, VideoParams
 from .core.catalog import get_models, get_providers, register_catalog
 from .core.catalog import model as model
 from .core.client import Client
@@ -63,8 +63,8 @@ def _ensure_adapters() -> None:
         return
     _adapters_loaded = True
 
-    from .ai_gateway import generate as ai_gw_generate
-    from .ai_gateway import stream as ai_gw_stream
+    from .ai_gateway.generate import generate as ai_gw_generate
+    from .ai_gateway.stream import stream as ai_gw_stream
     from .anthropic.adapter import stream as anthropic_stream
     from .openai.adapter import stream as openai_stream
 
@@ -204,19 +204,18 @@ async def stream(
     the final ``Message``.  After iteration, access ``.text``,
     ``.tool_calls``, ``.usage``, etc.
     """
-    _ensure_adapters()
-    c = client or _auto_client(model)
-
     call = middleware_.ModelContext(
         model=model,
         messages=messages,
         tools=tools,
         output_type=output_type,
-        client=c,
+        client=client,
         kwargs=kwargs,
     )
 
     async def _real(call: middleware_.ModelContext) -> StreamResult:
+        _ensure_adapters()
+        c = call.client or _auto_client(call.model)
         adapter_fn = _stream_adapters.get(call.model.adapter)
         if adapter_fn is None:
             registered = ", ".join(sorted(_stream_adapters)) or "(none)"
@@ -226,7 +225,7 @@ async def stream(
             )
         return StreamResult(
             adapter_fn(
-                call.client,
+                c,
                 call.model,
                 call.messages,
                 tools=call.tools,
@@ -258,17 +257,16 @@ async def generate(
     * :class:`VideoParams` — video generation (``/video-model``).
     * ``None`` — auto-detect from ``model.capabilities``.
     """
-    _ensure_adapters()
-    c = client or _auto_client(model)
-
     call = middleware_.GenerateContext(
         model=model,
         messages=messages,
         params=params,
-        client=c,
+        client=client,
     )
 
     async def _real(call: middleware_.GenerateContext) -> messages_.Message:
+        _ensure_adapters()
+        c = call.client or _auto_client(call.model)
         adapter_fn = _generate_adapters.get(call.model.adapter)
         if adapter_fn is None:
             registered = ", ".join(sorted(_generate_adapters)) or "(none)"
@@ -276,9 +274,7 @@ async def generate(
                 f"No generate adapter registered for adapter={call.model.adapter!r}. "
                 f"Registered: {registered}"
             )
-        return await adapter_fn(
-            call.client, call.model, call.messages, params=call.params
-        )
+        return await adapter_fn(c, call.model, call.messages, params=call.params)
 
     chain = middleware_._build_generate_chain(_real)
     return await chain(call)

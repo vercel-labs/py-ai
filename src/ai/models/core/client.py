@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import dataclasses
+from typing import TYPE_CHECKING
 
-import httpx
+if TYPE_CHECKING:
+    import httpx
 
 
 @dataclasses.dataclass
@@ -30,11 +32,13 @@ class Client:
     @property
     def http(self) -> httpx.AsyncClient:
         """Lazy-init shared httpx client."""
+        import httpx as _httpx
+
         if self._http is None or self._http.is_closed:
-            self._http = httpx.AsyncClient(
+            self._http = _httpx.AsyncClient(
                 base_url=self.base_url,
                 headers=self.headers,
-                timeout=httpx.Timeout(timeout=300.0, connect=10.0),
+                timeout=_httpx.Timeout(timeout=300.0, connect=10.0),
             )
         return self._http
 

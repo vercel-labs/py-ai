@@ -49,7 +49,7 @@ class ModelContext:
     messages: list[messages_.Message]
     tools: Sequence[tools_.ToolLike] | None
     output_type: type[pydantic.BaseModel] | None
-    client: Client
+    client: Client | None
     kwargs: dict[str, Any]
 
     def __post_init__(self) -> None:
@@ -66,7 +66,7 @@ class GenerateContext:
     model: Model
     messages: list[messages_.Message]
     params: Any
-    client: Client
+    client: Client | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "messages", list(self.messages))
