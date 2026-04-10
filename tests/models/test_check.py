@@ -90,7 +90,10 @@ class TestAnthropicCheck:
         assert await anthropic_check.check(c, _ANTHROPIC_MODEL) is True
 
     async def test_shared_status_logic_smoke(self) -> None:
-        assert await anthropic_check.check(_client_with_mock(401), _ANTHROPIC_MODEL) is False
+        assert (
+            await anthropic_check.check(_client_with_mock(401), _ANTHROPIC_MODEL)
+            is False
+        )
         with pytest.raises(httpx.HTTPStatusError):
             await anthropic_check.check(_client_with_mock(500), _ANTHROPIC_MODEL)
 
@@ -160,4 +163,7 @@ class TestCheckConnection:
             await check_connection(_UNKNOWN_MODEL, client=c)
 
     async def test_dispatch_false_propagates(self) -> None:
-        assert await check_connection(_OPENAI_MODEL, client=_client_with_mock(401)) is False
+        assert (
+            await check_connection(_OPENAI_MODEL, client=_client_with_mock(401))
+            is False
+        )

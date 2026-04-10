@@ -17,7 +17,6 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pydantic
-import pytest
 
 from ai.models.core.helpers import streaming
 from ai.types import messages
