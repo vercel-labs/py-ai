@@ -32,6 +32,7 @@ from typing import Any
 
 import pydantic
 
+from .. import middleware as middleware_
 from ..types import messages as messages_
 from . import runtime as runtime_
 
@@ -90,8 +91,25 @@ async def hook[T: pydantic.BaseModel](
             (long-running mode), the future is held until resolved
             externally.
     """
+    call = middleware_.HookContext(
+        label=label,
+        payload=payload,
+        metadata=metadata or {},
+        interrupt_loop=interrupt_loop,
+    )
+
+    chain = middleware_._build_hook_chain(_hook_impl)
+    result = await chain(call)
+    return result  # type: ignore[return-value]
+
+
+async def _hook_impl(call: middleware_.HookContext) -> pydantic.BaseModel:
+    """Core hook logic — the innermost ``next`` in the middleware chain."""
     rt = runtime_.get_runtime()
-    hook_metadata = metadata or {}
+    label = call.label
+    payload = call.payload
+    hook_metadata = call.metadata
+    interrupt_loop = call.interrupt_loop
 
     # Pre-registered resolution (serverless re-entry).
     pre_registered = _pending_resolutions.pop(label, None)

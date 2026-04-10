@@ -1,4 +1,4 @@
-from . import adapters, models
+from . import adapters, middleware, models
 from .adapters import ai_sdk_ui
 from .agents import (
     TOOL_APPROVAL_HOOK_TYPE,
@@ -15,6 +15,7 @@ from .agents import (
     tool,
     yield_from,
 )
+from .middleware import AgentRunContext, Middleware, use
 from .models import (
     Client,
     ImageParams,
@@ -105,6 +106,11 @@ __all__ = [
     "cancel_hook",
     "ToolApproval",
     "TOOL_APPROVAL_HOOK_TYPE",
+    # Middleware
+    "AgentRunContext",
+    "Middleware",
+    "middleware",
+    "use",
     # Submodules
     "mcp",
     "ai_sdk_ui",

@@ -36,6 +36,7 @@ from typing import Any
 
 import pydantic
 
+from .. import middleware as middleware_
 from ..types import messages as messages_
 from ..types import tools as tools_
 from .ai_gateway.generate import GenerateParams, ImageParams, VideoParams
@@ -205,16 +206,38 @@ async def stream(
     """
     _ensure_adapters()
     c = client or _auto_client(model)
-    adapter_fn = _stream_adapters.get(model.adapter)
-    if adapter_fn is None:
-        registered = ", ".join(sorted(_stream_adapters)) or "(none)"
-        raise KeyError(
-            f"No stream adapter registered for adapter={model.adapter!r}. "
-            f"Registered: {registered}"
-        )
-    return StreamResult(
-        adapter_fn(c, model, messages, tools=tools, output_type=output_type, **kwargs)
+
+    call = middleware_.ModelContext(
+        model=model,
+        messages=messages,
+        tools=tools,
+        output_type=output_type,
+        client=c,
+        kwargs=kwargs,
     )
+
+    async def _real(call: middleware_.ModelContext) -> StreamResult:
+        adapter_fn = _stream_adapters.get(call.model.adapter)
+        if adapter_fn is None:
+            registered = ", ".join(sorted(_stream_adapters)) or "(none)"
+            raise KeyError(
+                f"No stream adapter registered for adapter={call.model.adapter!r}. "
+                f"Registered: {registered}"
+            )
+        return StreamResult(
+            adapter_fn(
+                call.client,
+                call.model,
+                call.messages,
+                tools=call.tools,
+                output_type=call.output_type,
+                **call.kwargs,
+            )
+        )
+
+    chain = middleware_._build_model_chain(_real)
+    result: StreamResult = await chain(call)
+    return result
 
 
 async def generate(
@@ -237,14 +260,28 @@ async def generate(
     """
     _ensure_adapters()
     c = client or _auto_client(model)
-    adapter_fn = _generate_adapters.get(model.adapter)
-    if adapter_fn is None:
-        registered = ", ".join(sorted(_generate_adapters)) or "(none)"
-        raise KeyError(
-            f"No generate adapter registered for adapter={model.adapter!r}. "
-            f"Registered: {registered}"
+
+    call = middleware_.GenerateContext(
+        model=model,
+        messages=messages,
+        params=params,
+        client=c,
+    )
+
+    async def _real(call: middleware_.GenerateContext) -> messages_.Message:
+        adapter_fn = _generate_adapters.get(call.model.adapter)
+        if adapter_fn is None:
+            registered = ", ".join(sorted(_generate_adapters)) or "(none)"
+            raise KeyError(
+                f"No generate adapter registered for adapter={call.model.adapter!r}. "
+                f"Registered: {registered}"
+            )
+        return await adapter_fn(
+            call.client, call.model, call.messages, params=call.params
         )
-    return await adapter_fn(c, model, messages, params=params)
+
+    chain = middleware_._build_generate_chain(_real)
+    return await chain(call)
 
 
 async def check_connection(

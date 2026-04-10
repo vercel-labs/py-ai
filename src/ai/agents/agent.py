@@ -10,6 +10,7 @@ from typing import Any, Protocol, get_type_hints
 
 import pydantic
 
+from .. import middleware as middleware_
 from .. import models, types
 from ..types import builders
 from . import runtime
@@ -136,41 +137,49 @@ class ToolCall:
 
     async def __call__(self, **overrides: Any) -> types.Message:
         """Execute the tool and return a single tool-result message."""
-        prep_error: Exception | None = None
+        # Best-effort parse so middleware sees usable kwargs when possible.
+        # If parsing fails, middleware still gets the raw tool_call_id /
+        # tool_name and can replace kwargs before _real() executes.
         try:
             base_kwargs = self.kwargs
-        except Exception as exc:
-            prep_error = exc
+        except Exception:
             base_kwargs = {}
 
-        try:
-            final_kwargs = self._tool.validate_kwargs({**base_kwargs, **overrides})
-            prep_error = None
-        except Exception:
-            if prep_error is None or overrides:
-                raise
-            final_kwargs = None
+        if overrides:
+            # Overrides come from user code, not the model — validate
+            # eagerly so programming errors surface immediately.
+            base_kwargs = self._tool.validate_kwargs({**base_kwargs, **overrides})
 
-        try:
-            if prep_error is not None or final_kwargs is None:
-                raise prep_error or ValueError("Failed to prepare tool kwargs")
-            result = await self._tool.execute_kwargs(final_kwargs)
-        except Exception as exc:
+        call = middleware_.ToolContext(
+            tool_call_id=self._part.tool_call_id,
+            tool_name=self._part.tool_name,
+            kwargs=base_kwargs,
+        )
+
+        tool = self._tool
+
+        async def _real(call: middleware_.ToolContext) -> types.Message:
+            try:
+                result = await tool.execute_kwargs(call.kwargs)
+            except Exception as exc:
+                return builders.tool_message(
+                    types.ToolResultPart(
+                        tool_call_id=call.tool_call_id,
+                        tool_name=call.tool_name,
+                        result=str(exc),
+                        is_error=True,
+                    )
+                )
             return builders.tool_message(
                 types.ToolResultPart(
-                    tool_call_id=self._part.tool_call_id,
-                    tool_name=self._part.tool_name,
-                    result=str(exc),
-                    is_error=True,
+                    tool_call_id=call.tool_call_id,
+                    tool_name=call.tool_name,
+                    result=result,
                 )
             )
-        return builders.tool_message(
-            types.ToolResultPart(
-                tool_call_id=self._part.tool_call_id,
-                tool_name=self._part.tool_name,
-                result=result,
-            )
-        )
+
+        chain = middleware_._build_tool_chain(_real)
+        return await chain(call)
 
 
 class Context(pydantic.BaseModel):
@@ -293,12 +302,31 @@ class Agent:
                 Useful for multi-agent graphs where the consumer needs
                 to route messages by source.
         """
-        context = Context(model=model, messages=list(messages), tools=self._tools)
+        call = middleware_.AgentRunContext(
+            model=model,
+            messages=messages,
+            tools=self._tools,
+            label=label,
+        )
 
-        source = _collect_messages(self._loop_fn(context), context.messages)
-        async for message in runtime.run(source):
-            if label is not None:
-                message = message.model_copy(update={"label": label})
+        loop_fn = self._loop_fn
+
+        async def _real(
+            call: middleware_.AgentRunContext,
+        ) -> AsyncGenerator[types.Message]:
+            context = Context(
+                model=call.model,
+                messages=list(call.messages),
+                tools=call.tools,
+            )
+            source = _collect_messages(loop_fn(context), context.messages)
+            async for message in runtime.run(source):
+                if call.label is not None:
+                    message = message.model_copy(update={"label": call.label})
+                yield message
+
+        chain = middleware_._build_agent_run_chain(_real)
+        async for message in chain(call):
             yield message
 
 
