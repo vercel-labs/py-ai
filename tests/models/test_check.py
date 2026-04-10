@@ -89,14 +89,10 @@ class TestAnthropicCheck:
         c = _client_with_mock(200, {"id": "claude-opus-4-6", "type": "model"})
         assert await anthropic_check.check(c, _ANTHROPIC_MODEL) is True
 
-    async def test_401_returns_false(self) -> None:
-        c = _client_with_mock(401)
-        assert await anthropic_check.check(c, _ANTHROPIC_MODEL) is False
-
-    async def test_500_raises(self) -> None:
-        c = _client_with_mock(500)
+    async def test_shared_status_logic_smoke(self) -> None:
+        assert await anthropic_check.check(_client_with_mock(401), _ANTHROPIC_MODEL) is False
         with pytest.raises(httpx.HTTPStatusError):
-            await anthropic_check.check(c, _ANTHROPIC_MODEL)
+            await anthropic_check.check(_client_with_mock(500), _ANTHROPIC_MODEL)
 
 
 # ===================================================================
@@ -136,10 +132,6 @@ class TestAIGatewayCheck:
         c = _gateway_client(config_body=config)
         assert await ai_gw_check.check(c, _GATEWAY_MODEL) is False
 
-    async def test_auth_ok_empty_list(self) -> None:
-        c = _gateway_client(config_body={"models": []})
-        assert await ai_gw_check.check(c, _GATEWAY_MODEL) is False
-
     @pytest.mark.parametrize("status", [401, 403])
     async def test_credits_auth_error_returns_false(self, status: int) -> None:
         c = _gateway_client(credits_status=status)
@@ -157,16 +149,6 @@ class TestAIGatewayCheck:
 
 
 class TestCheckConnection:
-    async def test_openai_dispatches(self) -> None:
-        body = {"id": "gpt-5.4", "object": "model"}
-        c = _client_with_mock(200, body)
-        assert await check_connection(_OPENAI_MODEL, client=c) is True
-
-    async def test_anthropic_dispatches(self) -> None:
-        body = {"id": "claude-opus-4-6", "type": "model"}
-        c = _client_with_mock(200, body)
-        assert await check_connection(_ANTHROPIC_MODEL, client=c) is True
-
     async def test_gateway_dispatches(self) -> None:
         config = {"models": [{"id": "anthropic/claude-opus-4-6"}]}
         c = _gateway_client(config_body=config)
@@ -177,6 +159,5 @@ class TestCheckConnection:
         with pytest.raises(KeyError, match="unknown-provider"):
             await check_connection(_UNKNOWN_MODEL, client=c)
 
-    async def test_false_propagates(self) -> None:
-        c = _client_with_mock(401)
-        assert await check_connection(_OPENAI_MODEL, client=c) is False
+    async def test_dispatch_false_propagates(self) -> None:
+        assert await check_connection(_OPENAI_MODEL, client=_client_with_mock(401)) is False

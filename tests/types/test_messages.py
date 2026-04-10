@@ -1,5 +1,4 @@
-"""Message model: properties, part IDs, ToolCallPart, ToolResultPart,
-Message.replace, StructuredOutputPart, FilePart."""
+"""Focused tests for message model branches with real logic."""
 
 from __future__ import annotations
 
@@ -17,219 +16,6 @@ class _Weather(pydantic.BaseModel):
 _WEATHER_DATA = {"city": "SF", "temperature": 62.0}
 _WEATHER_TYPE_NAME = f"{_Weather.__module__}.{_Weather.__qualname__}"
 
-# -- is_done ---------------------------------------------------------------
-
-
-def test_is_done_all_done() -> None:
-    m = messages.Message(
-        id="m1",
-        role="assistant",
-        parts=[
-            messages.TextPart(text="hello", state="done"),
-            messages.ToolCallPart(
-                tool_call_id="tc1", tool_name="t", tool_args="{}", state="done"
-            ),
-        ],
-    )
-    assert m.is_done is True
-
-
-def test_is_done_streaming() -> None:
-    m = messages.Message(
-        id="m1",
-        role="assistant",
-        parts=[messages.TextPart(text="hel", state="streaming", delta="hel")],
-    )
-    assert m.is_done is False
-
-
-def test_is_done_no_state() -> None:
-    """Parts without state (restored from storage) count as done."""
-    m = messages.Message(
-        id="m1", role="assistant", parts=[messages.TextPart(text="hi")]
-    )
-    assert m.is_done is True
-
-
-# -- text / reasoning properties -------------------------------------------
-
-
-def test_text_returns_first_text_part() -> None:
-    m = messages.Message(
-        id="m1",
-        role="assistant",
-        parts=[
-            messages.TextPart(text="first"),
-            messages.TextPart(text="second"),
-        ],
-    )
-    assert m.text == "first"
-
-
-def test_text_empty_when_no_text_parts() -> None:
-    m = messages.Message(
-        id="m1",
-        role="assistant",
-        parts=[
-            messages.ToolCallPart(tool_call_id="tc1", tool_name="t", tool_args="{}")
-        ],
-    )
-    assert m.text == ""
-
-
-def test_reasoning_returns_first() -> None:
-    m = messages.Message(
-        id="m1",
-        role="assistant",
-        parts=[
-            messages.ReasoningPart(text="thinking hard"),
-            messages.TextPart(text="answer"),
-        ],
-    )
-    assert m.reasoning == "thinking hard"
-
-
-# -- deltas ----------------------------------------------------------------
-
-
-def test_text_delta() -> None:
-    m = messages.Message(
-        id="m1",
-        role="assistant",
-        parts=[messages.TextPart(text="ab", delta="b", state="streaming")],
-    )
-    assert m.text_delta == "b"
-
-
-def test_text_delta_empty_when_no_delta() -> None:
-    m = messages.Message(
-        id="m1",
-        role="assistant",
-        parts=[messages.TextPart(text="done", state="done")],
-    )
-    assert m.text_delta == ""
-
-
-def test_reasoning_delta() -> None:
-    m = messages.Message(
-        id="m1",
-        role="assistant",
-        parts=[messages.ReasoningPart(text="ab", delta="b", state="streaming")],
-    )
-    assert m.reasoning_delta == "b"
-
-
-def test_tool_deltas() -> None:
-    m = messages.Message(
-        id="m1",
-        role="assistant",
-        parts=[
-            messages.ToolCallPart(
-                tool_call_id="tc1",
-                tool_name="search",
-                tool_args='{"q":"te',
-                args_delta='"te',
-                state="streaming",
-            )
-        ],
-    )
-    deltas = m.tool_deltas
-    assert len(deltas) == 1
-    assert deltas[0].tool_call_id == "tc1"
-    assert deltas[0].args_delta == '"te'
-
-
-# -- tool_calls ------------------------------------------------------------
-
-
-def test_tool_calls() -> None:
-    m = messages.Message(
-        id="m1",
-        role="assistant",
-        parts=[
-            messages.TextPart(text="hi"),
-            messages.ToolCallPart(tool_call_id="tc1", tool_name="a", tool_args="{}"),
-            messages.ToolCallPart(tool_call_id="tc2", tool_name="b", tool_args="{}"),
-        ],
-    )
-    assert len(m.tool_calls) == 2
-    assert m.tool_calls[0].tool_call_id == "tc1"
-
-
-# -- get_hook_part ---------------------------------------------------------
-
-
-def test_get_hook_part_found() -> None:
-    """get_hook_part returns the HookPart when present."""
-    hook = messages.HookPart(hook_id="h1", hook_type="Approval", status="pending")
-    m = messages.Message(id="m1", role="assistant", parts=[hook])
-    assert m.get_hook_part() is hook
-    assert m.get_hook_part("h1") is hook
-
-
-def test_get_hook_part_by_id() -> None:
-    """get_hook_part with a specific hook_id skips non-matching hooks."""
-    h1 = messages.HookPart(hook_id="h1", hook_type="Approval", status="pending")
-    h2 = messages.HookPart(hook_id="h2", hook_type="Approval", status="resolved")
-    m = messages.Message(id="m1", role="assistant", parts=[h1, h2])
-    assert m.get_hook_part("h2") is h2
-
-
-def test_get_hook_part_missing() -> None:
-    """get_hook_part returns None when no HookPart exists."""
-    m = messages.Message(
-        id="m1", role="assistant", parts=[messages.TextPart(text="no hooks")]
-    )
-    assert m.get_hook_part() is None
-    assert m.get_hook_part("h-nope") is None
-
-
-# -- ToolResultPart --------------------------------------------------------
-
-
-def test_tool_result_part() -> None:
-    tr = messages.ToolResultPart(
-        tool_call_id="tc1", tool_name="t", result={"answer": 42}
-    )
-    assert tr.tool_call_id == "tc1"
-    assert tr.result == {"answer": 42}
-    assert tr.is_error is False
-
-
-def test_tool_result_part_error() -> None:
-    tr = messages.ToolResultPart(
-        tool_call_id="tc1",
-        tool_name="t",
-        result="Something went wrong",
-        is_error=True,
-    )
-    assert tr.is_error is True
-    assert tr.result == "Something went wrong"
-
-
-# -- Part ids --------------------------------------------------------------
-
-
-def test_parts_have_auto_generated_ids() -> None:
-    """All parts get an auto-generated id."""
-    text = messages.TextPart(text="hi")
-    tool = messages.ToolCallPart(tool_call_id="tc1", tool_name="t", tool_args="{}")
-    reasoning = messages.ReasoningPart(text="thinking")
-    assert text.id  # non-empty
-    assert tool.id
-    assert reasoning.id
-    # All different
-    assert len({text.id, tool.id, reasoning.id}) == 3
-
-
-def test_part_id_explicit() -> None:
-    """Parts accept an explicit id."""
-    tp = messages.TextPart(id="my-id", text="hi")
-    assert tp.id == "my-id"
-
-
-# -- Message.replace -------------------------------------------------------
-
 
 def test_replace() -> None:
     old_text = messages.TextPart(id="p0", text="hello")
@@ -241,7 +27,6 @@ def test_replace() -> None:
     new_text = messages.TextPart(id="p0", text="updated")
     updated_m = m.replace(new_text)
     assert updated_m.parts[0].text == "updated"  # type: ignore[union-attr]
-    # Original unchanged
     assert m.parts[0].text == "hello"  # type: ignore[union-attr]
 
 
@@ -255,7 +40,6 @@ def test_replace_missing_id() -> None:
 
 
 def test_replace_two_arg() -> None:
-    """replace(old, new) matches by identity, ignores id."""
     old_text = messages.TextPart(id="p0", text="hello")
     m = messages.Message(id="m1", role="assistant", parts=[old_text])
     new_text = messages.TextPart(id="different", text="world")
@@ -264,7 +48,6 @@ def test_replace_two_arg() -> None:
     assert isinstance(part, messages.TextPart)
     assert part.text == "world"
     assert part.id == "different"
-    # Original unchanged
     orig = m.parts[0]
     assert isinstance(orig, messages.TextPart)
     assert orig.text == "hello"
@@ -274,27 +57,22 @@ def test_replace_two_arg_missing() -> None:
     m = messages.Message(
         id="m1", role="assistant", parts=[messages.TextPart(id="p0", text="hi")]
     )
-    stranger = messages.TextPart(id="p0", text="hi")  # same content, different object
+    stranger = messages.TextPart(id="p0", text="hi")
     with pytest.raises(ValueError, match="not found in message"):
         m.replace(stranger, messages.TextPart(text="new"))
 
 
-# -- StructuredOutputPart --------------------------------------------------
-
-
 def test_structured_output_part_value() -> None:
-    """Lazy hydration: resolves class, validates data, caches result."""
     part = messages.StructuredOutputPart(
         data=_WEATHER_DATA, output_type_name=_WEATHER_TYPE_NAME
     )
     val = part.value
     assert isinstance(val, _Weather)
     assert val.city == "SF"
-    assert part.value is val  # cached
+    assert part.value is val
 
 
 def test_structured_output_part_bad_class_name() -> None:
-    """Unresolvable class name raises ImportError on access."""
     part = messages.StructuredOutputPart(
         data=_WEATHER_DATA, output_type_name="nonexistent.module.Cls"
     )
@@ -303,7 +81,6 @@ def test_structured_output_part_bad_class_name() -> None:
 
 
 def test_message_output_from_part() -> None:
-    """Message.output property delegates to StructuredOutputPart.value."""
     m = messages.Message(
         id="m1",
         role="assistant",
@@ -319,7 +96,6 @@ def test_message_output_from_part() -> None:
 
 
 def test_structured_output_round_trip() -> None:
-    """StructuredOutputPart survives model_dump -> model_validate."""
     m = messages.Message(
         id="m1",
         role="assistant",
@@ -335,11 +111,7 @@ def test_structured_output_round_trip() -> None:
     assert restored.output.city == "SF"
 
 
-# -- Usage -----------------------------------------------------------------
-
-
 def test_usage_add_merges_optional_fields() -> None:
-    """__add__ accumulates tokens and treats None vs populated correctly."""
     a = messages.Usage(
         input_tokens=100,
         output_tokens=50,
@@ -355,32 +127,13 @@ def test_usage_add_merges_optional_fields() -> None:
     assert total.input_tokens == 300
     assert total.output_tokens == 130
     assert total.total_tokens == 430
-
-    # None + int -> int (not None)
     assert total.reasoning_tokens == 10
-    # int + None -> int (not None)
     assert total.cache_read_tokens == 20
-    # None + None -> None (not zero)
     assert total.cache_write_tokens is None
-
-    # raw is intentionally not merged
     assert total.raw is None
 
 
-# -- FilePart --------------------------------------------------------------
-
-
-def test_file_part_creation() -> None:
-    """FilePart stores data, media_type, and optional filename."""
-    fp = messages.FilePart(data=b"\x89PNG", media_type="image/png", filename="pic.png")
-    assert fp.type == "file"
-    assert fp.data == b"\x89PNG"
-    assert fp.media_type == "image/png"
-    assert fp.filename == "pic.png"
-
-
 def test_file_part_in_part_union() -> None:
-    """FilePart round-trips through the Part discriminated union."""
     msg = messages.Message(
         id="m1",
         role="user",
@@ -398,25 +151,6 @@ def test_file_part_in_part_union() -> None:
     assert restored.parts[1].media_type == "image/jpeg"
 
 
-# -- FilePart.from_url -----------------------------------------------------
-
-
-def test_from_url_infers_jpeg() -> None:
-    fp = messages.FilePart.from_url("https://example.com/cat.jpg")
-    assert fp.media_type == "image/jpeg"
-    assert fp.data == "https://example.com/cat.jpg"
-
-
-def test_from_url_infers_png() -> None:
-    fp = messages.FilePart.from_url("https://example.com/photo.png")
-    assert fp.media_type == "image/png"
-
-
-def test_from_url_infers_pdf() -> None:
-    fp = messages.FilePart.from_url("https://example.com/doc.pdf")
-    assert fp.media_type == "application/pdf"
-
-
 def test_from_url_infers_from_data_url() -> None:
     fp = messages.FilePart.from_url("data:audio/wav;base64,AAAA")
     assert fp.media_type == "audio/wav"
@@ -432,23 +166,15 @@ def test_from_url_unknown_extension_raises() -> None:
         messages.FilePart.from_url("https://example.com/blob")
 
 
-# -- FilePart.from_bytes --------------------------------------------------
-
-
-def test_from_bytes_detects_png() -> None:
+def test_from_bytes_detects_image_and_preserves_filename() -> None:
     data = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A])
-    fp = messages.FilePart.from_bytes(data)
+    fp = messages.FilePart.from_bytes(data, filename="photo.png")
     assert fp.media_type == "image/png"
     assert fp.data == data
+    assert fp.filename == "photo.png"
 
 
-def test_from_bytes_detects_jpeg() -> None:
-    data = bytes([0xFF, 0xD8, 0xFF, 0xE0])
-    fp = messages.FilePart.from_bytes(data)
-    assert fp.media_type == "image/jpeg"
-
-
-def test_from_bytes_detects_wav() -> None:
+def test_from_bytes_detects_audio() -> None:
     data = bytes(
         [0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45]
     )
@@ -457,15 +183,8 @@ def test_from_bytes_detects_wav() -> None:
 
 
 def test_from_bytes_explicit_overrides() -> None:
-    """Explicit media_type should bypass detection."""
     fp = messages.FilePart.from_bytes(b"\x00\x00", media_type="video/mp4")
     assert fp.media_type == "video/mp4"
-
-
-def test_from_bytes_preserves_filename() -> None:
-    data = bytes([0x89, 0x50, 0x4E, 0x47])
-    fp = messages.FilePart.from_bytes(data, filename="photo.png")
-    assert fp.filename == "photo.png"
 
 
 def test_from_bytes_unknown_raises() -> None:

@@ -138,18 +138,24 @@ class TestRequest:
         assert captured["ai-model-id"] == "openai/gpt-image-1"
         assert captured["ai-gateway-auth-method"] == "api-key"
 
-    async def test_parameters_forwarded(self) -> None:
+    async def test_request_body_forwards_parameters_and_files(self) -> None:
         captured_body: dict[str, Any] = {}
 
         def handler(req: httpx.Request) -> httpx.Response:
             captured_body.update(json.loads(req.content))
             return httpx.Response(200, json={"images": [_PNG_B64]})
 
-        client = mock_client(httpx.MockTransport(handler))
+        msg = messages.Message(
+            role="user",
+            parts=[
+                messages.TextPart(text="landscape"),
+                messages.FilePart(data=_PNG_B64, media_type="image/png"),
+            ],
+        )
         await generate(
-            client,
+            mock_client(httpx.MockTransport(handler)),
             _IMAGE_MODEL,
-            [user_msg("landscape")],
+            [msg],
             params=ImageParams(
                 n=2,
                 size="1024x1024",
@@ -165,26 +171,6 @@ class TestRequest:
         assert captured_body["aspectRatio"] == "16:9"
         assert captured_body["seed"] == 42
         assert captured_body["providerOptions"] == {"google": {"style": "vivid"}}
-
-    async def test_input_images_forwarded(self) -> None:
-        """Input images from user messages -> files in request body."""
-        captured_body: dict[str, Any] = {}
-
-        def handler(req: httpx.Request) -> httpx.Response:
-            captured_body.update(json.loads(req.content))
-            return httpx.Response(200, json={"images": [_PNG_B64]})
-
-        msg = messages.Message(
-            role="user",
-            parts=[
-                messages.TextPart(text="Edit this"),
-                messages.FilePart(data=_PNG_B64, media_type="image/png"),
-            ],
-        )
-        client = mock_client(httpx.MockTransport(handler))
-        await generate(client, _IMAGE_MODEL, [msg])
-
-        assert captured_body["prompt"] == "Edit this"
         assert "files" in captured_body
         assert len(captured_body["files"]) == 1
         assert captured_body["files"][0]["type"] == "file"

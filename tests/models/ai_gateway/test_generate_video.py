@@ -183,7 +183,7 @@ class TestRequest:
         assert captured["accept"] == "text/event-stream"
         assert captured["ai-gateway-auth-method"] == "api-key"
 
-    async def test_parameters_forwarded(self) -> None:
+    async def test_request_body_forwards_parameters_and_input_image(self) -> None:
         captured_body: dict[str, Any] = {}
 
         def handler(req: httpx.Request) -> httpx.Response:
@@ -204,11 +204,18 @@ class TestRequest:
                 ),
             )
 
-        client = mock_client(httpx.MockTransport(handler))
+        png_b64 = base64.b64encode(b"\x89PNG").decode()
+        msg = messages.Message(
+            role="user",
+            parts=[
+                messages.TextPart(text="sunset"),
+                messages.FilePart(data=png_b64, media_type="image/png"),
+            ],
+        )
         await generate(
-            client,
+            mock_client(httpx.MockTransport(handler)),
             _VIDEO_MODEL,
-            [user_msg("sunset")],
+            [msg],
             params=VideoParams(
                 n=2,
                 aspect_ratio="16:9",
@@ -228,6 +235,9 @@ class TestRequest:
         assert captured_body["fps"] == 30
         assert captured_body["seed"] == 42
         assert captured_body["providerOptions"] == {"google": {"enhancePrompt": True}}
+        assert "image" in captured_body
+        assert captured_body["image"]["type"] == "file"
+        assert captured_body["image"]["mediaType"] == "image/png"
 
     async def test_url_posts_to_video_model_endpoint(self) -> None:
         captured_url: list[str] = []
@@ -257,46 +267,7 @@ class TestRequest:
             [user_msg("test")],
             params=VideoParams(),
         )
-
         assert captured_url[0] == "https://gw.test/v3/ai/video-model"
-
-    async def test_image_to_video_input(self) -> None:
-        """Image in user message -> image field in request body."""
-        captured_body: dict[str, Any] = {}
-
-        def handler(req: httpx.Request) -> httpx.Response:
-            captured_body.update(json.loads(req.content))
-            return httpx.Response(
-                200,
-                text=sse(
-                    {
-                        "type": "result",
-                        "videos": [
-                            {
-                                "type": "base64",
-                                "data": _MP4_B64,
-                                "mediaType": "video/mp4",
-                            }
-                        ],
-                    }
-                ),
-            )
-
-        png_b64 = base64.b64encode(b"\x89PNG").decode()
-        msg = messages.Message(
-            role="user",
-            parts=[
-                messages.TextPart(text="Animate this"),
-                messages.FilePart(data=png_b64, media_type="image/png"),
-            ],
-        )
-        client = mock_client(httpx.MockTransport(handler))
-        await generate(client, _VIDEO_MODEL, [msg], params=VideoParams())
-
-        assert captured_body["prompt"] == "Animate this"
-        assert "image" in captured_body
-        assert captured_body["image"]["type"] == "file"
-        assert captured_body["image"]["mediaType"] == "image/png"
 
 
 # ---------------------------------------------------------------------------

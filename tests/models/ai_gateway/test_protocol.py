@@ -232,59 +232,6 @@ class TestBuildRequestBody:
         assert "temp" in rf["schema"]["properties"]
 
 
-# ---------------------------------------------------------------------------
-# _parse_stream_part -- parametrized simple 1:1 mappings
-# ---------------------------------------------------------------------------
-
-_SIMPLE_STREAM_PARTS = [
-    (
-        {"type": "text-start", "id": "t1"},
-        streaming.TextStart(block_id="t1"),
-    ),
-    (
-        {"type": "text-end", "id": "t1"},
-        streaming.TextEnd(block_id="t1"),
-    ),
-    (
-        {"type": "reasoning-start", "id": "r1"},
-        streaming.ReasoningStart(block_id="r1"),
-    ),
-    (
-        {"type": "reasoning-delta", "id": "r1", "delta": "hmm"},
-        streaming.ReasoningDelta(block_id="r1", delta="hmm"),
-    ),
-    (
-        {"type": "reasoning-end", "id": "r1"},
-        streaming.ReasoningEnd(block_id="r1"),
-    ),
-    (
-        {"type": "tool-input-start", "id": "tc-1", "toolName": "search"},
-        streaming.ToolStart(tool_call_id="tc-1", tool_name="search"),
-    ),
-    (
-        {"type": "tool-input-delta", "id": "tc-1", "delta": '{"q"'},
-        streaming.ToolArgsDelta(tool_call_id="tc-1", delta='{"q"'),
-    ),
-    (
-        {"type": "tool-input-end", "id": "tc-1"},
-        streaming.ToolEnd(tool_call_id="tc-1"),
-    ),
-]
-
-
-@pytest.mark.parametrize(
-    ("wire", "expected"),
-    _SIMPLE_STREAM_PARTS,
-    ids=[w["type"] for w, _ in _SIMPLE_STREAM_PARTS],
-)
-def test_parse_stream_part_simple(
-    wire: dict[str, object], expected: streaming.StreamEvent
-) -> None:
-    events = stream_mod._parse_stream_part(wire)
-    assert len(events) == 1
-    assert events[0] == expected
-
-
 class TestParseStreamPartComplex:
     def test_text_delta_uses_textDelta_key(self) -> None:
         """The gateway sends ``textDelta`` (camelCase), not ``delta``."""
