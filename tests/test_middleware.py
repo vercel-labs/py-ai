@@ -320,7 +320,9 @@ async def test_wrap_generate_is_called() -> None:
 
     @my_agent.loop
     async def gen_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
-        result = await models.generate(context.model, context.messages)
+        result = await models.generate(
+            context.model, context.messages, models.ImageParams()
+        )
         yield result
 
     async for _m in my_agent.run(

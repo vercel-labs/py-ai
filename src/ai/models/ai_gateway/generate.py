@@ -1,8 +1,6 @@
 """AI Gateway v3 generation adapter — image-model and video-model endpoints.
 
-Provides typed parameter objects (:class:`ImageParams`, :class:`VideoParams`)
-and a unified :func:`generate` entry point that dispatches based on param type
-and validates against model capabilities.
+Unified :func:`generate` entry point that dispatches based on param type.
 """
 
 from __future__ import annotations
@@ -16,10 +14,10 @@ from ...types import messages as messages_
 from ..core import client as client_
 from ..core import model as model_
 from ..core.helpers import files
+from ..core.types import GenerateParams as GenerateParams
+from ..core.types import ImageParams as ImageParams
+from ..core.types import VideoParams as VideoParams
 from . import _common, errors
-from .types import GenerateParams as GenerateParams
-from .types import ImageParams as ImageParams
-from .types import VideoParams as VideoParams
 
 # ---------------------------------------------------------------------------
 # Image generation — /image-model
@@ -155,57 +153,17 @@ async def _generate_video(
 # ---------------------------------------------------------------------------
 
 
-def _check_capabilities(
-    model: model_.Model,
-    params: GenerateParams,
-) -> None:
-    """Validate that model capabilities match the requested generation type."""
-    caps = model.capabilities
-
-    if isinstance(params, VideoParams):
-        if "video" not in caps:
-            raise ValueError(
-                f"Model {model.id!r} does not have 'video' capability "
-                f"(capabilities={caps}). Use ImageParams for image models."
-            )
-        if "text" in caps and "video" not in caps:
-            raise ValueError(
-                f"Model {model.id!r} is a text model (capabilities={caps}). "
-                f"Use stream() for text generation, not generate()."
-            )
-    elif isinstance(params, ImageParams):
-        if "video" in caps and "image" not in caps:
-            raise ValueError(
-                f"Model {model.id!r} has 'video' capability but not 'image' "
-                f"(capabilities={caps}). Use VideoParams for video models."
-            )
-        if "text" in caps and "image" not in caps:
-            raise ValueError(
-                f"Model {model.id!r} is a text model (capabilities={caps}). "
-                f"Use stream() for text generation, not generate()."
-            )
-
-
 async def generate(
     client: client_.Client,
     model: model_.Model,
     messages: list[messages_.Message],
-    params: GenerateParams | None = None,
+    params: GenerateParams,
 ) -> messages_.Message:
     """Generate media (images or video) through the AI Gateway.
 
     Dispatches to ``/image-model`` or ``/video-model`` based on ``params``
-    type, with fallback to model capabilities when ``params`` is ``None``.
-
-    Raises :class:`ValueError` if the model capabilities don't match the
-    requested generation type.
+    type.
     """
-    # Auto-detect from capabilities when no params provided
-    if params is None:
-        params = VideoParams() if "video" in model.capabilities else ImageParams()
-
-    _check_capabilities(model, params)
-
     if isinstance(params, VideoParams):
         return await _generate_video(client, model, messages, params)
     return await _generate_image(client, model, messages, params)

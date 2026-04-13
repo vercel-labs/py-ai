@@ -38,7 +38,6 @@ from .types.stream import StreamResultLike
 
 if TYPE_CHECKING:
     from .agents.agent import Tool
-    from .models.core.client import Client
     from .models.core.model import Model
 
 
@@ -50,7 +49,6 @@ class ModelContext:
     messages: list[messages_.Message]
     tools: Sequence[tools_.ToolLike] | None
     output_type: type[pydantic.BaseModel] | None
-    client: Client | None
     kwargs: dict[str, Any]
 
     def __post_init__(self) -> None:
@@ -67,7 +65,6 @@ class GenerateContext:
     model: Model
     messages: list[messages_.Message]
     params: Any
-    client: Client | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "messages", list(self.messages))

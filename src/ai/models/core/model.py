@@ -4,31 +4,21 @@ from __future__ import annotations
 
 import dataclasses
 
-
-@dataclasses.dataclass(frozen=True)
-class ModelCost:
-    """Per-million-token pricing."""
-
-    input: float = 0.0
-    output: float = 0.0
-    cache_read: float = 0.0
-    cache_write: float = 0.0
+from .client import Client
+from .proto import Provider
 
 
 @dataclasses.dataclass(frozen=True)
 class Model:
-    """Pure-data description of a model.
+    """Lightweight reference to a model on a specific provider.
 
-    * ``id`` — identifier sent to the provider (e.g. ``"claude-sonnet-4-20250514"``).
-    * ``adapter`` — adapter key (e.g. ``"ai-gateway-v3"``, ``"anthropic-messages"``).
-    * ``provider`` — hosting service (e.g. ``"ai-gateway"``, ``"anthropic"``).
+    * ``id`` — identifier sent to the provider (e.g. ``"claude-sonnet-4-6"``).
+    * ``adapter`` — wire protocol key (e.g. ``"ai-gateway-v3"``, ``"anthropic"``).
+    * ``provider`` — :class:`Provider` that owns this model.
+    * ``client`` — explicit :class:`Client` override (skips provider's default).
     """
 
     id: str
     adapter: str
-    provider: str
-    name: str = ""
-    capabilities: tuple[str, ...] = ("text",)
-    context_window: int = 0
-    max_output_tokens: int = 0
-    cost: ModelCost | None = None
+    provider: Provider
+    client: Client | None = dataclasses.field(default=None, repr=False)

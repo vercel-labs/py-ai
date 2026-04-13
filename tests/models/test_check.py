@@ -8,13 +8,15 @@ unique two-endpoint routing that needs dedicated tests.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from typing import Any
 
 import httpx
 import pytest
 
-from ai.models import check_connection
+from ai.models import anthropic, check_connection, openai
+from ai.models.ai_gateway import ai_gateway
 from ai.models.ai_gateway import check as ai_gw_check
 from ai.models.anthropic import check as anthropic_check
 from ai.models.core import client as client_
@@ -25,14 +27,48 @@ from ai.models.openai import check as openai_check
 # Fixtures
 # ---------------------------------------------------------------------------
 
-_OPENAI_MODEL = model_.Model(id="gpt-5.4", adapter="openai", provider="openai")
-_ANTHROPIC_MODEL = model_.Model(
-    id="claude-opus-4-6", adapter="anthropic", provider="anthropic"
-)
-_GATEWAY_MODEL = model_.Model(
-    id="anthropic/claude-opus-4-6", adapter="ai-gateway-v3", provider="ai-gateway"
-)
-_UNKNOWN_MODEL = model_.Model(id="x", adapter="x", provider="unknown-provider")
+_OPENAI_MODEL = openai("gpt-5.4")
+_ANTHROPIC_MODEL = anthropic("claude-opus-4-6")
+_GATEWAY_MODEL = ai_gateway("anthropic/claude-opus-4-6")
+
+
+class _FailProvider:
+    """A provider whose check always raises KeyError (for testing unknown providers)."""
+
+    @property
+    def api_key_env(self) -> None:
+        return None
+
+    @property
+    def base_url(self) -> str:
+        return "http://unknown.test"
+
+    @property
+    def adapter(self) -> str:
+        return "x"
+
+    @property
+    def name(self) -> str:
+        return "unknown-provider"
+
+    def client(self) -> client_.Client:
+        return client_.Client(base_url=self.base_url)
+
+    async def check(self, client: client_.Client, model: model_.Model) -> bool:
+        raise KeyError(f"No check function registered for provider={self.name!r}.")
+
+    async def list(self, *, client: client_.Client | None = None) -> list[str]:
+        return []
+
+    def __call__(
+        self, model_id: str, *, client: client_.Client | None = None
+    ) -> model_.Model:
+        return model_.Model(
+            id=model_id, adapter=self.adapter, provider=self, client=client
+        )
+
+
+_UNKNOWN_MODEL = _FailProvider()("x")
 
 
 def _client_with_mock(
@@ -155,15 +191,16 @@ class TestCheckConnection:
     async def test_gateway_dispatches(self) -> None:
         config = {"models": [{"id": "anthropic/claude-opus-4-6"}]}
         c = _gateway_client(config_body=config)
-        assert await check_connection(_GATEWAY_MODEL, client=c) is True
+        m = dataclasses.replace(_GATEWAY_MODEL, client=c)
+        assert await check_connection(m) is True
 
     async def test_unknown_provider_raises(self) -> None:
         c = _client_with_mock(200)
+        m = dataclasses.replace(_UNKNOWN_MODEL, client=c)
         with pytest.raises(KeyError, match="unknown-provider"):
-            await check_connection(_UNKNOWN_MODEL, client=c)
+            await check_connection(m)
 
     async def test_dispatch_false_propagates(self) -> None:
-        assert (
-            await check_connection(_OPENAI_MODEL, client=_client_with_mock(401))
-            is False
-        )
+        c = _client_with_mock(401)
+        m = dataclasses.replace(_OPENAI_MODEL, client=c)
+        assert await check_connection(m) is False

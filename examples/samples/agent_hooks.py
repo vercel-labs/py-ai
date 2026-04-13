@@ -26,7 +26,7 @@ async def contact_mothership(query: str) -> str:
 
 
 async def main() -> None:
-    model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
+    model = ai.ai_gateway("anthropic/claude-sonnet-4")
 
     my_agent = ai.agent(tools=[contact_mothership])
 

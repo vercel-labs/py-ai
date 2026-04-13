@@ -19,7 +19,7 @@ async def get_population(city: str) -> int:
 
 
 async def main() -> None:
-    model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
+    model = ai.ai_gateway("anthropic/claude-sonnet-4")
 
     tools = [get_weather, get_population]
     my_agent = ai.agent(tools=tools)

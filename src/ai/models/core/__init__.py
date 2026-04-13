@@ -1,19 +1,26 @@
 """Core types for models."""
 
-from .catalog import get_models, get_providers, register_catalog
-from .catalog import model as model_factory
+from .adapters import register_generate, register_stream
+from .api import check_connection, generate, stream
 from .client import Client
-from .model import Model, ModelCost
-from .proto import GenerateFn, StreamFn
+from .model import Model
+from .proto import CheckConnFn, GenerateFn, Provider, StreamFn
+from .types import GenerateParams, ImageParams, StreamResult, VideoParams
 
 __all__ = [
+    "CheckConnFn",
     "Client",
     "GenerateFn",
+    "GenerateParams",
+    "ImageParams",
     "Model",
-    "ModelCost",
+    "Provider",
     "StreamFn",
-    "get_models",
-    "get_providers",
-    "model_factory",
-    "register_catalog",
+    "StreamResult",
+    "VideoParams",
+    "check_connection",
+    "generate",
+    "register_generate",
+    "register_stream",
+    "stream",
 ]
