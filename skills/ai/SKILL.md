@@ -1,6 +1,6 @@
 ---
 name: ai
-description: Python `ai` module — models, agents, hooks, MCP, structured output
+description: Python `ai` module — models, agents, hooks, middleware, MCP, structured output
 ---
 
 # ai
@@ -21,7 +21,7 @@ async def get_weather(city: str) -> str:
     """Get the current weather for a city."""
     return f"Sunny, 72F in {city}"
 
-model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
+model = ai.ai_gateway("anthropic/claude-sonnet-4")
 agent = ai.agent(tools=[get_weather])
 
 messages = [
@@ -33,11 +33,11 @@ async for msg in agent.run(model, messages):
     print(msg.text_delta, end="")
 ```
 
-`ai.model(provider, model_id)` — built-in providers: `ai-gateway`, `anthropic`, `openai`. Default clients auto-created from env vars (`AI_GATEWAY_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`). Pass `ai.Client(base_url=, api_key=)` for custom endpoints.
+`ai.openai(model_id)`, `ai.anthropic(model_id)`, `ai.ai_gateway(model_id)` — provider factories, callable, return `Model`. Clients auto-created from env vars (`AI_GATEWAY_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`). Pass `ai.Client(base_url=, api_key=)` to the provider call for custom endpoints: `ai.openai("gpt-5.4", client=c)`. `provider.list()` returns available model IDs.
 
 `ai.stream(model, messages, ...)` — streaming without an agent loop. Returns `StreamResult` with `.text`, `.tool_calls`, `.output`, `.usage` after iteration.
 
-`ai.generate(model, messages)` — non-streaming / image / video generation.
+`ai.generate(model, messages, params)` — non-streaming generation. `params` is `ImageParams` or `VideoParams`.
 
 `ai.check_connection(model)` — verify credentials and model availability.
 
@@ -75,7 +75,7 @@ my_agent = ai.agent(tools=[get_weather, get_population])
 @my_agent.loop
 async def custom(context: ai.Context):
     while True:
-        s = await ai.models.stream(
+        s = await ai.stream(
             context.model, context.messages, tools=context.tools
         )
         async for msg in s:
@@ -144,7 +144,7 @@ Hook messages have `role="signal"` with a `HookPart`.
 
 **Long-running mode** (`interrupt_loop=False`, default): await blocks until resolved. Use for websocket/interactive UIs.
 
-**Serverless mode** (`interrupt_loop=True`): unresolved hooks cancel the run. Store the checkpoint, pre-register a resolution, rerun with `checkpoint=`.
+**Serverless mode** (`interrupt_loop=True`): unresolved hooks cancel the run. Pre-register a resolution with `ai.resolve_hook(...)` before rerunning.
 
 Consuming hooks in the iterator:
 
@@ -159,18 +159,6 @@ async for msg in my_agent.run(model, messages):
         continue
     print(msg.text_delta, end="")
 ```
-
-## Checkpoints
-
-`Checkpoint` records completed LLM calls, tool executions, and hook resolutions. On replay, cached results are returned without re-executing.
-
-```python
-data = result.checkpoint.model_dump()
-checkpoint = ai.Checkpoint.model_validate(data)
-result = my_agent.run(model, messages, checkpoint=checkpoint)
-```
-
-Primary use case: serverless hook re-entry.
 
 ## Structured output
 
@@ -213,9 +201,24 @@ return StreamingResponse(
 )
 ```
 
-## Telemetry
+## Middleware
+
+Subclass `ai.Middleware` and override the wrap methods you need. Pass to `agent.run(..., middleware=[...])`. Run-scoped, composable, first in list = outermost.
 
 ```python
-ai.telemetry.enable()   # OTel-based, emits run/step/tool events
-ai.telemetry.disable()
+class LoggingMiddleware(ai.Middleware):
+    async def wrap_model(self, call, next):
+        print(f"calling {call.model.id}")
+        result = await next(call)
+        print("stream started")
+        return result
+
+    async def wrap_tool(self, call, next):
+        print(f"tool {call.tool_name}({call.kwargs})")
+        return await next(call)
+
+async for msg in agent.run(model, messages, middleware=[LoggingMiddleware()]):
+    ...
 ```
+
+Five surfaces: `wrap_agent_run`, `wrap_model`, `wrap_generate`, `wrap_tool`, `wrap_hook`. Each receives a frozen context dataclass and a `next` callable. Use `dataclasses.replace(call, ...)` to modify before passing to `next`.
