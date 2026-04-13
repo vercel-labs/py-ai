@@ -39,6 +39,7 @@ import pydantic
 from .. import middleware as middleware_
 from ..types import messages as messages_
 from ..types import tools as tools_
+from ..types.stream import StreamResultLike
 from .ai_gateway.types import GenerateParams, ImageParams, VideoParams
 from .core.catalog import get_models, get_providers, register_catalog
 from .core.catalog import model as model
@@ -157,11 +158,31 @@ class StreamResult:
 
     Properties like ``.text`` and ``.tool_calls`` delegate to the final
     ``Message`` snapshot and are available after iteration completes.
+
+    Satisfies :class:`~ai.types.StreamResultLike`.
     """
 
     def __init__(self, gen: AsyncGenerator[messages_.Message]) -> None:
         self._gen = gen
         self._final: messages_.Message | None = None
+
+    @classmethod
+    def from_generator(cls, gen: AsyncGenerator[messages_.Message]) -> StreamResult:
+        """Create a :class:`StreamResult` from an async generator.
+
+        This is the public API for middleware that needs to transform or
+        replace the stream returned by ``wrap_model``::
+
+            async def wrap_model(self, call, next):
+                original = await next(call)
+
+                async def _transformed():
+                    async for msg in original:
+                        yield modify(msg)
+
+                return StreamResult.from_generator(_transformed())
+        """
+        return cls(gen)
 
     def __aiter__(self) -> AsyncGenerator[messages_.Message]:
         return self._iterate()
@@ -197,12 +218,15 @@ async def stream(
     output_type: type[pydantic.BaseModel] | None = None,
     client: Client | None = None,
     **kwargs: Any,
-) -> StreamResult:
+) -> StreamResultLike:
     """Stream an LLM response.
 
-    Returns a :class:`StreamResult` that is async-iterable and collects
-    the final ``Message``.  After iteration, access ``.text``,
+    Returns a :class:`StreamResultLike` that is async-iterable and
+    collects the final ``Message``.  After iteration, access ``.text``,
     ``.tool_calls``, ``.usage``, etc.
+
+    Without middleware the concrete type is :class:`StreamResult`; with
+    middleware it may be any :class:`~ai.StreamResultLike`.
     """
     call = middleware_.ModelContext(
         model=model,
@@ -213,7 +237,7 @@ async def stream(
         kwargs=kwargs,
     )
 
-    async def _real(call: middleware_.ModelContext) -> StreamResult:
+    async def _real(call: middleware_.ModelContext) -> StreamResultLike:
         _ensure_adapters()
         c = call.client or _auto_client(call.model)
         adapter_fn = _stream_adapters.get(call.model.adapter)
@@ -235,8 +259,7 @@ async def stream(
         )
 
     chain = middleware_._build_model_chain(_real)
-    result: StreamResult = await chain(call)
-    return result
+    return await chain(call)
 
 
 async def generate(
@@ -337,6 +360,7 @@ __all__ = [
     "ModelCost",
     "StreamFn",
     "StreamResult",
+    "StreamResultLike",
     "VideoParams",
     # Catalog
     "get_models",

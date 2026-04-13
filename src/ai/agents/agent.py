@@ -281,6 +281,11 @@ class Agent:
         self._tools: list[Tool[..., Any]] = tools or []
         self._loop_fn: LoopFn = _default_loop
 
+    @property
+    def tools(self) -> list[Tool[..., Any]]:
+        """The agent's registered tools (read-only copy)."""
+        return list(self._tools)
+
     def loop(self, fn: LoopFn) -> LoopFn:
         """Decorator: override the default loop function."""
         self._loop_fn = fn
@@ -332,9 +337,13 @@ class Agent:
         # Activate middleware for this run (and everything it calls).
         # When middleware is None (default), inherit the parent's middleware
         # from the context var — this lets nested agents share middleware.
+        # When middleware is explicitly provided, *extend* the parent stack
+        # so that outer cross-cutting concerns (tracing, durability) are
+        # preserved.  Pass ``middleware=[]`` to clear the stack entirely.
         mw_token: middleware_.Token | None = None
         if middleware is not None:
-            mw_token = middleware_.activate(middleware)
+            parent = middleware_.get()
+            mw_token = middleware_.activate(parent + middleware)
         try:
             chain = middleware_._build_agent_run_chain(_real)
             async for message in chain(call):

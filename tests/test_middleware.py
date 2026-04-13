@@ -482,6 +482,96 @@ async def test_nested_agent_inherits_middleware() -> None:
     assert model_call_count == 3
 
 
+async def test_nested_agent_extends_middleware() -> None:
+    """Nested agent.run(middleware=[B]) extends, not replaces, the parent stack."""
+    tags: list[str] = []
+
+    class Tagger(ai.Middleware):
+        def __init__(self, tag: str) -> None:
+            self.tag = tag
+
+        async def wrap_model(self, call: middleware.ModelContext, next: Any) -> Any:
+            tags.append(self.tag)
+            return await next(call)
+
+    inner = ai.agent()
+
+    @ai.tool  # type: ignore[arg-type]
+    async def run_inner(query: str) -> AsyncGenerator[ai.Message]:
+        """Run sub-agent with its own middleware."""
+        async for msg in inner.run(
+            MOCK_MODEL,
+            [ai.user_message(query)],
+            middleware=[Tagger("B")],
+        ):
+            yield msg
+
+    outer = ai.agent(tools=[run_inner])
+
+    mock_llm(
+        [
+            # Outer turn 1: call run_inner.
+            [tool_call_msg(tc_id="tc-1", name="run_inner", args='{"query": "hi"}')],
+            # Inner turn 1: text reply (consumed by inner agent).
+            [text_msg("inner done", id="inner-1")],
+            # Outer turn 2: final.
+            [text_msg("outer done", id="outer-2")],
+        ]
+    )
+
+    async for _m in outer.run(
+        MOCK_MODEL, [ai.user_message("go")], middleware=[Tagger("A")]
+    ):
+        pass
+
+    # Outer model calls see only A. Inner model call sees A then B (composed).
+    assert tags == ["A", "A", "B", "A"]
+
+
+async def test_nested_agent_empty_middleware_preserves_parent() -> None:
+    """Passing middleware=[] to a nested run still inherits parent middleware."""
+    tags: list[str] = []
+
+    class Tagger(ai.Middleware):
+        def __init__(self, tag: str) -> None:
+            self.tag = tag
+
+        async def wrap_model(self, call: middleware.ModelContext, next: Any) -> Any:
+            tags.append(self.tag)
+            return await next(call)
+
+    inner = ai.agent()
+
+    @ai.tool  # type: ignore[arg-type]
+    async def run_inner(query: str) -> AsyncGenerator[ai.Message]:
+        """Run sub-agent with empty middleware list."""
+        async for msg in inner.run(
+            MOCK_MODEL,
+            [ai.user_message(query)],
+            middleware=[],  # no extra middleware; parent's still apply
+        ):
+            yield msg
+
+    outer = ai.agent(tools=[run_inner])
+
+    mock_llm(
+        [
+            [tool_call_msg(tc_id="tc-1", name="run_inner", args='{"query": "hi"}')],
+            [text_msg("inner done", id="inner-1")],
+            [text_msg("outer done", id="outer-2")],
+        ]
+    )
+
+    async for _m in outer.run(
+        MOCK_MODEL, [ai.user_message("go")], middleware=[Tagger("A")]
+    ):
+        pass
+
+    # All three model calls (2 outer + 1 inner) see A because parent
+    # middleware is always preserved — middleware=[] adds nothing extra.
+    assert tags == ["A", "A", "A"]
+
+
 # ── wrap_agent_run ──────────────────────────────────────────────
 
 
@@ -801,24 +891,24 @@ async def test_middleware_can_wrap_stream_result() -> None:
     """Middleware can iterate a StreamResult and transform messages."""
 
     class TextAppender(ai.Middleware):
-        async def wrap_model(self, call: middleware.ModelContext, next: Any) -> Any:
+        async def wrap_model(
+            self,
+            call: middleware.ModelContext,
+            next: Any,
+        ) -> ai.StreamResultLike:
             stream_result = await next(call)
-            # Wrap the StreamResult's async generator to append text.
-            original_gen = stream_result._gen
 
             async def _transformed() -> AsyncGenerator[messages_.Message]:
-                async for msg in original_gen:
+                async for msg in stream_result:
                     yield msg
                 # After the stream ends, yield one more snapshot with extra text.
-                # Build a simple final message.
                 yield messages_.Message(
                     id="appended",
                     role="assistant",
                     parts=[messages_.TextPart(text="original + appended")],
                 )
 
-            stream_result._gen = _transformed()
-            return stream_result
+            return ai.StreamResult.from_generator(_transformed())
 
     my_agent = ai.agent()
     mock_llm([[text_msg("original")]])

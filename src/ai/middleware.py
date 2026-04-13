@@ -24,6 +24,7 @@ import pydantic
 
 from .types import messages as messages_
 from .types import tools as tools_
+from .types.stream import StreamResultLike
 
 # ---------------------------------------------------------------------------
 # Call context objects — frozen dataclasses with isolated mutable fields.
@@ -115,15 +116,7 @@ class AgentRunContext:
 # Middleware base class — override the methods you care about.
 # ---------------------------------------------------------------------------
 
-# Forward-reference type aliases to avoid importing heavy modules at the
-# top level.  The actual types are checked at call sites only.
-#
-# These are intentionally broad (Any) so that the middleware module does
-# not import from models/ or agents/ — which would create circular deps.
-
-# StreamResult from models/__init__.py — async-iterable of Message snapshots.
-_StreamResult = Any
-# Message
+# Message alias for brevity in signatures.
 _Message = messages_.Message
 
 # Agent run next-function type: call -> async generator of messages.
@@ -159,13 +152,24 @@ class Middleware:
     async def wrap_model(
         self,
         call: ModelContext,
-        next: Callable[[ModelContext], Awaitable[_StreamResult]],
-    ) -> _StreamResult:
+        next: Callable[[ModelContext], Awaitable[StreamResultLike]],
+    ) -> StreamResultLike:
         """Wrap a model streaming call.
 
-        ``next(call)`` returns a :class:`~ai.models.StreamResult` that is
-        async-iterable over ``Message`` snapshots.  You can do work before,
-        iterate / transform the stream, or do cleanup after.
+        ``next(call)`` returns a :class:`~ai.types.StreamResultLike` that
+        is async-iterable over ``Message`` snapshots.  You can do work
+        before, iterate / transform the stream, or do cleanup after.
+
+        To transform the stream, use
+        :meth:`~ai.models.StreamResult.from_generator`::
+
+            async def wrap_model(self, call, next):
+                stream = await next(call)
+                async def _add_suffix():
+                    async for msg in stream:
+                        yield msg
+                from ai.models import StreamResult
+                return StreamResult.from_generator(_add_suffix())
         """
         return await next(call)
 
@@ -242,8 +246,8 @@ def deactivate(token: Token) -> None:
 
 
 def _build_model_chain(
-    real: Callable[[ModelContext], Awaitable[_StreamResult]],
-) -> Callable[[ModelContext], Awaitable[_StreamResult]]:
+    real: Callable[[ModelContext], Awaitable[StreamResultLike]],
+) -> Callable[[ModelContext], Awaitable[StreamResultLike]]:
     mw = get()
     if not mw:
         return real
@@ -252,9 +256,10 @@ def _build_model_chain(
     for m in reversed(mw):
 
         def _make(
-            m: Middleware, nxt: Callable[[ModelContext], Awaitable[_StreamResult]]
-        ) -> Callable[[ModelContext], Awaitable[_StreamResult]]:
-            async def _wrapped(call: ModelContext) -> _StreamResult:
+            m: Middleware,
+            nxt: Callable[[ModelContext], Awaitable[StreamResultLike]],
+        ) -> Callable[[ModelContext], Awaitable[StreamResultLike]]:
+            async def _wrapped(call: ModelContext) -> StreamResultLike:
                 return await m.wrap_model(call, nxt)
 
             return _wrapped
@@ -357,6 +362,7 @@ __all__ = [
     "HookContext",
     "Middleware",
     "ModelContext",
+    "StreamResultLike",
     "ToolContext",
     "activate",
     "deactivate",

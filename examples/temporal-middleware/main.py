@@ -130,66 +130,39 @@ async def llm_call_activity(params: LLMParams) -> LLMResult:
 # wrap_tool, same as without middleware.
 
 
-class _BufferedStreamResult:
-    """Wraps a single buffered Message to look like a StreamResult."""
-
-    def __init__(self, message: ai.Message) -> None:
-        self._message = message
-
-    def __aiter__(self) -> AsyncGenerator[ai.Message]:
-        return self._generate()
-
-    async def _generate(self) -> AsyncGenerator[ai.Message]:
-        yield self._message
-
-    @property
-    def tool_calls(self) -> list[ai.ToolCallPart]:
-        return self._message.tool_calls
-
-    @property
-    def text(self) -> str:
-        return self._message.text
-
-    @property
-    def usage(self) -> ai.Usage | None:
-        return self._message.usage
-
-    @property
-    def output(self) -> Any:
-        return self._message.output
-
-
 class TemporalMiddleware(ai.Middleware):
-    """Routes LLM calls and tool executions through Temporal activities.
+    """Routes LLM calls and tool executions through Temporal activities."""
 
-    The middleware tracks messages itself so it can serialize the full
-    conversation to the LLM activity at each step.
-    """
-
-    def __init__(
-        self,
-        initial_messages: list[ai.Message],
-        tool_schemas: list[dict[str, Any]],
-    ) -> None:
-        self._messages = list(initial_messages)
+    def __init__(self, tool_schemas: list[dict[str, Any]]) -> None:
         self._tool_schemas = tool_schemas
 
-    async def wrap_model(self, call: ai.middleware.ModelContext, next: Any) -> Any:
+    async def wrap_model(
+        self,
+        call: ai.middleware.ModelContext,
+        next: Any,
+    ) -> ai.StreamResultLike:
         """LLM call → Temporal activity."""
         result = await temporalio.workflow.execute_activity(
             llm_call_activity,
             LLMParams(
-                messages=[m.model_dump() for m in self._messages],
+                messages=[m.model_dump() for m in call.messages],
                 tool_schemas=self._tool_schemas,
             ),
             start_to_close_timeout=datetime.timedelta(minutes=5),
             retry_policy=temporalio.common.RetryPolicy(maximum_attempts=3),
         )
         msg = ai.Message.model_validate(result.message)
-        self._messages.append(msg)
-        return _BufferedStreamResult(msg)
 
-    async def wrap_tool(self, call: ai.middleware.ToolContext, next: Any) -> Any:
+        async def _single() -> AsyncGenerator[ai.Message]:
+            yield msg
+
+        return ai.StreamResult.from_generator(_single())
+
+    async def wrap_tool(
+        self,
+        call: ai.middleware.ToolContext,
+        next: Any,
+    ) -> ai.Message:
         """Tool execution → Temporal activity."""
         result = await temporalio.workflow.execute_activity(
             tool_dispatch_activity,
@@ -199,7 +172,7 @@ class TemporalMiddleware(ai.Middleware):
             ),
             start_to_close_timeout=datetime.timedelta(minutes=2),
         )
-        tool_msg = ai.tool_message(
+        return ai.tool_message(
             ai.ToolResultPart(
                 tool_call_id=call.tool_call_id,
                 tool_name=call.tool_name,
@@ -207,8 +180,6 @@ class TemporalMiddleware(ai.Middleware):
                 is_error=result.is_error,
             )
         )
-        self._messages.append(tool_msg)
-        return tool_msg
 
 
 # ── Agent (default loop — no customization) ──────────────────────
@@ -237,9 +208,9 @@ class WeatherWorkflow:
                 "description": t.description,
                 "param_schema": t.param_schema,
             }
-            for t in weather_agent._tools
+            for t in weather_agent.tools
         ]
-        mw = TemporalMiddleware(messages, tool_schemas)
+        mw = TemporalMiddleware(tool_schemas)
 
         final_text = ""
         async for msg in weather_agent.run(model, messages, middleware=[mw]):
