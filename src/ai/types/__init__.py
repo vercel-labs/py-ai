@@ -19,6 +19,7 @@ from .messages import (
     Usage,
     generate_id,
 )
+from .stream import StreamResultLike
 from .tools import ToolLike, ToolSchema
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "Part",
     "PartState",
     "ReasoningPart",
+    "StreamResultLike",
     "StructuredOutputPart",
     "TextPart",
     "ToolCallPart",

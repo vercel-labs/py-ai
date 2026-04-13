@@ -103,6 +103,42 @@ def mock_llm(responses: list[list[messages_.Message]]) -> MockAdapter:
     return adapter
 
 
+class MockGenerateAdapter:
+    """Mock generate adapter that returns pre-configured responses.
+
+    Each call pops the next response.  Tracks ``call_count`` for assertions.
+    """
+
+    def __init__(self, responses: list[messages_.Message]) -> None:
+        self._responses = list(responses)
+        self._call_index = 0
+        self.call_count = 0
+
+    async def generate(
+        self,
+        client: models.Client,
+        model: models.Model,
+        messages: list[messages_.Message],
+        params: Any = None,
+    ) -> messages_.Message:
+        if self._call_index >= len(self._responses):
+            raise RuntimeError("MockGenerateAdapter: no more responses configured")
+        self.call_count += 1
+        msg = self._responses[self._call_index]
+        self._call_index += 1
+        return msg
+
+
+def mock_generate(responses: list[messages_.Message]) -> MockGenerateAdapter:
+    """Create a MockGenerateAdapter and register it.
+
+    Returns the adapter so tests can inspect ``call_count``.
+    """
+    adapter = MockGenerateAdapter(responses)
+    models.register_generate("mock", adapter.generate)
+    return adapter
+
+
 # ── Helpers ──────────────────────────────────────────────────────
 
 

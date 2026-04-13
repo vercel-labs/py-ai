@@ -10,12 +10,9 @@ from typing import Any, Protocol, get_type_hints
 
 import pydantic
 
-from .. import _durability as _dctx
+from .. import middleware as middleware_
 from .. import models, types
-from ..telemetry import events as telemetry
 from ..types import builders
-from . import checkpoint as checkpoint_
-from . import durability as durability_
 from . import runtime
 
 
@@ -139,80 +136,50 @@ class ToolCall:
         return dict(self._kwargs)
 
     async def __call__(self, **overrides: Any) -> types.Message:
-        """Execute the tool and return a single tool-result message.
-
-        If a durability provider is active, the call is routed through
-        it for recording or replay.
-        """
-        provider = _dctx.get_provider()
-        prep_error: Exception | None = None
+        """Execute the tool and return a single tool-result message."""
+        # Best-effort parse so middleware sees usable kwargs when possible.
+        # If parsing fails, middleware still gets the raw tool_call_id /
+        # tool_name and can replace kwargs before _real() executes.
         try:
             base_kwargs = self.kwargs
-        except Exception as exc:
-            prep_error = exc
+        except Exception:
             base_kwargs = {}
 
-        try:
-            final_kwargs = self._tool.validate_kwargs({**base_kwargs, **overrides})
-            prep_error = None
-        except Exception:
-            if prep_error is None or overrides:
-                raise
-            final_kwargs = None
+        if overrides:
+            # Overrides come from user code, not the model — validate
+            # eagerly so programming errors surface immediately.
+            base_kwargs = self._tool.validate_kwargs({**base_kwargs, **overrides})
 
-        telemetry.handle(
-            telemetry.ToolCallStartEvent(
-                tool_name=self.name,
-                tool_call_id=self.id,
-                args=(
-                    json.dumps(final_kwargs)
-                    if final_kwargs is not None
-                    else self._part.tool_args
-                ),
-            )
+        call = middleware_.ToolContext(
+            tool_call_id=self._part.tool_call_id,
+            tool_name=self._part.tool_name,
+            kwargs=base_kwargs,
         )
-        t0 = telemetry.time_ms()
-        error_str: str | None = None
 
-        async def _execute() -> types.ToolResultPart:
-            nonlocal error_str
+        tool = self._tool
+
+        async def _real(call: middleware_.ToolContext) -> types.Message:
             try:
-                if prep_error is not None or final_kwargs is None:
-                    raise prep_error or ValueError("Failed to prepare tool kwargs")
-                result = await self._tool.execute_kwargs(final_kwargs)
+                result = await tool.execute_kwargs(call.kwargs)
             except Exception as exc:
-                error_str = str(exc)
-                return types.ToolResultPart(
-                    tool_call_id=self._part.tool_call_id,
-                    tool_name=self._part.tool_name,
-                    result=str(exc),
-                    is_error=True,
+                return builders.tool_message(
+                    types.ToolResultPart(
+                        tool_call_id=call.tool_call_id,
+                        tool_name=call.tool_name,
+                        result=str(exc),
+                        is_error=True,
+                    )
                 )
-            return types.ToolResultPart(
-                tool_call_id=self._part.tool_call_id,
-                tool_name=self._part.tool_name,
-                result=result,
+            return builders.tool_message(
+                types.ToolResultPart(
+                    tool_call_id=call.tool_call_id,
+                    tool_name=call.tool_name,
+                    result=result,
+                )
             )
 
-        if provider is not None:
-            result_part = await provider.execute_tool(
-                _execute,
-                tool_call_id=self.id,
-                tool_name=self.name,
-            )
-        else:
-            result_part = await _execute()
-
-        telemetry.handle(
-            telemetry.ToolCallFinishEvent(
-                tool_name=self.name,
-                tool_call_id=self.id,
-                result=result_part.result,
-                error=error_str,
-                duration_ms=telemetry.time_ms() - t0,
-            )
-        )
-        return builders.tool_message(result_part)
+        chain = middleware_._build_tool_chain(_real)
+        return await chain(call)
 
 
 class Context(pydantic.BaseModel):
@@ -237,23 +204,12 @@ class LoopFn(Protocol):
 
 
 async def _default_loop(context: Context) -> AsyncGenerator[types.Message]:
-    step_index = 0
     while True:
-        telemetry.handle(telemetry.StepStartEvent(step_index=step_index))
-
         stream = await models.stream(
             context.model, context.messages, tools=context.tools
         )
-        done_message: types.Message | None = None
         async for message in stream:
-            done_message = message
             yield message
-
-        if done_message is not None:
-            telemetry.handle(
-                telemetry.StepFinishEvent(step_index=step_index, message=done_message)
-            )
-        step_index += 1
 
         tool_calls = context.resolve(stream.tool_calls)
         if not tool_calls:
@@ -325,6 +281,11 @@ class Agent:
         self._tools: list[Tool[..., Any]] = tools or []
         self._loop_fn: LoopFn = _default_loop
 
+    @property
+    def tools(self) -> list[Tool[..., Any]]:
+        """The agent's registered tools (read-only copy)."""
+        return list(self._tools)
+
     def loop(self, fn: LoopFn) -> LoopFn:
         """Decorator: override the default loop function."""
         self._loop_fn = fn
@@ -336,8 +297,7 @@ class Agent:
         messages: list[types.Message],
         *,
         label: str | None = None,
-        durability: durability_.DurabilityProvider | None = None,
-        checkpoint: checkpoint_.Checkpoint | None = None,
+        middleware: list[middleware_.Middleware] | None = None,
     ) -> AsyncGenerator[types.Message]:
         """Run the agent loop, yielding messages to the consumer.
 
@@ -347,30 +307,50 @@ class Agent:
             label: Optional label applied to every yielded message.
                 Useful for multi-agent graphs where the consumer needs
                 to route messages by source.
-            durability: Explicit durability provider.  If ``None`` but
-                *checkpoint* is given, an :class:`EventLogProvider` is
-                created automatically.
-            checkpoint: Checkpoint to resume from.  Implies eventlog
-                durability when no explicit *durability* is provided.
+            middleware: Optional list of middleware to apply to this run.
+                First in the list = outermost.  Middleware wraps model
+                calls, tool calls, hooks, and the run itself.
         """
-        # Convenience: checkpoint implies eventlog provider.
-        if checkpoint is not None and durability is None:
-            durability = durability_.EventLogProvider(checkpoint)
+        call = middleware_.AgentRunContext(
+            model=model,
+            messages=messages,
+            tools=self._tools,
+            label=label,
+        )
 
-        context = Context(model=model, messages=list(messages), tools=self._tools)
+        loop_fn = self._loop_fn
 
-        # Set the durability provider on the shared context var so that
-        # models.stream() and ToolCall.__call__() auto-detect it.
-        token = _dctx.set_provider(durability) if durability is not None else None
-        try:
-            source = _collect_messages(self._loop_fn(context), context.messages)
+        async def _real(
+            call: middleware_.AgentRunContext,
+        ) -> AsyncGenerator[types.Message]:
+            context = Context(
+                model=call.model,
+                messages=list(call.messages),
+                tools=call.tools,
+            )
+            source = _collect_messages(loop_fn(context), context.messages)
             async for message in runtime.run(source):
-                if label is not None:
-                    message = message.model_copy(update={"label": label})
+                if call.label is not None:
+                    message = message.model_copy(update={"label": call.label})
+                yield message
+
+        # Activate middleware for this run (and everything it calls).
+        # When middleware is None (default), inherit the parent's middleware
+        # from the context var — this lets nested agents share middleware.
+        # When middleware is explicitly provided, *extend* the parent stack
+        # so that outer cross-cutting concerns (tracing, durability) are
+        # preserved.  Pass ``middleware=[]`` to clear the stack entirely.
+        mw_token: middleware_.Token | None = None
+        if middleware is not None:
+            parent = middleware_.get()
+            mw_token = middleware_.activate(parent + middleware)
+        try:
+            chain = middleware_._build_agent_run_chain(_real)
+            async for message in chain(call):
                 yield message
         finally:
-            if token is not None:
-                _dctx.reset_provider(token)
+            if mw_token is not None:
+                middleware_.deactivate(mw_token)
 
 
 def agent(

@@ -394,8 +394,8 @@ def to_messages(
     without the caller needing to handle approval routing explicitly.
 
     When approvals are resolved, the trailing assistant message is
-    automatically stripped.  The checkpoint will replay that step, so
-    including it would send duplicate tool-use content to the LLM.
+    automatically stripped to avoid sending duplicate tool-use content
+    to the LLM on re-entry.
 
     Args:
         ui_messages: List of UIMessage objects from the AI SDK v6 frontend.
@@ -516,14 +516,11 @@ def to_messages(
                 )
             )
 
-    # When resuming from a checkpoint (approvals were resolved above),
-    # the frontend sends the full history including the assistant message
-    # from the interrupted run.  The checkpoint replays that step, so
-    # strip the trailing assistant message to avoid duplicate tool-use.
+    # When resuming after approvals were resolved above, the frontend
+    # sends the full history including the assistant message from the
+    # interrupted run.  Strip it to avoid duplicate tool-use content.
     if resolved_any_approval and result and result[-1].role == "assistant":
-        logger.info(
-            "Stripping trailing assistant message (checkpoint will replay this step)"
-        )
+        logger.info("Stripping trailing assistant message (approvals resolved)")
         result = result[:-1]
 
     return result

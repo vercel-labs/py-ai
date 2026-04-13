@@ -86,29 +86,25 @@ async def test_cancel_nonexistent_raises() -> None:
 
 async def test_pre_registered_resolution_consumed() -> None:
     """Pre-registered resolution is consumed by hook() without suspending."""
+    resolved_value: Confirmation | None = None
     my_agent = ai.agent()
 
     @my_agent.loop
     async def custom(context: ai.Context) -> AsyncGenerator[ai.Message]:
+        nonlocal resolved_value
         async for msg in await ai.models.stream(context.model, context.messages):
             yield msg
-        await ai.hook("pre_reg_1", payload=Confirmation)
+        resolved_value = await ai.hook("pre_reg_1", payload=Confirmation)
 
     # Pre-register BEFORE run.
     ai.resolve_hook("pre_reg_1", {"approved": True})
 
     mock_llm([[text_msg("OK")]])
-    provider = ai.EventLogProvider()
-    async for _msg in my_agent.run(
-        MOCK_MODEL,
-        [ai.user_message("go")],
-        durability=provider,
-    ):
+    async for _msg in my_agent.run(MOCK_MODEL, [ai.user_message("go")]):
         pass
 
-    # Hook event should be recorded in checkpoint.
-    cp = provider.checkpoint()
-    assert any(h.label == "pre_reg_1" for h in cp.hooks)
+    assert resolved_value is not None
+    assert resolved_value.approved is True
 
 
 # -- Schema validation on resolve -----------------------------------------

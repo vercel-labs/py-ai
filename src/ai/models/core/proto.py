@@ -10,14 +10,16 @@ required.  The protocols below exist only for static type-checking.
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Sequence
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import pydantic
 
 from ...types import messages as messages_
 from ...types import tools as tools_
-from .client import Client
 from .model import Model
+
+if TYPE_CHECKING:
+    from .client import Client
 
 
 @runtime_checkable

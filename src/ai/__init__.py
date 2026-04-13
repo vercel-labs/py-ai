@@ -1,19 +1,12 @@
-from . import adapters, models, telemetry
+from . import adapters, middleware, models
 from .adapters import ai_sdk_ui
 from .agents import (
     TOOL_APPROVAL_HOOK_TYPE,
     Agent,
-    Checkpoint,
     Context,
-    DurabilityProvider,
-    EventLogProvider,
-    HookEvent,
-    PendingHookInfo,
-    StepEvent,
     Tool,
     ToolApproval,
     ToolCall,
-    ToolEvent,
     agent,
     cancel_hook,
     hook,
@@ -22,11 +15,13 @@ from .agents import (
     tool,
     yield_from,
 )
+from .middleware import AgentRunContext, Middleware
 from .models import (
     Client,
     ImageParams,
     Model,
     ModelCost,
+    StreamResult,
     VideoParams,
     check_connection,
     generate,
@@ -42,6 +37,7 @@ from .types import (
     Part,
     PartState,
     ReasoningPart,
+    StreamResultLike,
     StructuredOutputPart,
     TextPart,
     ToolCallPart,
@@ -91,6 +87,8 @@ __all__ = [
     "ImageParams",
     "VideoParams",
     "Client",
+    "StreamResult",
+    "StreamResultLike",
     "check_connection",
     "model",
     "models",
@@ -112,17 +110,11 @@ __all__ = [
     "cancel_hook",
     "ToolApproval",
     "TOOL_APPROVAL_HOOK_TYPE",
-    # Agents — durability
-    "DurabilityProvider",
-    "EventLogProvider",
-    # Agents — checkpoint
-    "Checkpoint",
-    "PendingHookInfo",
-    "StepEvent",
-    "ToolEvent",
-    "HookEvent",
+    # Middleware
+    "AgentRunContext",
+    "Middleware",
+    "middleware",
     # Submodules
-    "telemetry",
     "mcp",
     "ai_sdk_ui",
     "adapters",

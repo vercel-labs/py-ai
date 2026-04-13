@@ -6,13 +6,13 @@ import contextvars
 import dataclasses
 import json
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import httpx
-import mcp.client.session
-import mcp.client.stdio
-import mcp.client.streamable_http
-import mcp.types
+if TYPE_CHECKING:
+    import mcp.client.session
+    import mcp.client.stdio
+    import mcp.client.streamable_http
+    import mcp.types
 
 from ... import types
 from ..agent import Tool as Tool_
@@ -45,6 +45,8 @@ async def _get_or_create_connection(
     transport_factory: Callable[[], contextlib.AbstractAsyncContextManager[Any]],
 ) -> mcp.client.session.ClientSession:
     """Get an existing connection or create a new one."""
+    import mcp.client.session as _mcp_session
+
     pool = _pool.get()
 
     if pool is None:
@@ -63,7 +65,7 @@ async def _get_or_create_connection(
             streams = await exit_stack.enter_async_context(transport_factory())
             read_stream, write_stream = streams[0], streams[1]
 
-            client = mcp.client.session.ClientSession(
+            client = _mcp_session.ClientSession(
                 read_stream=read_stream,
                 write_stream=write_stream,
             )
@@ -86,6 +88,8 @@ def _make_tool_fn(
     """Create a tool function that manages its own connection."""
 
     async def call_tool(**kwargs: Any) -> Any:
+        import mcp.types as _mcp_types
+
         client = await _get_or_create_connection(connection_key, transport_factory)
         try:
             result = await asyncio.wait_for(
@@ -101,7 +105,7 @@ def _make_tool_fn(
             error_text = " ".join(
                 part.text
                 for part in result.content
-                if isinstance(part, mcp.types.TextContent)
+                if isinstance(part, _mcp_types.TextContent)
             )
             raise RuntimeError(f"MCP tool error: {error_text or 'Unknown error'}")
 
@@ -109,7 +113,7 @@ def _make_tool_fn(
             return result.structuredContent
 
         for part in result.content:
-            if isinstance(part, mcp.types.TextContent):
+            if isinstance(part, _mcp_types.TextContent):
                 text = part.text
                 if text.startswith(("{", "[")):
                     try:
@@ -151,11 +155,13 @@ async def get_stdio_tools(
             "npx", "-y", "@anthropic/mcp-server-filesystem", "/tmp"
         )
     """
+    import mcp.client.stdio as _mcp_stdio
+
     connection_key = f"stdio:{command}:{':'.join(args)}"
 
     def transport_factory() -> contextlib.AbstractAsyncContextManager[Any]:
-        return mcp.client.stdio.stdio_client(
-            mcp.client.stdio.StdioServerParameters(
+        return _mcp_stdio.stdio_client(
+            _mcp_stdio.StdioServerParameters(
                 command=command,
                 args=list(args),
                 env=env,
@@ -198,13 +204,14 @@ async def get_http_tools(
             headers={"Authorization": "Bearer xxx"}
         )
     """
+    import httpx as _httpx
+    import mcp.client.streamable_http as _mcp_http
+
     connection_key = f"http:{url}"
 
     def transport_factory() -> contextlib.AbstractAsyncContextManager[Any]:
-        http_client = httpx.AsyncClient(headers=headers) if headers else None
-        return mcp.client.streamable_http.streamable_http_client(
-            url=url, http_client=http_client
-        )
+        http_client = _httpx.AsyncClient(headers=headers) if headers else None
+        return _mcp_http.streamable_http_client(url=url, http_client=http_client)
 
     client = await _get_or_create_connection(connection_key, transport_factory)
     result = await client.list_tools()
@@ -221,7 +228,11 @@ def _mcp_tool_to_native(
     transport_factory: Callable[[], contextlib.AbstractAsyncContextManager[Any]],
     tool_prefix: str | None,
 ) -> Tool_[..., Any]:
-    """Convert an MCP tool to a native Tool."""
+    """Convert an MCP tool to a native Tool.
+
+    ``mcp_tool`` is typed as :class:`mcp.types.Tool` for static analysis;
+    the actual ``mcp.types`` import is deferred to the calling function.
+    """
     name = mcp_tool.name
     if tool_prefix:
         name = f"{tool_prefix}_{name}"
