@@ -21,9 +21,8 @@ from typing import Any
 import httpx
 import pytest
 
-from ai.models.ai_gateway import errors
+from ai.models.ai_gateway import ai_gateway, errors
 from ai.models.ai_gateway.generate import ImageParams, generate
-from ai.models.core import model as model_
 from ai.types import messages
 
 from .conftest import mock_client, user_msg
@@ -36,11 +35,7 @@ _PNG_B64 = base64.b64encode(_PNG_HEADER).decode()
 _JPEG_HEADER = bytes([0xFF, 0xD8, 0xFF, 0xE0])
 _JPEG_B64 = base64.b64encode(_JPEG_HEADER).decode()
 
-_IMAGE_MODEL = model_.Model(
-    id="google/imagen-4.0-generate-001",
-    adapter="ai-gateway-v3",
-    provider="ai-gateway",
-)
+_IMAGE_MODEL = ai_gateway("google/imagen-4.0-generate-001")
 
 
 # ---------------------------------------------------------------------------
@@ -125,11 +120,7 @@ class TestRequest:
             captured.update(dict(req.headers))
             return httpx.Response(200, json={"images": [_PNG_B64]})
 
-        model = model_.Model(
-            id="openai/gpt-image-1",
-            adapter="ai-gateway-v3",
-            provider="ai-gateway",
-        )
+        model = ai_gateway("openai/gpt-image-1")
         client = mock_client(httpx.MockTransport(handler), api_key="sk-test")
         await generate(client, model, [user_msg("Hi")], ImageParams())
 

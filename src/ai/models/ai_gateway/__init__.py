@@ -14,13 +14,15 @@ time.  This matters for sandboxed runtimes (e.g. Temporal workflow workers).
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any
 
+from ..core import client as client_
 from ..core.model import Model
 from . import errors
 
 if TYPE_CHECKING:
-    from ..core.client import Client
+    pass
 
 _BASE_URL = "https://ai-gateway.vercel.sh/v3/ai"
 _API_KEY_ENV = "AI_GATEWAY_API_KEY"
@@ -28,32 +30,57 @@ _PROTOCOL_VERSION = "0.0.1"
 
 
 class _AIGateway:
-    """Callable provider factory for the Vercel AI Gateway."""
+    """Callable provider factory for the Vercel AI Gateway.
+
+    Satisfies the :class:`~ai.models.core.proto.Provider` protocol.
+    """
+
+    @property
+    def api_key_env(self) -> str:
+        return _API_KEY_ENV
+
+    @property
+    def base_url(self) -> str:
+        return _BASE_URL
+
+    @property
+    def adapter(self) -> str:
+        return "ai-gateway-v3"
+
+    @property
+    def name(self) -> str:
+        return "ai-gateway"
+
+    def client(self) -> client_.Client:
+        """Create a :class:`Client` from env-var credentials."""
+        return client_.Client(
+            base_url=_BASE_URL,
+            api_key=os.environ.get(_API_KEY_ENV),
+        )
+
+    async def check(self, client: client_.Client, model: Model) -> bool:
+        """Delegate to :func:`ai_gateway.check.check`."""
+        from . import check as check_
+
+        return await check_.check(client, model)
 
     def __call__(
         self,
         model_id: str,
         *,
         base_url: str | None = None,
-        client: Client | None = None,
+        client: client_.Client | None = None,
     ) -> Model:
         return Model(
             id=model_id,
-            adapter="ai-gateway-v3",
-            provider="ai-gateway",
-            base_url=base_url or _BASE_URL,
-            api_key_env=_API_KEY_ENV,
+            adapter=self.adapter,
+            provider=self,
             client=client,
         )
 
-    async def list(self, *, client: Client | None = None) -> list[str]:
+    async def list(self, *, client: client_.Client | None = None) -> list[str]:
         """List available model IDs from the AI Gateway."""
-        from ..core import client as client_
-
-        c = client or client_.Client(
-            base_url=_BASE_URL,
-            api_key=__import__("os").environ.get(_API_KEY_ENV),
-        )
+        c = client or self.client()
         base_url = c.base_url.rstrip("/")
         headers: dict[str, str] = {
             "ai-gateway-protocol-version": _PROTOCOL_VERSION,

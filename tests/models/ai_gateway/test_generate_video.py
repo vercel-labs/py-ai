@@ -22,9 +22,8 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from ai.models.ai_gateway import errors
+from ai.models.ai_gateway import ai_gateway, errors
 from ai.models.ai_gateway.generate import VideoParams, generate
-from ai.models.core import model as model_
 from ai.types import messages
 
 from .conftest import mock_client, sse, user_msg
@@ -39,11 +38,7 @@ _MP4_B64 = base64.b64encode(_MP4_HEADER).decode()
 _WEBM_HEADER = bytes([0x1A, 0x45, 0xDF, 0xA3])
 _WEBM_B64 = base64.b64encode(_WEBM_HEADER).decode()
 
-_VIDEO_MODEL = model_.Model(
-    id="google/veo-3.0-generate-001",
-    adapter="ai-gateway-v3",
-    provider="ai-gateway",
-)
+_VIDEO_MODEL = ai_gateway("google/veo-3.0-generate-001")
 
 
 # ---------------------------------------------------------------------------

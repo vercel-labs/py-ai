@@ -11,7 +11,7 @@ import ai
 from ai import models
 from ai.types import messages as messages_
 
-from ..conftest import MOCK_MODEL, mock_llm, text_msg
+from ..conftest import MOCK_MODEL, MOCK_PROVIDER, MockProvider, mock_llm, text_msg
 
 
 # Module-level model so StructuredOutputPart can resolve it by FQN.
@@ -64,7 +64,7 @@ async def test_stream_with_explicit_client() -> None:
 
     explicit = models.Client(base_url="https://custom.test", api_key="sk-custom")
     explicit_model = models.Model(
-        id="mock-model", adapter="mock", provider="mock", client=explicit
+        id="mock-model", adapter="mock", provider=MOCK_PROVIDER, client=explicit
     )
     s = await models.stream(explicit_model, [ai.user_message("Hi")])
     async for _ in s:
@@ -120,12 +120,12 @@ async def test_stream_with_output_type() -> None:
 # generate() tests
 # ---------------------------------------------------------------------------
 
+_MOCK_GEN_PROVIDER = MockProvider(adapter="mock-gen")
+
 GENERATE_MODEL = models.Model(
     id="gen-model",
     adapter="mock-gen",
-    provider="mock",
-    base_url="http://mock.test",
-    api_key_env="MOCK_API_KEY",
+    provider=_MOCK_GEN_PROVIDER,
 )
 
 

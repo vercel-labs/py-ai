@@ -20,6 +20,7 @@ from .models import (
     Client,
     ImageParams,
     Model,
+    Provider,
     StreamResult,
     VideoParams,
     ai_gateway,
@@ -84,6 +85,7 @@ __all__ = [
     "thinking",
     # Models (from models/)
     "Model",
+    "Provider",
     "ImageParams",
     "VideoParams",
     "Client",

@@ -107,12 +107,11 @@ async def check_connection(
     consumed.
 
     The client is resolved from the model: ``model.client`` if set,
-    otherwise auto-created from ``model.base_url`` / ``model.api_key_env``.
+    otherwise created by the provider.
 
     Non-auth transport errors (network failures, 5xx) are raised rather
     than returning ``False`` so that callers can distinguish "bad
     credentials / unknown model" from "provider unreachable".
     """
     c = client_.auto_client(model)
-    check_fn = adapters.get_check_fn(model.provider)
-    return await check_fn(c, model)
+    return await model.provider.check(c, model)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-import os
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -53,21 +52,11 @@ class Client:
 def auto_client(model: model_.Model) -> Client:
     """Create a :class:`Client` from the model's connection info.
 
-    Uses ``model.client`` if set, otherwise builds one from
-    ``model.base_url`` and the env var named by ``model.api_key_env``.
+    Uses ``model.client`` if set, otherwise delegates to
+    ``model.provider.client()`` which reads the provider's default
+    ``base_url`` and ``api_key_env``.
     """
     if model.client is not None:
         return model.client
 
-    if model.base_url is None:
-        raise ValueError(
-            f"Model {model.id!r} (provider={model.provider!r}) has no "
-            f"base_url and no explicit client. Pass a client= to the "
-            f"provider factory or set base_url."
-        )
-
-    api_key: str | None = None
-    if model.api_key_env:
-        api_key = os.environ.get(model.api_key_env)
-
-    return Client(base_url=model.base_url, api_key=api_key)
+    return model.provider.client()

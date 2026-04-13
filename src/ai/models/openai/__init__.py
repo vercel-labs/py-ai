@@ -13,44 +13,71 @@ SDK at import time.
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
+from ..core import client as client_
 from ..core.model import Model
 
 if TYPE_CHECKING:
-    from ..core.client import Client
+    pass
 
 _BASE_URL = "https://api.openai.com/v1"
 _API_KEY_ENV = "OPENAI_API_KEY"
 
 
 class _OpenAI:
-    """Callable provider — ``openai("gpt-5.4")`` returns a :class:`Model`."""
+    """Callable provider — ``openai("gpt-5.4")`` returns a :class:`Model`.
+
+    Satisfies the :class:`~ai.models.core.proto.Provider` protocol.
+    """
+
+    @property
+    def api_key_env(self) -> str:
+        return _API_KEY_ENV
+
+    @property
+    def base_url(self) -> str:
+        return _BASE_URL
+
+    @property
+    def adapter(self) -> str:
+        return "openai"
+
+    @property
+    def name(self) -> str:
+        return "openai"
+
+    def client(self) -> client_.Client:
+        """Create a :class:`Client` from env-var credentials."""
+        return client_.Client(
+            base_url=_BASE_URL,
+            api_key=os.environ.get(_API_KEY_ENV),
+        )
+
+    async def check(self, client: client_.Client, model: Model) -> bool:
+        """Delegate to :func:`openai.check.check`."""
+        from . import check as check_
+
+        return await check_.check(client, model)
 
     def __call__(
         self,
         model_id: str,
         *,
         base_url: str | None = None,
-        client: Client | None = None,
+        client: client_.Client | None = None,
     ) -> Model:
         return Model(
             id=model_id,
-            adapter="openai",
-            provider="openai",
-            base_url=base_url or _BASE_URL,
-            api_key_env=_API_KEY_ENV,
+            adapter=self.adapter,
+            provider=self,
             client=client,
         )
 
-    async def list(self, *, client: Client | None = None) -> list[str]:
+    async def list(self, *, client: client_.Client | None = None) -> list[str]:
         """List available model IDs from the OpenAI API."""
-        from ..core import client as client_
-
-        c = client or client_.Client(
-            base_url=_BASE_URL,
-            api_key=__import__("os").environ.get(_API_KEY_ENV),
-        )
+        c = client or self.client()
         headers = {"Authorization": f"Bearer {c.api_key}"}
         response = await c.http.get(f"{c.base_url.rstrip('/')}/models", headers=headers)
         response.raise_for_status()

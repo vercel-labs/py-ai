@@ -10,13 +10,79 @@ from ai import models
 from ai.types import builders
 from ai.types import messages as messages_
 
+
+class MockProvider:
+    """Minimal provider that satisfies the ``Provider`` protocol for tests.
+
+    Carries just enough state so that ``Model`` objects can be constructed
+    and ``auto_client`` can resolve a client.
+    """
+
+    def __init__(
+        self,
+        *,
+        name: str = "mock",
+        adapter: str = "mock",
+        base_url: str = "http://mock.test",
+        api_key_env: str | None = "MOCK_API_KEY",
+    ) -> None:
+        self._name = name
+        self._adapter = adapter
+        self._base_url = base_url
+        self._api_key_env = api_key_env
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def adapter(self) -> str:
+        return self._adapter
+
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
+    @property
+    def api_key_env(self) -> str | None:
+        return self._api_key_env
+
+    def client(self) -> models.Client:
+        import os
+
+        api_key = os.environ.get(self._api_key_env) if self._api_key_env else None
+        return models.Client(base_url=self._base_url, api_key=api_key)
+
+    async def check(self, client: models.Client, model: models.Model) -> bool:
+        return True
+
+    async def list(self, *, client: models.Client | None = None) -> list[str]:
+        return []
+
+    def __call__(
+        self,
+        model_id: str,
+        *,
+        client: models.Client | None = None,
+    ) -> models.Model:
+        return models.Model(
+            id=model_id,
+            adapter=self._adapter,
+            provider=self,
+            client=client,
+        )
+
+    def __repr__(self) -> str:
+        return self._name
+
+
+MOCK_PROVIDER = MockProvider()
+
 # A fixed Model used in tests — adapter="mock" dispatches to the mock adapter.
 MOCK_MODEL = models.Model(
     id="mock-model",
     adapter="mock",
-    provider="mock",
-    base_url="http://mock.test",
-    api_key_env="MOCK_API_KEY",
+    provider=MOCK_PROVIDER,
 )
 
 

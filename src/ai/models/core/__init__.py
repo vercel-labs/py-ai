@@ -1,10 +1,10 @@
 """Core types for models."""
 
-from .adapters import register_check, register_generate, register_stream
+from .adapters import register_generate, register_stream
 from .api import check_connection, generate, stream
 from .client import Client
 from .model import Model
-from .proto import CheckConnFn, GenerateFn, StreamFn
+from .proto import CheckConnFn, GenerateFn, Provider, StreamFn
 from .types import GenerateParams, ImageParams, StreamResult, VideoParams
 
 __all__ = [
@@ -14,12 +14,12 @@ __all__ = [
     "GenerateParams",
     "ImageParams",
     "Model",
+    "Provider",
     "StreamFn",
     "StreamResult",
     "VideoParams",
     "check_connection",
     "generate",
-    "register_check",
     "register_generate",
     "register_stream",
     "stream",

@@ -23,7 +23,7 @@ import httpx
 import pytest
 
 import ai
-from ai.models.ai_gateway import errors
+from ai.models.ai_gateway import ai_gateway, errors
 from ai.models.core import model as model_
 from ai.types import messages
 
@@ -37,11 +37,7 @@ stream_mod = importlib.import_module("ai.models.ai_gateway.stream")
 # Helpers
 # ---------------------------------------------------------------------------
 
-_TEST_MODEL = model_.Model(
-    id="test-provider/test-model",
-    adapter="ai-gateway-v3",
-    provider="ai-gateway",
-)
+_TEST_MODEL = ai_gateway("test-provider/test-model")
 
 
 async def _collect(
@@ -220,11 +216,7 @@ class TestRequest:
                 text=sse({"type": "finish", "finishReason": "stop", "usage": {}}),
             )
 
-        model = model_.Model(
-            id="anthropic/claude-sonnet-4",
-            adapter="ai-gateway-v3",
-            provider="ai-gateway",
-        )
+        model = ai_gateway("anthropic/claude-sonnet-4")
         client = mock_client(httpx.MockTransport(handler), api_key="sk-test")
         await _collect(client, [user_msg("Hi")], model=model)
 

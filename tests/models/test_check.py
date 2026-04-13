@@ -15,7 +15,8 @@ from typing import Any
 import httpx
 import pytest
 
-from ai.models import check_connection
+from ai.models import anthropic, check_connection, openai
+from ai.models.ai_gateway import ai_gateway
 from ai.models.ai_gateway import check as ai_gw_check
 from ai.models.anthropic import check as anthropic_check
 from ai.models.core import client as client_
@@ -26,25 +27,48 @@ from ai.models.openai import check as openai_check
 # Fixtures
 # ---------------------------------------------------------------------------
 
-_OPENAI_MODEL = model_.Model(
-    id="gpt-5.4",
-    adapter="openai",
-    provider="openai",
-    base_url="https://api.openai.com/v1",
-)
-_ANTHROPIC_MODEL = model_.Model(
-    id="claude-opus-4-6",
-    adapter="anthropic",
-    provider="anthropic",
-    base_url="https://api.anthropic.com/v1",
-)
-_GATEWAY_MODEL = model_.Model(
-    id="anthropic/claude-opus-4-6",
-    adapter="ai-gateway-v3",
-    provider="ai-gateway",
-    base_url="https://ai-gateway.vercel.sh/v3/ai",
-)
-_UNKNOWN_MODEL = model_.Model(id="x", adapter="x", provider="unknown-provider")
+_OPENAI_MODEL = openai("gpt-5.4")
+_ANTHROPIC_MODEL = anthropic("claude-opus-4-6")
+_GATEWAY_MODEL = ai_gateway("anthropic/claude-opus-4-6")
+
+
+class _FailProvider:
+    """A provider whose check always raises KeyError (for testing unknown providers)."""
+
+    @property
+    def api_key_env(self) -> None:
+        return None
+
+    @property
+    def base_url(self) -> str:
+        return "http://unknown.test"
+
+    @property
+    def adapter(self) -> str:
+        return "x"
+
+    @property
+    def name(self) -> str:
+        return "unknown-provider"
+
+    def client(self) -> client_.Client:
+        return client_.Client(base_url=self.base_url)
+
+    async def check(self, client: client_.Client, model: model_.Model) -> bool:
+        raise KeyError(f"No check function registered for provider={self.name!r}.")
+
+    async def list(self, *, client: client_.Client | None = None) -> list[str]:
+        return []
+
+    def __call__(
+        self, model_id: str, *, client: client_.Client | None = None
+    ) -> model_.Model:
+        return model_.Model(
+            id=model_id, adapter=self.adapter, provider=self, client=client
+        )
+
+
+_UNKNOWN_MODEL = _FailProvider()("x")
 
 
 def _client_with_mock(

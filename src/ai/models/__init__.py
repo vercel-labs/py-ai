@@ -27,11 +27,11 @@ Usage::
 from ..types.stream import StreamResultLike
 from .ai_gateway import ai_gateway
 from .anthropic import anthropic
-from .core.adapters import register_check, register_generate, register_stream
+from .core.adapters import register_generate, register_stream
 from .core.api import check_connection, generate, stream
 from .core.client import Client
 from .core.model import Model
-from .core.proto import CheckConnFn, GenerateFn, StreamFn
+from .core.proto import CheckConnFn, GenerateFn, Provider, StreamFn
 from .core.types import GenerateParams, ImageParams, StreamResult, VideoParams
 from .openai import openai
 
@@ -43,6 +43,7 @@ __all__ = [
     "GenerateParams",
     "ImageParams",
     "Model",
+    "Provider",
     "StreamFn",
     "StreamResult",
     "StreamResultLike",
@@ -51,8 +52,7 @@ __all__ = [
     "ai_gateway",
     "anthropic",
     "openai",
-    # Adapter / check registration
-    "register_check",
+    # Adapter registration
     "register_generate",
     "register_stream",
     # Public API
