@@ -30,7 +30,7 @@ async def get_weather(city: str) -> str:
 
 
 async def main() -> None:
-    model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
+    model = ai.ai_gateway("anthropic/claude-sonnet-4")
     agent = ai.agent(tools=[get_weather])
 
     messages = [
@@ -53,11 +53,14 @@ if __name__ == "__main__":
 ### Models
 
 ```
-ai.model(provider, model_id)    model metadata (providers: ai-gateway, anthropic, openai)
-ai.stream(model, messages, ...) streaming generation (supports tools=, output_type=, client=)
-ai.generate(model, messages)    non-streaming / image / video generation
+ai.openai(model_id)             provider — callable, returns Model
+ai.anthropic(model_id)          provider — callable, returns Model
+ai.ai_gateway(model_id)         provider — callable, returns Model
+provider.list()                 list available model IDs from the provider API
+ai.stream(model, messages, ...) streaming generation (supports tools=, output_type=)
+ai.generate(model, messages, p) non-streaming generation (ImageParams, VideoParams)
 ai.check_connection(model)      verify credentials and model availability
-ai.Client(base_url=, api_key=)  explicit client when you need a custom endpoint
+ai.Client(base_url=, api_key=)  explicit client — pass to provider call: ai.openai("gpt-5.4", client=c)
 ```
 
 ### Agents
@@ -78,11 +81,20 @@ ai.system_message  ai.user_message  ai.assistant_message  ai.tool_message
 ai.tool_result     ai.file_part     ai.thinking
 ```
 
+### Middleware
+
+```
+ai.Middleware                    base class — subclass and override wrap methods
+agent.run(..., middleware=[m])   run-scoped, first = outermost
+```
+
+Five wrap surfaces: `wrap_agent_run`, `wrap_model`, `wrap_generate`, `wrap_tool`, `wrap_hook`.
+Each receives a context dataclass and a `next` callable. Default implementations pass through.
+
 ### Integrations
 
 ```
 ai.mcp.get_http_tools(url, ...) expose an MCP server as tools
-ai.telemetry.enable/disable()   OpenTelemetry-style event hooks
 ai.ai_sdk_ui                    AI SDK UI streaming adapter
 ```
 
@@ -94,7 +106,7 @@ Override the default loop when you need approval gates, routing, or custom orche
 @agent.loop
 async def custom(context: ai.Context):
     while True:
-        s = await ai.models.stream(
+        s = await ai.stream(
             context.model, context.messages, tools=context.tools
         )
         async for msg in s:
@@ -115,4 +127,5 @@ Small focused samples live in `examples/samples/`. End-to-end demos:
 - `examples/fastapi-vite/` -- FastAPI backend + Vite frontend with hook-based tool approval
 - `examples/multiagent-textual/` -- Textual TUI with parallel agents and interactive hook resolution
 - `examples/temporal-direct/` -- durable agent with a custom loop (every I/O call is a Temporal activity)
-- `examples/temporal-middleware/` -- durable agent via Middleware (default loop, I/O routed to Temporal activities)
+- `examples/temporal-middleware/` -- durable agent via middleware (default loop, I/O routed to Temporal activities)
+- `examples/samples/middleware_simple.py` -- middleware that logs all five execution surfaces
