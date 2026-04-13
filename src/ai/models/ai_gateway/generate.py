@@ -1,7 +1,6 @@
 """AI Gateway v3 generation adapter — image-model and video-model endpoints.
 
-Provides typed parameter objects (:class:`ImageParams`, :class:`VideoParams`)
-and a unified :func:`generate` entry point that dispatches based on param type
+Unified :func:`generate` entry point that dispatches based on param type
 and validates against model capabilities.
 """
 
@@ -16,10 +15,10 @@ from ...types import messages as messages_
 from ..core import client as client_
 from ..core import model as model_
 from ..core.helpers import files
+from ..core.types import GenerateParams as GenerateParams
+from ..core.types import ImageParams as ImageParams
+from ..core.types import VideoParams as VideoParams
 from . import _common, errors
-from .types import GenerateParams as GenerateParams
-from .types import ImageParams as ImageParams
-from .types import VideoParams as VideoParams
 
 # ---------------------------------------------------------------------------
 # Image generation — /image-model

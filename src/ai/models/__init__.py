@@ -25,7 +25,6 @@ Usage::
 """
 
 from ..types.stream import StreamResultLike
-from .ai_gateway.types import GenerateParams, ImageParams, VideoParams
 from .core.adapters import register_check, register_generate, register_stream
 from .core.api import check_connection, generate, stream
 from .core.catalog import get_models, get_providers, register_catalog
@@ -33,7 +32,7 @@ from .core.catalog import model as model
 from .core.client import _PROVIDER_DEFAULTS, Client
 from .core.model import Model, ModelCost
 from .core.proto import CheckConnFn, GenerateFn, StreamFn
-from .core.stream_result import StreamResult
+from .core.types import GenerateParams, ImageParams, StreamResult, VideoParams
 
 __all__ = [
     # Core types

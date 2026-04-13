@@ -14,10 +14,10 @@ from ... import middleware as middleware_
 from ...types import messages as messages_
 from ...types import stream as stream_
 from ...types import tools as tools_
-from ..ai_gateway import types as ai_gw_types
-from . import adapters, stream_result
+from . import adapters
 from . import client as client_
 from . import model as model_
+from . import types as types_
 
 
 async def stream(
@@ -50,7 +50,7 @@ async def stream(
     async def _real(call: middleware_.ModelContext) -> stream_.StreamResultLike:
         c = call.client or client_.auto_client(call.model)
         adapter_fn = adapters.get_stream_adapter(call.model.adapter)
-        return stream_result.StreamResult(
+        return types_.StreamResult(
             adapter_fn(
                 c,
                 call.model,
@@ -68,7 +68,7 @@ async def stream(
 async def generate(
     model: model_.Model,
     messages: list[messages_.Message],
-    params: ai_gw_types.GenerateParams | None = None,
+    params: types_.GenerateParams | None = None,
     *,
     client: client_.Client | None = None,
 ) -> messages_.Message:

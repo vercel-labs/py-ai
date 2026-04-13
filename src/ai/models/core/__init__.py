@@ -7,16 +7,19 @@ from .catalog import model as model_factory
 from .client import Client
 from .model import Model, ModelCost
 from .proto import CheckConnFn, GenerateFn, StreamFn
-from .stream_result import StreamResult
+from .types import GenerateParams, ImageParams, StreamResult, VideoParams
 
 __all__ = [
     "CheckConnFn",
     "Client",
     "GenerateFn",
+    "GenerateParams",
+    "ImageParams",
     "Model",
     "ModelCost",
     "StreamFn",
     "StreamResult",
+    "VideoParams",
     "check_connection",
     "generate",
     "get_models",
