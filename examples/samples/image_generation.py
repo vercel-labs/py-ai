@@ -6,7 +6,7 @@ import pathlib
 
 import ai
 
-model = ai.model("ai-gateway", "google/imagen-4.0-generate-001")
+model = ai.ai_gateway("google/imagen-4.0-generate-001")
 
 messages = [
     ai.user_message(

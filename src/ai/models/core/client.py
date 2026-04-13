@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import httpx
@@ -28,9 +28,7 @@ class Client:
     api_key: str | None = None
     headers: dict[str, str] = dataclasses.field(default_factory=dict)
 
-    _http: httpx.AsyncClient | None = dataclasses.field(
-        default=None, repr=False, compare=False
-    )
+    _http: Any = dataclasses.field(default=None, repr=False, compare=False)
 
     @property
     def http(self) -> httpx.AsyncClient:
@@ -43,7 +41,7 @@ class Client:
                 headers=self.headers,
                 timeout=_httpx.Timeout(timeout=300.0, connect=10.0),
             )
-        return self._http
+        return self._http  # type: ignore[no-any-return]
 
     async def aclose(self) -> None:
         """Close the underlying HTTP client if open."""
@@ -52,24 +50,24 @@ class Client:
             self._http = None
 
 
-# ---------------------------------------------------------------------------
-# Provider defaults — base URLs and env var names for auto-client creation.
-# ---------------------------------------------------------------------------
-
-_PROVIDER_DEFAULTS: dict[str, tuple[str, str]] = {
-    "ai-gateway": ("https://ai-gateway.vercel.sh/v3/ai", "AI_GATEWAY_API_KEY"),
-    "anthropic": ("https://api.anthropic.com/v1", "ANTHROPIC_API_KEY"),
-    "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY"),
-}
-
-
 def auto_client(model: model_.Model) -> Client:
-    """Create a :class:`Client` from env vars for the given model's provider."""
-    defaults = _PROVIDER_DEFAULTS.get(model.provider)
-    if defaults is None:
+    """Create a :class:`Client` from the model's connection info.
+
+    Uses ``model.client`` if set, otherwise builds one from
+    ``model.base_url`` and the env var named by ``model.api_key_env``.
+    """
+    if model.client is not None:
+        return model.client
+
+    if model.base_url is None:
         raise ValueError(
-            f"No default client config for provider {model.provider!r}. "
-            f"Pass an explicit client= argument."
+            f"Model {model.id!r} (provider={model.provider!r}) has no "
+            f"base_url and no explicit client. Pass a client= to the "
+            f"provider factory or set base_url."
         )
-    base_url, env_var = defaults
-    return Client(base_url=base_url, api_key=os.environ.get(env_var))
+
+    api_key: str | None = None
+    if model.api_key_env:
+        api_key = os.environ.get(model.api_key_env)
+
+    return Client(base_url=model.base_url, api_key=api_key)

@@ -10,7 +10,7 @@ from typing import Any
 
 import ai
 
-MODEL = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
+MODEL = ai.ai_gateway("anthropic/claude-sonnet-4")
 
 
 @ai.tool
@@ -42,7 +42,9 @@ async def graph(context: ai.Context) -> AsyncGenerator[ai.Message]:
         if not tool_calls:
             return
 
-        results = await asyncio.gather(*(_execute_with_approval(tc) for tc in tool_calls))
+        results = await asyncio.gather(
+            *(_execute_with_approval(tc) for tc in tool_calls)
+        )
         yield ai.tool_message(*results)
 
 

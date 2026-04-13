@@ -31,7 +31,7 @@ async def delete_file(path: str) -> str:
 
 
 async def main() -> None:
-    model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
+    model = ai.ai_gateway("anthropic/claude-sonnet-4")
 
     my_agent = ai.agent(tools=[delete_file])
 

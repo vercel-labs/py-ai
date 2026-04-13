@@ -5,8 +5,6 @@ import os
 
 import ai
 
-model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
-
 # Explicit client — useful for custom auth, proxies, or self-hosted gateways.
 client = ai.Client(
     base_url="https://ai-gateway.vercel.sh/v3/ai",
@@ -14,12 +12,14 @@ client = ai.Client(
     headers={"X-Custom-Header": "example"},
 )
 
+model = ai.ai_gateway("anthropic/claude-sonnet-4", client=client)
+
 messages = [ai.user_message("Hello!")]
 
 
 async def main() -> None:
     try:
-        async for msg in await ai.models.stream(model, messages, client=client):
+        async for msg in await ai.models.stream(model, messages):
             if msg.text_delta:
                 print(msg.text_delta, end="", flush=True)
         print()

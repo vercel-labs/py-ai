@@ -11,10 +11,13 @@ from ai.types import builders
 from ai.types import messages as messages_
 
 # A fixed Model used in tests — adapter="mock" dispatches to the mock adapter.
-MOCK_MODEL = models.Model(id="mock-model", adapter="mock", provider="mock")
-
-# Register a dummy provider so _auto_client() doesn't error for provider="mock".
-models._PROVIDER_DEFAULTS["mock"] = ("http://mock.test", "MOCK_API_KEY")
+MOCK_MODEL = models.Model(
+    id="mock-model",
+    adapter="mock",
+    provider="mock",
+    base_url="http://mock.test",
+    api_key_env="MOCK_API_KEY",
+)
 
 
 class MockAdapter:

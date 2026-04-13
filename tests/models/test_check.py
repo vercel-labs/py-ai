@@ -8,6 +8,7 @@ unique two-endpoint routing that needs dedicated tests.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from typing import Any
 
@@ -25,12 +26,23 @@ from ai.models.openai import check as openai_check
 # Fixtures
 # ---------------------------------------------------------------------------
 
-_OPENAI_MODEL = model_.Model(id="gpt-5.4", adapter="openai", provider="openai")
+_OPENAI_MODEL = model_.Model(
+    id="gpt-5.4",
+    adapter="openai",
+    provider="openai",
+    base_url="https://api.openai.com/v1",
+)
 _ANTHROPIC_MODEL = model_.Model(
-    id="claude-opus-4-6", adapter="anthropic", provider="anthropic"
+    id="claude-opus-4-6",
+    adapter="anthropic",
+    provider="anthropic",
+    base_url="https://api.anthropic.com/v1",
 )
 _GATEWAY_MODEL = model_.Model(
-    id="anthropic/claude-opus-4-6", adapter="ai-gateway-v3", provider="ai-gateway"
+    id="anthropic/claude-opus-4-6",
+    adapter="ai-gateway-v3",
+    provider="ai-gateway",
+    base_url="https://ai-gateway.vercel.sh/v3/ai",
 )
 _UNKNOWN_MODEL = model_.Model(id="x", adapter="x", provider="unknown-provider")
 
@@ -155,15 +167,16 @@ class TestCheckConnection:
     async def test_gateway_dispatches(self) -> None:
         config = {"models": [{"id": "anthropic/claude-opus-4-6"}]}
         c = _gateway_client(config_body=config)
-        assert await check_connection(_GATEWAY_MODEL, client=c) is True
+        m = dataclasses.replace(_GATEWAY_MODEL, client=c)
+        assert await check_connection(m) is True
 
     async def test_unknown_provider_raises(self) -> None:
         c = _client_with_mock(200)
+        m = dataclasses.replace(_UNKNOWN_MODEL, client=c)
         with pytest.raises(KeyError, match="unknown-provider"):
-            await check_connection(_UNKNOWN_MODEL, client=c)
+            await check_connection(m)
 
     async def test_dispatch_false_propagates(self) -> None:
-        assert (
-            await check_connection(_OPENAI_MODEL, client=_client_with_mock(401))
-            is False
-        )
+        c = _client_with_mock(401)
+        m = dataclasses.replace(_OPENAI_MODEL, client=c)
+        assert await check_connection(m) is False

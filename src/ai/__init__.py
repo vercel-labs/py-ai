@@ -20,12 +20,13 @@ from .models import (
     Client,
     ImageParams,
     Model,
-    ModelCost,
     StreamResult,
     VideoParams,
+    ai_gateway,
+    anthropic,
     check_connection,
     generate,
-    model,
+    openai,
     stream,
 )
 
@@ -83,17 +84,19 @@ __all__ = [
     "thinking",
     # Models (from models/)
     "Model",
-    "ModelCost",
     "ImageParams",
     "VideoParams",
     "Client",
     "StreamResult",
     "StreamResultLike",
     "check_connection",
-    "model",
-    "models",
     "stream",
     "generate",
+    "models",
+    # Provider factories
+    "openai",
+    "anthropic",
+    "ai_gateway",
     # Agents — primary API
     "Agent",
     "agent",

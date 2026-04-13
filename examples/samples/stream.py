@@ -4,7 +4,7 @@ import asyncio
 
 import ai
 
-model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
+model = ai.ai_gateway("anthropic/claude-sonnet-4")
 
 messages = [
     ai.system_message("Be concise."),

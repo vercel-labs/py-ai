@@ -41,7 +41,7 @@ async def test_stream_basic() -> None:
 
 
 async def test_stream_with_explicit_client() -> None:
-    """ai.models.stream(client=...) forwards the provided client to the adapter."""
+    """Model with explicit client= forwards it to the adapter."""
     received_clients: list[models.Client] = []
 
     async def _spy_stream(
@@ -63,7 +63,10 @@ async def test_stream_with_explicit_client() -> None:
     models.register_stream("mock", _spy_stream)
 
     explicit = models.Client(base_url="https://custom.test", api_key="sk-custom")
-    s = await models.stream(MOCK_MODEL, [ai.user_message("Hi")], client=explicit)
+    explicit_model = models.Model(
+        id="mock-model", adapter="mock", provider="mock", client=explicit
+    )
+    s = await models.stream(explicit_model, [ai.user_message("Hi")])
     async for _ in s:
         pass
 
@@ -121,7 +124,8 @@ GENERATE_MODEL = models.Model(
     id="gen-model",
     adapter="mock-gen",
     provider="mock",
-    capabilities=("image",),
+    base_url="http://mock.test",
+    api_key_env="MOCK_API_KEY",
 )
 
 

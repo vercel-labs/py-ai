@@ -57,7 +57,7 @@ class GenerateFn(Protocol):
         client: Client,
         model: Model,
         messages: list[messages_.Message],
-        params: Any = None,
+        params: Any,
     ) -> messages_.Message: ...
 
 

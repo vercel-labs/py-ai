@@ -3,36 +3,37 @@
 Usage::
 
     import ai
-    from ai.types import Message, TextPart
+    from ai.models import openai, anthropic, ai_gateway
 
-    # look up a model from the catalog
-    opus = ai.model("ai-gateway", "anthropic/claude-opus-4-6")
-
-    msgs = [Message(role="user", parts=[TextPart(text="hello")])]
+    model = openai("gpt-5.4")
+    model = anthropic("claude-sonnet-4-6")
+    model = ai_gateway("anthropic/claude-sonnet-4")
 
     # stream — auto-creates client from env vars
-    s = await ai.stream(opus, msgs)
+    msgs = [ai.user_message("hello")]
+    s = await ai.stream(model, msgs)
     async for msg in s:
         print(msg.text_delta, end="")
 
-    # explicit client
-    client = ai.Client(
-        base_url="https://custom.example.com/v3/ai", api_key="sk-...",
-    )
-    s = await ai.stream(opus, msgs, client=client)
-    async for msg in s:
-        ...
+    # explicit client for custom auth
+    client = ai.Client(base_url="https://custom.example.com/v1", api_key="sk-...")
+    model = openai("gpt-5.4", client=client)
+    s = await ai.stream(model, msgs)
+
+    # list available models
+    ids = await openai.list()
 """
 
 from ..types.stream import StreamResultLike
+from .ai_gateway import ai_gateway
+from .anthropic import anthropic
 from .core.adapters import register_check, register_generate, register_stream
 from .core.api import check_connection, generate, stream
-from .core.catalog import get_models, get_providers, register_catalog
-from .core.catalog import model as model
-from .core.client import _PROVIDER_DEFAULTS, Client
-from .core.model import Model, ModelCost
+from .core.client import Client
+from .core.model import Model
 from .core.proto import CheckConnFn, GenerateFn, StreamFn
 from .core.types import GenerateParams, ImageParams, StreamResult, VideoParams
+from .openai import openai
 
 __all__ = [
     # Core types
@@ -42,16 +43,14 @@ __all__ = [
     "GenerateParams",
     "ImageParams",
     "Model",
-    "ModelCost",
     "StreamFn",
     "StreamResult",
     "StreamResultLike",
     "VideoParams",
-    # Catalog
-    "get_models",
-    "get_providers",
-    "model",
-    "register_catalog",
+    # Provider factories
+    "ai_gateway",
+    "anthropic",
+    "openai",
     # Adapter / check registration
     "register_check",
     "register_generate",
@@ -60,6 +59,4 @@ __all__ = [
     "check_connection",
     "generate",
     "stream",
-    # Internal (used by tests)
-    "_PROVIDER_DEFAULTS",
 ]

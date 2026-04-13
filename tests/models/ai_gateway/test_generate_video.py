@@ -43,7 +43,6 @@ _VIDEO_MODEL = model_.Model(
     id="google/veo-3.0-generate-001",
     adapter="ai-gateway-v3",
     provider="ai-gateway",
-    capabilities=("video",),
 )
 
 

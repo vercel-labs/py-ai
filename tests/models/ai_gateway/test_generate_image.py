@@ -40,7 +40,6 @@ _IMAGE_MODEL = model_.Model(
     id="google/imagen-4.0-generate-001",
     adapter="ai-gateway-v3",
     provider="ai-gateway",
-    capabilities=("image",),
 )
 
 
@@ -60,7 +59,9 @@ class TestGenerate:
             )
 
         client = mock_client(httpx.MockTransport(handler))
-        msg = await generate(client, _IMAGE_MODEL, [user_msg("A sunset over Tokyo")])
+        msg = await generate(
+            client, _IMAGE_MODEL, [user_msg("A sunset over Tokyo")], ImageParams()
+        )
 
         assert msg.role == "assistant"
         assert len(msg.images) == 1
@@ -104,7 +105,7 @@ class TestGenerate:
             )
 
         client = mock_client(httpx.MockTransport(handler))
-        msg = await generate(client, _IMAGE_MODEL, [user_msg("a dog")])
+        msg = await generate(client, _IMAGE_MODEL, [user_msg("a dog")], ImageParams())
 
         assert msg.usage is not None
         assert msg.usage.input_tokens == 50
@@ -128,10 +129,9 @@ class TestRequest:
             id="openai/gpt-image-1",
             adapter="ai-gateway-v3",
             provider="ai-gateway",
-            capabilities=("image",),
         )
         client = mock_client(httpx.MockTransport(handler), api_key="sk-test")
-        await generate(client, model, [user_msg("Hi")])
+        await generate(client, model, [user_msg("Hi")], ImageParams())
 
         assert captured["authorization"] == "Bearer sk-test"
         assert captured["ai-image-model-specification-version"] == "3"
@@ -184,7 +184,7 @@ class TestRequest:
             return httpx.Response(200, json={"images": [_PNG_B64]})
 
         client = mock_client(httpx.MockTransport(handler))
-        await generate(client, _IMAGE_MODEL, [user_msg("test")])
+        await generate(client, _IMAGE_MODEL, [user_msg("test")], ImageParams())
 
         assert captured_url[0] == "https://gw.test/v3/ai/image-model"
 
@@ -212,6 +212,7 @@ class TestErrors:
                 mock_client(httpx.MockTransport(handler)),
                 _IMAGE_MODEL,
                 [user_msg("test")],
+                ImageParams(),
             )
 
     async def test_429_rate_limit_error(self) -> None:
@@ -231,6 +232,7 @@ class TestErrors:
                 mock_client(httpx.MockTransport(handler)),
                 _IMAGE_MODEL,
                 [user_msg("test")],
+                ImageParams(),
             )
 
     async def test_empty_images_returns_empty_message(self) -> None:
@@ -243,5 +245,6 @@ class TestErrors:
             mock_client(httpx.MockTransport(handler)),
             _IMAGE_MODEL,
             [user_msg("test")],
+            ImageParams(),
         )
         assert len(msg.images) == 0
