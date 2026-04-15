@@ -1,123 +1,13 @@
-"""Middleware: composable wrappers around all execution surfaces.
-
-Middleware is run-scoped — pass it to :meth:`Agent.run`::
-
-    agent.run(model, messages, middleware=[LoggingMiddleware()])
-
-Middleware wraps agent runs, model calls, generate calls, tool calls, and
-hook calls.  Subclass :class:`Middleware` and override the methods you care
-about — unimplemented methods pass through to the next middleware (or the
-real implementation).
-
-Ordering: first in the list = outermost.  ``[A(), B()]`` means A wraps B
-wraps the real call.  A sees the call first and the result last.
-"""
-
 from __future__ import annotations
 
 import contextvars
-import dataclasses
-from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
-from typing import TYPE_CHECKING, Any
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from typing import TYPE_CHECKING
 
 import pydantic
 
-from .types import messages as messages_
-from .types import tools as tools_
-from .types.stream import StreamResultLike
-
-# ---------------------------------------------------------------------------
-# Call context objects — frozen dataclasses with isolated mutable fields.
-#
-# Mutable container fields (``list``, ``dict``) are shallow-copied at
-# construction via ``__post_init__`` so that middleware sees its own copy
-# and cannot accidentally mutate the caller's data.  To modify fields,
-# use ``dataclasses.replace(call, messages=new_msgs)`` before passing
-# to ``next``.
-# ---------------------------------------------------------------------------
-
-if TYPE_CHECKING:
-    from .agents.agent import Tool
-    from .models.core.model import Model
-
-
-@dataclasses.dataclass(frozen=True)
-class ModelContext:
-    """Context for a model streaming call."""
-
-    model: Model
-    messages: list[messages_.Message]
-    tools: Sequence[tools_.ToolLike] | None
-    output_type: type[pydantic.BaseModel] | None
-    kwargs: dict[str, Any]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "messages", list(self.messages))
-        if self.tools is not None:
-            object.__setattr__(self, "tools", list(self.tools))
-        object.__setattr__(self, "kwargs", dict(self.kwargs))
-
-
-@dataclasses.dataclass(frozen=True)
-class GenerateContext:
-    """Context for a model generate call (images, video, etc.)."""
-
-    model: Model
-    messages: list[messages_.Message]
-    params: Any
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "messages", list(self.messages))
-
-
-@dataclasses.dataclass(frozen=True)
-class ToolContext:
-    """Context for a tool execution."""
-
-    tool_call_id: str
-    tool_name: str
-    kwargs: dict[str, Any]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "kwargs", dict(self.kwargs))
-
-
-@dataclasses.dataclass(frozen=True)
-class HookContext:
-    """Context for a hook suspension point."""
-
-    label: str
-    payload: type[pydantic.BaseModel]
-    metadata: dict[str, Any]
-    interrupt_loop: bool
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "metadata", dict(self.metadata))
-
-
-@dataclasses.dataclass(frozen=True)
-class AgentRunContext:
-    """Context for an agent run."""
-
-    model: Model
-    messages: list[messages_.Message]
-    tools: list[Tool[..., Any]]
-    label: str | None
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "messages", list(self.messages))
-        object.__setattr__(self, "tools", list(self.tools))
-
-
-# ---------------------------------------------------------------------------
-# Middleware base class — override the methods you care about.
-# ---------------------------------------------------------------------------
-
-# Message alias for brevity in signatures.
-_Message = messages_.Message
-
-# Agent run next-function type: call -> async generator of messages.
-_AgentRunNext = Callable[[AgentRunContext], AsyncGenerator[_Message]]
+from . import context
+from ai import types
 
 
 class Middleware:
@@ -128,9 +18,9 @@ class Middleware:
 
     async def wrap_agent_run(
         self,
-        call: AgentRunContext,
-        next: _AgentRunNext,
-    ) -> AsyncGenerator[_Message]:
+        args: context.AgentRunContext,
+        wrapped: Callable[[context.AgentRunContext], AsyncGenerator[types.Message]],
+    ) -> AsyncGenerator[types.Message]:
         """Wrap an agent run.
 
         ``next(call)`` returns an async generator of ``Message`` objects.
@@ -143,14 +33,16 @@ class Middleware:
                     yield msg
                 span.end()
         """
-        async for msg in next(call):
+        async for msg in wrapped(args):
             yield msg
 
     async def wrap_model(
         self,
-        call: ModelContext,
-        next: Callable[[ModelContext], Awaitable[StreamResultLike]],
-    ) -> StreamResultLike:
+        args: context.ModelContext,
+        wrapped: Callable[
+            [context.ModelContext], Awaitable[types.stream.StreamResultLike]
+        ],
+    ) -> types.stream.StreamResultLike:
         """Wrap a model streaming call.
 
         ``next(call)`` returns a :class:`~ai.types.StreamResultLike` that
@@ -168,38 +60,38 @@ class Middleware:
                 from ai.models import StreamResult
                 return StreamResult.from_generator(_add_suffix())
         """
-        return await next(call)
+        return await wrapped(args)
 
     async def wrap_generate(
         self,
-        call: GenerateContext,
-        next: Callable[[GenerateContext], Awaitable[_Message]],
-    ) -> _Message:
+        args: context.GenerateContext,
+        wrapped: Callable[[context.GenerateContext], Awaitable[types.Message]],
+    ) -> types.Message:
         """Wrap a model generate call (images, video, etc.)."""
-        return await next(call)
+        return await wrapped(args)
 
     async def wrap_tool(
         self,
-        call: ToolContext,
-        next: Callable[[ToolContext], Awaitable[_Message]],
-    ) -> _Message:
+        args: context.ToolContext,
+        wrapped: Callable[[context.ToolContext], Awaitable[types.Message]],
+    ) -> types.Message:
         """Wrap a tool execution.
 
         ``next(call)`` returns the tool-result ``Message``.
         """
-        return await next(call)
+        return await wrapped(args)
 
     async def wrap_hook(
         self,
-        call: HookContext,
-        next: Callable[[HookContext], Awaitable[pydantic.BaseModel]],
+        args: context.HookContext,
+        wrapped: Callable[[context.HookContext], Awaitable[pydantic.BaseModel]],
     ) -> pydantic.BaseModel:
         """Wrap a hook suspension point.
 
         ``next(call)`` blocks until the hook is resolved and returns the
         validated payload instance.
         """
-        return await next(call)
+        return await wrapped(args)
 
 
 # ---------------------------------------------------------------------------
