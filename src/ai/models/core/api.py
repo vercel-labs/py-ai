@@ -11,6 +11,7 @@ from typing import Any
 import pydantic
 
 from ... import middleware as middleware_
+from ...types import integrity as integrity_
 from ...types import messages as messages_
 from ...types import stream as stream_
 from ...types import tools as tools_
@@ -37,6 +38,8 @@ async def stream(
     The client is resolved from the model: ``model.client`` if set,
     otherwise auto-created from ``model.base_url`` / ``model.api_key_env``.
     """
+    messages = integrity_.prepare_messages(messages)
+
     call = middleware_.ModelContext(
         model=model,
         messages=messages,
@@ -79,6 +82,8 @@ async def generate(
     * :class:`ImageParams` — image generation (``/image-model``).
     * :class:`VideoParams` — video generation (``/video-model``).
     """
+    messages = integrity_.prepare_messages(messages)
+
     call = middleware_.GenerateContext(
         model=model,
         messages=messages,
