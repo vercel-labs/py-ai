@@ -251,4 +251,11 @@ def prepare_messages(
     if fatal_issues or (mode == "strict" and issues):
         raise IntegrityError(issues)
 
+    if issues:
+        logger.warning(
+            "Auto-fixed %d message issue(s): %s",
+            len(issues),
+            ", ".join(issues),
+        )
+
     return result

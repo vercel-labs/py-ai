@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from collections.abc import AsyncGenerator, Sequence
+from typing import Any, Literal
+from unittest.mock import patch
 
+import pydantic
 import pytest
 
+import ai
+from ai import models
 from ai.types import builders, messages
 from ai.types.integrity import IntegrityError, prepare_messages
+
+from ..conftest import MOCK_MODEL, mock_generate, mock_llm, text_msg
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -459,3 +466,108 @@ def test_does_not_mutate_input() -> None:
     original_len = len(original)
     _ = prepare_messages(original)
     assert len(original) == original_len
+
+
+# ---------------------------------------------------------------------------
+# Wiring: stream() and generate() run prepare_messages on input
+# ---------------------------------------------------------------------------
+
+
+async def test_stream_calls_prepare_messages() -> None:
+    """stream() should invoke prepare_messages before hitting the adapter."""
+    mock_llm([[text_msg("ok")]])
+    msgs = [ai.user_message("hi")]
+
+    with patch(
+        "ai.models.core.api.integrity_.prepare_messages", wraps=lambda m: m
+    ) as spy:
+        s = await models.stream(MOCK_MODEL, msgs)
+        async for _ in s:
+            pass
+        spy.assert_called_once_with(msgs)
+
+
+async def test_stream_sanitizes_signal_messages() -> None:
+    """Signal messages are stripped before reaching the adapter."""
+    received: list[list[messages.Message]] = []
+    mock = mock_llm([[text_msg("ok")]])
+
+    # Wrap the mock adapter to capture messages it receives
+    original_adapter = mock.stream
+
+    async def _spy_stream(
+        client: models.Client,
+        model: models.Model,
+        messages: list[messages.Message],
+        *,
+        tools: Sequence[ai.ToolLike] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
+        **kwargs: Any,
+    ) -> AsyncGenerator[messages.Message]:
+        received.append(list(messages))
+        async for m in original_adapter(
+            client, model, messages, tools=tools, output_type=output_type, **kwargs
+        ):
+            yield m
+
+    models.register_stream("mock", _spy_stream)
+
+    msgs = [
+        ai.user_message("hi"),
+        messages.Message(role="signal", parts=[messages.TextPart(text="internal")]),
+        ai.assistant_message("hello"),
+    ]
+    s = await models.stream(MOCK_MODEL, msgs)
+    async for _ in s:
+        pass
+
+    # The adapter should have received only 2 messages (signal stripped)
+    assert len(received) == 1
+    assert len(received[0]) == 2
+    assert all(m.role != "signal" for m in received[0])
+
+
+async def test_generate_calls_prepare_messages() -> None:
+    """generate() should invoke prepare_messages before hitting the adapter."""
+    sentinel = messages.Message(
+        role="assistant",
+        parts=[messages.FilePart(data=b"\x89PNG", media_type="image/png")],
+    )
+    mock_generate([sentinel])
+    msgs = [ai.user_message("A cat")]
+
+    with patch(
+        "ai.models.core.api.integrity_.prepare_messages", wraps=lambda m: m
+    ) as spy:
+        await models.generate(MOCK_MODEL, msgs, models.ImageParams(n=1))
+        spy.assert_called_once_with(msgs)
+
+
+async def test_generate_sanitizes_signal_messages() -> None:
+    """Signal messages are stripped before reaching generate adapter."""
+    received: list[list[messages.Message]] = []
+    sentinel = messages.Message(
+        role="assistant",
+        parts=[messages.FilePart(data=b"\x89PNG", media_type="image/png")],
+    )
+
+    async def _spy_gen(
+        client: models.Client,
+        model: models.Model,
+        messages: list[messages.Message],
+        params: Any,
+    ) -> messages.Message:
+        received.append(list(messages))
+        return sentinel
+
+    models.register_generate("mock", _spy_gen)
+
+    msgs = [
+        ai.user_message("A cat"),
+        messages.Message(role="signal", parts=[messages.TextPart(text="internal")]),
+    ]
+    await models.generate(MOCK_MODEL, msgs, models.ImageParams(n=1))
+
+    assert len(received) == 1
+    assert len(received[0]) == 1
+    assert received[0][0].role == "user"

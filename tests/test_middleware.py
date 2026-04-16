@@ -7,6 +7,7 @@ from collections.abc import AsyncGenerator, Sequence
 from typing import Any
 
 import pydantic
+import pytest
 
 import ai
 from ai import middleware, models
@@ -335,11 +336,41 @@ async def test_wrap_generate_is_called() -> None:
 
 
 async def test_wrap_tool_context_fields_flow_to_result() -> None:
-    """ToolContext.tool_call_id and tool_name are used in the result message."""
+    """ToolContext.tool_name is used in the result message."""
 
     class Rewriter(ai.Middleware):
         async def wrap_tool(self, call: middleware.ToolContext, next: Any) -> Any:
-            # Rewrite the tool_call_id via dataclasses.replace.
+            # Rewrite the tool_name via dataclasses.replace.
+            modified = dataclasses.replace(call, tool_name="rewritten-name")
+            return await next(modified)
+
+    @ai.tool
+    async def echo(x: int) -> int:
+        """Echo a number."""
+        return x
+
+    my_agent = ai.agent(tools=[echo])
+    call1 = [tool_call_msg(tc_id="tc-1", name="echo", args='{"x": 42}')]
+    call2 = [text_msg("done")]
+    mock_llm([call1, call2])
+
+    tool_result_msgs: list[ai.Message] = []
+    async for m in my_agent.run(
+        MOCK_MODEL, [ai.user_message("go")], middleware=[Rewriter()]
+    ):
+        if m.role == "tool" and m.tool_results:
+            tool_result_msgs.append(m)
+
+    assert len(tool_result_msgs) >= 1
+    # The result message should use the rewritten name, not the original.
+    assert tool_result_msgs[0].tool_results[0].tool_name == "rewritten-name"
+
+
+async def test_wrap_tool_rewriting_tool_call_id_breaks_history() -> None:
+    """tool_call_id is a correlation key and must stay stable."""
+
+    class Rewriter(ai.Middleware):
+        async def wrap_tool(self, call: middleware.ToolContext, next: Any) -> Any:
             modified = dataclasses.replace(call, tool_call_id="rewritten-id")
             return await next(modified)
 
@@ -353,16 +384,14 @@ async def test_wrap_tool_context_fields_flow_to_result() -> None:
     call2 = [text_msg("done")]
     mock_llm([call1, call2])
 
-    tool_result_msgs: list[ai.Message] = []
-    async for m in my_agent.run(
-        MOCK_MODEL, [ai.user_message("go")], middleware=[Rewriter()]
-    ):
-        if m.role == "tool" and m.tool_results:
-            tool_result_msgs.append(m)
+    with pytest.raises(ExceptionGroup) as exc_info:
+        async for _m in my_agent.run(
+            MOCK_MODEL, [ai.user_message("go")], middleware=[Rewriter()]
+        ):
+            pass
 
-    assert len(tool_result_msgs) >= 1
-    # The result message should use the rewritten ID, not the original.
-    assert tool_result_msgs[0].tool_results[0].tool_call_id == "rewritten-id"
+    assert len(exc_info.value.exceptions) == 1
+    assert "orphaned-tool-result" in str(exc_info.value.exceptions[0])
 
 
 # ── StreamResult wrapping ───────────────────────────────────────
