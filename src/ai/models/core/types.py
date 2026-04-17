@@ -69,9 +69,12 @@ class StreamResult:
     Properties like ``.text`` and ``.tool_calls`` delegate to the final
     ``Message`` snapshot and are available after iteration completes.
 
-    When *run_id* is provided, every yielded message is stamped with it.
-    When *input_messages* is provided, they are re-emitted (with *run_id*)
-    before the model response stream.
+    One ``StreamResult`` represents one turn: a single LLM request and its
+    response.  When *turn_id* is provided, the model response is stamped
+    with it.  When *input_messages* is provided, they are re-emitted ahead
+    of the response; inputs that already carry a ``turn_id`` (from earlier
+    turns) are preserved as-is, only inputs with ``turn_id=None`` receive
+    the current *turn_id*.
 
     Satisfies :class:`~ai.types.StreamResultLike`.
     """
@@ -80,11 +83,11 @@ class StreamResult:
         self,
         gen: AsyncGenerator[messages_.Message],
         *,
-        run_id: str | None = None,
+        turn_id: str | None = None,
         input_messages: list[messages_.Message] | None = None,
     ) -> None:
         self._gen = gen
-        self._run_id = run_id
+        self._turn_id = turn_id
         self._input_messages = input_messages or []
         self._final: messages_.Message | None = None
 
@@ -110,17 +113,24 @@ class StreamResult:
         return self._iterate()
 
     async def _iterate(self) -> AsyncGenerator[messages_.Message]:
-        # Re-emit input messages with run_id stamped.
+        # Re-emit input messages; stamp only the ones without a turn_id.
+        # Prior turns keep their existing ids.
         for msg in self._input_messages:
-            stamped = msg.model_copy(update={"run_id": self._run_id})
-            yield stamped
+            if msg.turn_id is None and self._turn_id is not None:
+                msg = msg.model_copy(update={"turn_id": self._turn_id})
+            yield msg
 
-        # Stream model response with run_id stamped.
+        # Stream model response with turn_id stamped (when missing).
         async for msg in self._gen:
-            if self._run_id is not None:
-                msg = msg.model_copy(update={"run_id": self._run_id})
+            if msg.turn_id is None and self._turn_id is not None:
+                msg = msg.model_copy(update={"turn_id": self._turn_id})
             self._final = msg
             yield msg
+
+    @property
+    def turn_id(self) -> str | None:
+        """The turn id stamped on this stream's response (if any)."""
+        return self._turn_id
 
     @property
     def text(self) -> str:

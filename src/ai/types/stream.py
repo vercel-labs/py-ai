@@ -34,3 +34,6 @@ class StreamResultLike(Protocol):
 
     @property
     def output(self) -> Any: ...
+
+    @property
+    def turn_id(self) -> str | None: ...

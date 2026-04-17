@@ -316,7 +316,7 @@ class Message(pydantic.BaseModel):
     role: Literal["user", "assistant", "system", "tool", "internal"]
     parts: list[Part]
     id: str = pydantic.Field(default_factory=generate_id)
-    run_id: str | None = None
+    turn_id: str | None = None
     agent: str | None = None
     usage: Usage | None = None
     stream: MessageStreamState | None = pydantic.Field(default=None, exclude=True)

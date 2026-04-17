@@ -1,5 +1,4 @@
-from . import adapters, middleware, models
-from .adapters import ai_sdk_ui
+from . import middleware, models
 from .agents import (
     TOOL_APPROVAL_HOOK_TYPE,
     Agent,
@@ -127,6 +126,4 @@ __all__ = [
     "middleware",
     # Submodules
     "mcp",
-    "ai_sdk_ui",
-    "adapters",
 ]
