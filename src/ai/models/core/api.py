@@ -27,6 +27,7 @@ async def stream(
     *,
     tools: Sequence[tools_.ToolLike] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
+    run_id: str | None = None,
     **kwargs: Any,
 ) -> stream_.StreamResultLike:
     """Stream an LLM response.
@@ -35,10 +36,16 @@ async def stream(
     collects the final ``Message``.  After iteration, access ``.text``,
     ``.tool_calls``, ``.usage``, etc.
 
+    Every yielded message (re-emitted inputs + model response) carries
+    ``run_id``.  If *run_id* is not provided, one is generated.
+
     The client is resolved from the model: ``model.client`` if set,
     otherwise auto-created from ``model.base_url`` / ``model.api_key_env``.
     """
     messages = integrity_.prepare_messages(messages)
+
+    if run_id is None:
+        run_id = messages_.generate_id("run")
 
     call = middleware_.ModelContext(
         model=model,
@@ -47,6 +54,9 @@ async def stream(
         output_type=output_type,
         kwargs=kwargs,
     )
+
+    # Capture in closure for the inner function.
+    _run_id = run_id
 
     async def _real(call: middleware_.ModelContext) -> stream_.StreamResultLike:
         c = client_.auto_client(call.model)
@@ -59,7 +69,9 @@ async def stream(
                 tools=call.tools,
                 output_type=call.output_type,
                 **call.kwargs,
-            )
+            ),
+            run_id=_run_id,
+            input_messages=call.messages,
         )
 
     chain = middleware_._build_model_chain(_real)

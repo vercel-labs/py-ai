@@ -188,6 +188,7 @@ class Context(pydantic.BaseModel):
     model: models.Model
     messages: list[types.Message]
     tools: list[Tool[..., Any]]
+    run_id: str | None = None
 
     model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
 
@@ -206,7 +207,10 @@ class LoopFn(Protocol):
 async def _default_loop(context: Context) -> AsyncGenerator[types.Message]:
     while True:
         stream = await models.stream(
-            context.model, context.messages, tools=context.tools
+            context.model,
+            context.messages,
+            tools=context.tools,
+            run_id=context.run_id,
         )
         async for message in stream:
             yield message
@@ -220,7 +224,10 @@ async def _default_loop(context: Context) -> AsyncGenerator[types.Message]:
             tasks = [tg.create_task(tc()) for tc in tool_calls]
 
         # Yield one merged tool-result message — history auto-collects it.
-        yield builders.tool_message(*(t.result() for t in tasks))
+        tool_msg = builders.tool_message(*(t.result() for t in tasks))
+        if context.run_id is not None:
+            tool_msg = tool_msg.model_copy(update={"run_id": context.run_id})
+        yield tool_msg
 
 
 async def _collect_messages(
@@ -311,6 +318,8 @@ class Agent:
                 First in the list = outermost.  Middleware wraps model
                 calls, tool calls, hooks, and the run itself.
         """
+        run_id = types.generate_id("run")
+
         call = middleware_.AgentRunContext(
             model=model,
             messages=messages,
@@ -327,11 +336,17 @@ class Agent:
                 model=call.model,
                 messages=list(call.messages),
                 tools=call.tools,
+                run_id=run_id,
             )
             source = _collect_messages(loop_fn(context), context.messages)
             async for message in runtime.run(source):
+                updates: dict[str, Any] = {}
+                if message.run_id is None:
+                    updates["run_id"] = run_id
                 if call.label is not None:
-                    message = message.model_copy(update={"label": call.label})
+                    updates["agent"] = call.label
+                if updates:
+                    message = message.model_copy(update=updates)
                 yield message
 
         # Activate middleware for this run (and everything it calls).

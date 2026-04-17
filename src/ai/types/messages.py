@@ -13,19 +13,12 @@ def generate_id(prefix: str | None = None) -> str:
     return f"{prefix}_{raw}" if prefix else raw
 
 
-# Streaming state for parts
-PartState = Literal["streaming", "done"]
-
-
 class TextPart(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(frozen=True)
 
     id: str = pydantic.Field(default_factory=generate_id)
     text: str
     type: Literal["text"] = "text"
-    # Streaming state
-    state: PartState | None = None  # None = finalized/restored from storage
-    delta: str | None = None  # Current delta, None when not actively streaming
 
 
 class ToolCallPart(pydantic.BaseModel):
@@ -43,9 +36,6 @@ class ToolCallPart(pydantic.BaseModel):
     tool_name: str
     tool_args: str
     type: Literal["tool_call"] = "tool_call"
-    # Streaming state (for args streaming)
-    state: PartState | None = None
-    args_delta: str | None = None  # Delta for tool_args
 
 
 class ToolResultPart(pydantic.BaseModel):
@@ -74,9 +64,6 @@ class ReasoningPart(pydantic.BaseModel):
     # Anthropic's thinking blocks include a signature for cache/verification.
     # This must be preserved and sent back in multi-turn conversations.
     signature: str | None = None
-    # Streaming state
-    state: PartState | None = None
-    delta: str | None = None
 
 
 class HookPart(pydantic.BaseModel):
@@ -279,14 +266,60 @@ class ToolDelta(pydantic.BaseModel):
     args_delta: str
 
 
+# ---------------------------------------------------------------------------
+# Streaming sidecar — transient state excluded from persistence.
+# ---------------------------------------------------------------------------
+
+
+class PartOpened(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(frozen=True)
+
+    part_id: str
+    type: Literal["part_opened"] = "part_opened"
+
+
+class PartDelta(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(frozen=True)
+
+    part_id: str
+    chunk: str
+    type: Literal["part_delta"] = "part_delta"
+
+
+class PartClosed(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(frozen=True)
+
+    part_id: str
+    type: Literal["part_closed"] = "part_closed"
+
+
+StreamEvent = Annotated[
+    PartOpened | PartDelta | PartClosed,
+    pydantic.Field(discriminator="type"),
+]
+
+
+class MessageStreamState(pydantic.BaseModel):
+    """Transient streaming state attached to a Message during streaming.
+
+    ``events`` contains the events since the previous yield — never cumulative.
+    ``is_done`` is True once the stream has finished.
+    """
+
+    events: list[StreamEvent] = pydantic.Field(default_factory=list)
+    is_done: bool = False
+
+
 class Message(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(frozen=True)
 
-    role: Literal["user", "assistant", "system", "tool", "signal"]
+    role: Literal["user", "assistant", "system", "tool", "internal"]
     parts: list[Part]
     id: str = pydantic.Field(default_factory=generate_id)
-    label: str | None = None
+    run_id: str | None = None
+    agent: str | None = None
     usage: Usage | None = None
+    stream: MessageStreamState | None = pydantic.Field(default=None, exclude=True)
 
     @overload
     def replace(self, new: Part, /) -> Message: ...
@@ -337,44 +370,58 @@ class Message(pydantic.BaseModel):
 
     @property
     def is_done(self) -> bool:
-        """Message is done when all parts are done (or have no streaming state)."""
-        for part in self.parts:
-            if (
-                isinstance(part, (TextPart, ReasoningPart, ToolCallPart))
-                and part.state == "streaming"
-            ):
-                return False
-        return True
+        """No sidecar (persisted/restored) means done. Otherwise ``stream.is_done``."""
+        if self.stream is None:
+            return True
+        return self.stream.is_done
+
+    def _parts_by_id(self) -> dict[str, Part]:
+        return {p.id: p for p in self.parts}
 
     @property
     def text_delta(self) -> str:
-        """Get current text delta from parts."""
-        for part in self.parts:
-            if isinstance(part, TextPart) and part.delta:
-                return part.delta
+        """Derive from ``stream.events`` — first PartDelta whose part is TextPart."""
+        if self.stream is None:
+            return ""
+        parts_map = self._parts_by_id()
+        for ev in self.stream.events:
+            if isinstance(ev, PartDelta):
+                part = parts_map.get(ev.part_id)
+                if isinstance(part, TextPart):
+                    return ev.chunk
         return ""
 
     @property
     def reasoning_delta(self) -> str:
-        """Get current reasoning delta from parts."""
-        for part in self.parts:
-            if isinstance(part, ReasoningPart) and part.delta:
-                return part.delta
+        """First PartDelta whose part is a ReasoningPart."""
+        if self.stream is None:
+            return ""
+        parts_map = self._parts_by_id()
+        for ev in self.stream.events:
+            if isinstance(ev, PartDelta):
+                part = parts_map.get(ev.part_id)
+                if isinstance(part, ReasoningPart):
+                    return ev.chunk
         return ""
 
     @property
     def tool_deltas(self) -> list[ToolDelta]:
-        """Get current tool deltas from parts."""
-        deltas = []
-        for part in self.parts:
-            if isinstance(part, ToolCallPart) and part.args_delta:
-                deltas.append(
-                    ToolDelta(
-                        tool_call_id=part.tool_call_id,
-                        tool_name=part.tool_name,
-                        args_delta=part.args_delta,
+        """Derive from ``stream.events`` — PartDeltas whose parts are ToolCallPart."""
+        if self.stream is None:
+            return []
+        parts_map = self._parts_by_id()
+        deltas: list[ToolDelta] = []
+        for ev in self.stream.events:
+            if isinstance(ev, PartDelta):
+                part = parts_map.get(ev.part_id)
+                if isinstance(part, ToolCallPart):
+                    deltas.append(
+                        ToolDelta(
+                            tool_call_id=part.tool_call_id,
+                            tool_name=part.tool_name,
+                            args_delta=ev.chunk,
+                        )
                     )
-                )
         return deltas
 
     @property

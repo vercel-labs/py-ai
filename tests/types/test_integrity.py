@@ -93,14 +93,14 @@ def test_idempotent() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Signal messages
+# Internal messages
 # ---------------------------------------------------------------------------
 
 
-def test_drops_signal_messages() -> None:
+def test_drops_internal_messages() -> None:
     msgs = [
         builders.user_message("hi"),
-        messages.Message(role="signal", parts=[messages.TextPart(text="internal")]),
+        messages.Message(role="internal", parts=[messages.TextPart(text="internal")]),
         builders.assistant_message("hello"),
     ]
     result = prepare_messages(msgs)
@@ -109,13 +109,13 @@ def test_drops_signal_messages() -> None:
     assert result[1].role == "assistant"
 
 
-def test_signal_strict_raises() -> None:
+def test_internal_strict_raises() -> None:
     msgs = [
-        messages.Message(role="signal", parts=[messages.TextPart(text="x")]),
+        messages.Message(role="internal", parts=[messages.TextPart(text="x")]),
     ]
     with pytest.raises(IntegrityError) as exc_info:
         prepare_messages(msgs, mode="strict")
-    assert "signal-message" in exc_info.value.issues
+    assert "internal-message" in exc_info.value.issues
 
 
 # ---------------------------------------------------------------------------
@@ -346,7 +346,7 @@ def test_complete_tool_flow_unchanged() -> None:
 
 def test_strict_collects_all_issues() -> None:
     msgs = [
-        messages.Message(role="signal", parts=[messages.TextPart(text="x")]),
+        messages.Message(role="internal", parts=[messages.TextPart(text="x")]),
         messages.Message(
             role="assistant",
             parts=[
@@ -358,13 +358,13 @@ def test_strict_collects_all_issues() -> None:
     with pytest.raises(IntegrityError) as exc_info:
         prepare_messages(msgs, mode="strict")
     issues = exc_info.value.issues
-    assert "signal-message" in issues
+    assert "internal-message" in issues
     assert "internal-part" in issues
 
 
 def test_strict_keeps_recoverable_issues_when_history_is_corrupt() -> None:
     msgs = [
-        messages.Message(role="signal", parts=[messages.TextPart(text="x")]),
+        messages.Message(role="internal", parts=[messages.TextPart(text="x")]),
         builders.user_message("go"),
         messages.Message(
             role="assistant",
@@ -380,7 +380,7 @@ def test_strict_keeps_recoverable_issues_when_history_is_corrupt() -> None:
     ]
     with pytest.raises(IntegrityError) as exc_info:
         prepare_messages(msgs, mode="strict")
-    assert "signal-message" in exc_info.value.issues
+    assert "internal-message" in exc_info.value.issues
     assert "duplicate-tool-call" in exc_info.value.issues
 
 
@@ -487,8 +487,8 @@ async def test_stream_calls_prepare_messages() -> None:
         spy.assert_called_once_with(msgs)
 
 
-async def test_stream_sanitizes_signal_messages() -> None:
-    """Signal messages are stripped before reaching the adapter."""
+async def test_stream_sanitizes_internal_messages() -> None:
+    """Internal messages are stripped before reaching the adapter."""
     received: list[list[messages.Message]] = []
     mock = mock_llm([[text_msg("ok")]])
 
@@ -514,17 +514,17 @@ async def test_stream_sanitizes_signal_messages() -> None:
 
     msgs = [
         ai.user_message("hi"),
-        messages.Message(role="signal", parts=[messages.TextPart(text="internal")]),
+        messages.Message(role="internal", parts=[messages.TextPart(text="internal")]),
         ai.assistant_message("hello"),
     ]
     s = await models.stream(MOCK_MODEL, msgs)
     async for _ in s:
         pass
 
-    # The adapter should have received only 2 messages (signal stripped)
+    # The adapter should have received only 2 messages (internal stripped)
     assert len(received) == 1
     assert len(received[0]) == 2
-    assert all(m.role != "signal" for m in received[0])
+    assert all(m.role != "internal" for m in received[0])
 
 
 async def test_generate_calls_prepare_messages() -> None:
@@ -543,8 +543,8 @@ async def test_generate_calls_prepare_messages() -> None:
         spy.assert_called_once_with(msgs)
 
 
-async def test_generate_sanitizes_signal_messages() -> None:
-    """Signal messages are stripped before reaching generate adapter."""
+async def test_generate_sanitizes_internal_messages() -> None:
+    """Internal messages are stripped before reaching generate adapter."""
     received: list[list[messages.Message]] = []
     sentinel = messages.Message(
         role="assistant",
@@ -564,7 +564,7 @@ async def test_generate_sanitizes_signal_messages() -> None:
 
     msgs = [
         ai.user_message("A cat"),
-        messages.Message(role="signal", parts=[messages.TextPart(text="internal")]),
+        messages.Message(role="internal", parts=[messages.TextPart(text="internal")]),
     ]
     await models.generate(MOCK_MODEL, msgs, models.ImageParams(n=1))
 

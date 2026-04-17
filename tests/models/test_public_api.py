@@ -57,7 +57,7 @@ async def test_stream_with_explicit_client() -> None:
         yield messages_.Message(
             id="m1",
             role="assistant",
-            parts=[messages_.TextPart(text="ok", state="done")],
+            parts=[messages_.TextPart(text="ok")],
         )
 
     models.register_stream("mock", _spy_stream)
@@ -89,7 +89,7 @@ async def test_stream_with_output_type() -> None:
         output_type: type[pydantic.BaseModel] | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[messages_.Message]:
-        text_part = messages_.TextPart(text=json_text, state="done")
+        text_part = messages_.TextPart(text=json_text)
         parts: list[messages_.Part] = [text_part]
         if output_type is not None:
             import json

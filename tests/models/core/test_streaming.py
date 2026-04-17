@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ai.models.core.helpers import streaming
 from ai.types import messages
+from ai.types.messages import PartClosed, PartDelta, PartOpened
 
 # -- Text streaming --------------------------------------------------------
 
@@ -14,27 +15,37 @@ def test_text_lifecycle() -> None:
     assert len(m.parts) == 1
     part = m.parts[0]
     assert isinstance(part, messages.TextPart)
-    assert part.state == "streaming"
     assert part.text == ""
+    assert m.stream is not None
+    assert any(isinstance(e, PartOpened) and e.part_id == "b1" for e in m.stream.events)
 
     m = h.handle_event(streaming.TextDelta(block_id="b1", delta="Hello"))
     part = m.parts[0]
     assert isinstance(part, messages.TextPart)
     assert part.text == "Hello"
-    assert part.delta == "Hello"
-    assert part.state == "streaming"
+    assert m.stream is not None
+    assert any(
+        isinstance(e, PartDelta) and e.part_id == "b1" and e.chunk == "Hello"
+        for e in m.stream.events
+    )
 
     m = h.handle_event(streaming.TextDelta(block_id="b1", delta=" world"))
     part = m.parts[0]
     assert isinstance(part, messages.TextPart)
     assert part.text == "Hello world"
-    assert part.delta == " world"
+    assert m.stream is not None
+    assert any(
+        isinstance(e, PartDelta) and e.part_id == "b1" and e.chunk == " world"
+        for e in m.stream.events
+    )
 
     m = h.handle_event(streaming.TextEnd(block_id="b1"))
     part = m.parts[0]
     assert isinstance(part, messages.TextPart)
-    assert part.state == "done"
-    assert part.delta is None
+    assert m.stream is not None
+    assert any(isinstance(e, PartClosed) and e.part_id == "b1" for e in m.stream.events)
+    # No delta events in this yield
+    assert not any(isinstance(e, PartDelta) for e in m.stream.events)
 
 
 # -- Reasoning streaming ---------------------------------------------------
@@ -47,13 +58,18 @@ def test_reasoning_lifecycle() -> None:
     part = m.parts[0]
     assert isinstance(part, messages.ReasoningPart)
     assert part.text == "thinking"
-    assert part.state == "streaming"
+    assert m.stream is not None
+    assert any(
+        isinstance(e, PartDelta) and e.part_id == "r1" and e.chunk == "thinking"
+        for e in m.stream.events
+    )
 
     m = h.handle_event(streaming.ReasoningEnd(block_id="r1", signature="sig123"))
     part = m.parts[0]
     assert isinstance(part, messages.ReasoningPart)
-    assert part.state == "done"
     assert part.signature == "sig123"
+    assert m.stream is not None
+    assert any(isinstance(e, PartClosed) and e.part_id == "r1" for e in m.stream.events)
 
 
 # -- Tool streaming --------------------------------------------------------
@@ -67,8 +83,11 @@ def test_tool_lifecycle() -> None:
     assert isinstance(part, messages.ToolCallPart)
     assert part.tool_name == "get_weather"
     assert part.tool_args == '{"ci'
-    assert part.state == "streaming"
-    assert part.args_delta == '{"ci'
+    assert m.stream is not None
+    assert any(
+        isinstance(e, PartDelta) and e.part_id == "tc1" and e.chunk == '{"ci'
+        for e in m.stream.events
+    )
 
     m = h.handle_event(
         streaming.ToolArgsDelta(tool_call_id="tc1", delta='ty":"London"}')
@@ -80,8 +99,12 @@ def test_tool_lifecycle() -> None:
     m = h.handle_event(streaming.ToolEnd(tool_call_id="tc1"))
     part = m.parts[0]
     assert isinstance(part, messages.ToolCallPart)
-    assert part.state == "done"
-    assert part.args_delta is None
+    assert m.stream is not None
+    assert any(
+        isinstance(e, PartClosed) and e.part_id == "tc1" for e in m.stream.events
+    )
+    # No delta events in this yield
+    assert not any(isinstance(e, PartDelta) for e in m.stream.events)
 
 
 # -- Multi-part messages ---------------------------------------------------
@@ -106,12 +129,10 @@ def test_reasoning_then_text_then_tool() -> None:
     assert isinstance(m.parts[0], messages.ReasoningPart)
     assert isinstance(m.parts[1], messages.TextPart)
     assert isinstance(m.parts[2], messages.ToolCallPart)
-    assert all(
-        p.state == "done"
-        for p in m.parts
-        if isinstance(
-            p, (messages.TextPart, messages.ToolCallPart, messages.ReasoningPart)
-        )
+    # The last event was ToolEnd(tc1), so only that PartClosed is in events
+    assert m.stream is not None
+    assert any(
+        isinstance(e, PartClosed) and e.part_id == "tc1" for e in m.stream.events
     )
 
 
@@ -134,12 +155,10 @@ def test_multiple_tool_calls() -> None:
     h.handle_event(streaming.ToolArgsDelta(tool_call_id="tc2", delta='{"dir":"."}'))
     h.handle_event(streaming.ToolEnd(tool_call_id="tc1"))
     m = h.handle_event(streaming.ToolEnd(tool_call_id="tc2"))
-    assert all(
-        p.state == "done"
-        for p in m.parts
-        if isinstance(
-            p, (messages.TextPart, messages.ToolCallPart, messages.ReasoningPart)
-        )
+    # Last event was ToolEnd(tc2), so its PartClosed is in events
+    assert m.stream is not None
+    assert any(
+        isinstance(e, PartClosed) and e.part_id == "tc2" for e in m.stream.events
     )
 
 
@@ -154,8 +173,9 @@ def test_message_done_finalizes_all() -> None:
     m = h.handle_event(streaming.MessageDone(finish_reason="end_turn"))
     part = m.parts[0]
     assert isinstance(part, messages.TextPart)
-    assert part.state == "done"
     assert m.is_done
+    assert m.stream is not None
+    assert m.stream.is_done
 
 
 def test_message_done_propagates_usage() -> None:
@@ -180,7 +200,7 @@ def test_message_done_propagates_usage() -> None:
 
 
 def test_deltas_only_on_active_blocks() -> None:
-    """Delta should be None on inactive blocks, present only on active."""
+    """Delta events should only reference the active block."""
     h = streaming.StreamHandler(message_id="m1")
     h.handle_event(streaming.TextStart(block_id="t1"))
     h.handle_event(streaming.TextDelta(block_id="t1", delta="first"))
@@ -190,8 +210,17 @@ def test_deltas_only_on_active_blocks() -> None:
     m = h.handle_event(streaming.TextDelta(block_id="t2", delta="second"))
 
     text_parts = [p for p in m.parts if isinstance(p, messages.TextPart)]
-    assert text_parts[0].delta is None  # t1 is done
-    assert text_parts[1].delta == "second"  # t2 is active
+    assert text_parts[0].text == "first"  # t1 snapshot
+    assert text_parts[1].text == "second"  # t2 snapshot
+    # Only t2 has a delta event in this yield
+    assert m.stream is not None
+    assert any(
+        isinstance(e, PartDelta) and e.part_id == "t2" and e.chunk == "second"
+        for e in m.stream.events
+    )
+    assert not any(
+        isinstance(e, PartDelta) and e.part_id == "t1" for e in m.stream.events
+    )
 
 
 # -- File event (inline images from LLMs like Gemini/GPT-5) ---------------

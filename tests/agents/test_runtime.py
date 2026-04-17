@@ -72,13 +72,11 @@ async def test_agent_parallel_tools() -> None:
                 tool_call_id="tc-1",
                 tool_name="double",
                 tool_args='{"x": 3}',
-                state="done",
             ),
             messages.ToolCallPart(
                 tool_call_id="tc-2",
                 tool_name="double",
                 tool_args='{"x": 7}',
-                state="done",
             ),
         ],
     )

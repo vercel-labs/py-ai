@@ -69,11 +69,23 @@ class StreamResult:
     Properties like ``.text`` and ``.tool_calls`` delegate to the final
     ``Message`` snapshot and are available after iteration completes.
 
+    When *run_id* is provided, every yielded message is stamped with it.
+    When *input_messages* is provided, they are re-emitted (with *run_id*)
+    before the model response stream.
+
     Satisfies :class:`~ai.types.StreamResultLike`.
     """
 
-    def __init__(self, gen: AsyncGenerator[messages_.Message]) -> None:
+    def __init__(
+        self,
+        gen: AsyncGenerator[messages_.Message],
+        *,
+        run_id: str | None = None,
+        input_messages: list[messages_.Message] | None = None,
+    ) -> None:
         self._gen = gen
+        self._run_id = run_id
+        self._input_messages = input_messages or []
         self._final: messages_.Message | None = None
 
     @classmethod
@@ -98,7 +110,15 @@ class StreamResult:
         return self._iterate()
 
     async def _iterate(self) -> AsyncGenerator[messages_.Message]:
+        # Re-emit input messages with run_id stamped.
+        for msg in self._input_messages:
+            stamped = msg.model_copy(update={"run_id": self._run_id})
+            yield stamped
+
+        # Stream model response with run_id stamped.
         async for msg in self._gen:
+            if self._run_id is not None:
+                msg = msg.model_copy(update={"run_id": self._run_id})
             self._final = msg
             yield msg
 

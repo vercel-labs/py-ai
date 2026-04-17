@@ -24,12 +24,12 @@ async def progress_tool(query: str) -> AsyncGenerator[ai.Message]:
     """Tool that streams progress, then returns a final answer."""
     yield ai.Message(
         role="assistant",
-        parts=[messages_.TextPart(text="Working...", state="done")],
-        label="progress",
+        parts=[messages_.TextPart(text="Working...")],
+        agent="progress",
     )
     yield ai.Message(
         role="assistant",
-        parts=[messages_.TextPart(text=f"Answer for {query}", state="done")],
+        parts=[messages_.TextPart(text=f"Answer for {query}")],
     )
 
 
@@ -51,7 +51,7 @@ async def test_generator_tool_streams_and_returns_result() -> None:
     assert llm.call_count == 2
 
     # Intermediate progress message was forwarded to consumer.
-    progress = [m for m in collected if m.label == "progress"]
+    progress = [m for m in collected if m.agent == "progress"]
     assert len(progress) == 1
     assert progress[0].text == "Working..."
 
@@ -175,7 +175,7 @@ async def test_yield_from_nested_agent() -> None:
     assert adapter.call_count == 3
 
     # Inner messages were forwarded to the consumer with label="inner".
-    inner_msgs = [m for m in collected if m.label == "inner"]
+    inner_msgs = [m for m in collected if m.agent == "inner"]
     assert len(inner_msgs) > 0
 
     # The outer LLM's second call (index 2) must NOT contain any inner
@@ -187,7 +187,7 @@ async def test_yield_from_nested_agent() -> None:
 
     # Specifically: no inner assistant text or inner tool results leaked.
     for m in outer_turn2_msgs:
-        assert m.label is None or m.label != "inner"
+        assert m.agent is None or m.agent != "inner"
         if m.role == "assistant":
             # This must be the outer tool-call message, not inner text.
             assert len(m.tool_calls) > 0

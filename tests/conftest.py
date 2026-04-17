@@ -215,10 +215,8 @@ def text_msg(
     text: str,
     *,
     id: str = "msg-1",
-    state: messages_.PartState | None = "done",
-    delta: str | None = None,
 ) -> messages_.Message:
-    part: messages_.Part = messages_.TextPart(text=text, state=state, delta=delta)
+    part: messages_.Part = messages_.TextPart(text=text)
     return messages_.Message(id=id, role="assistant", parts=[part])
 
 
@@ -234,7 +232,6 @@ def tool_call_msg(
         tool_call_id=tc_id,
         tool_name=name,
         tool_args=args,
-        state="done",
     )
     return messages_.Message(id=id, role="assistant", parts=[part])
 

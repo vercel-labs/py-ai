@@ -122,50 +122,54 @@ class StreamHandler:
     def handle_event(self, event: StreamEvent) -> messages_.Message:
         """Process event and return current Message state."""
 
-        # Current deltas (reset each call)
-        text_delta: str | None = None
-        reasoning_delta: str | None = None
-        tool_deltas: dict[str, str] = {}  # tool_call_id -> delta
+        # Sidecar events for this yield (reset each call).
+        stream_events: list[messages_.StreamEvent] = []
 
         match event:
             case TextStart(block_id=bid):
                 self._text_blocks[bid] = ""
                 self._active_text_id = bid
+                stream_events.append(messages_.PartOpened(part_id=bid))
 
             case TextDelta(block_id=bid, delta=d):
                 self._text_blocks[bid] += d
-                text_delta = d
+                stream_events.append(messages_.PartDelta(part_id=bid, chunk=d))
 
             case TextEnd(block_id=bid):
                 if self._active_text_id == bid:
                     self._active_text_id = None
+                stream_events.append(messages_.PartClosed(part_id=bid))
 
             case ReasoningStart(block_id=bid):
                 self._reasoning_blocks[bid] = ("", None)
                 self._active_reasoning_id = bid
+                stream_events.append(messages_.PartOpened(part_id=bid))
 
             case ReasoningDelta(block_id=bid, delta=d):
                 text, sig = self._reasoning_blocks[bid]
                 self._reasoning_blocks[bid] = (text + d, sig)
-                reasoning_delta = d
+                stream_events.append(messages_.PartDelta(part_id=bid, chunk=d))
 
             case ReasoningEnd(block_id=bid, signature=sig):
                 text, _ = self._reasoning_blocks[bid]
                 self._reasoning_blocks[bid] = (text, sig)
                 if self._active_reasoning_id == bid:
                     self._active_reasoning_id = None
+                stream_events.append(messages_.PartClosed(part_id=bid))
 
             case ToolStart(tool_call_id=tcid, tool_name=name):
                 self._tool_calls[tcid] = (name, "")
                 self._active_tool_ids.add(tcid)
+                stream_events.append(messages_.PartOpened(part_id=tcid))
 
             case ToolArgsDelta(tool_call_id=tcid, delta=d):
                 name, args = self._tool_calls[tcid]
                 self._tool_calls[tcid] = (name, args + d)
-                tool_deltas[tcid] = d
+                stream_events.append(messages_.PartDelta(part_id=tcid, chunk=d))
 
             case ToolEnd(tool_call_id=tcid):
                 self._active_tool_ids.discard(tcid)
+                stream_events.append(messages_.PartClosed(part_id=tcid))
 
             case FileEvent(block_id=bid, media_type=mt, data=d):
                 self._files[bid] = (mt, d)
@@ -177,52 +181,30 @@ class StreamHandler:
                 self._active_reasoning_id = None
                 self._active_tool_ids.clear()
 
-        return self._build_message(text_delta, reasoning_delta, tool_deltas)
+        return self._build_message(stream_events)
 
     def _build_message(
         self,
-        text_delta: str | None,
-        reasoning_delta: str | None,
-        tool_deltas: dict[str, str],
+        stream_events: list[messages_.StreamEvent],
     ) -> messages_.Message:
         parts: list[messages_.Part] = []
 
         # Reasoning parts first (like thinking blocks)
         for bid, (text, sig) in self._reasoning_blocks.items():
-            is_active = bid == self._active_reasoning_id
-            parts.append(
-                messages_.ReasoningPart(
-                    id=bid,
-                    text=text,
-                    signature=sig,
-                    state="streaming" if is_active else "done",
-                    delta=reasoning_delta if is_active else None,
-                )
-            )
+            parts.append(messages_.ReasoningPart(id=bid, text=text, signature=sig))
 
         # Text parts
         for bid, text in self._text_blocks.items():
-            is_active = bid == self._active_text_id
-            parts.append(
-                messages_.TextPart(
-                    id=bid,
-                    text=text,
-                    state="streaming" if is_active else "done",
-                    delta=text_delta if is_active else None,
-                )
-            )
+            parts.append(messages_.TextPart(id=bid, text=text))
 
         # Tool call parts
         for tcid, (name, args) in self._tool_calls.items():
-            is_active = tcid in self._active_tool_ids
             parts.append(
                 messages_.ToolCallPart(
                     id=tcid,
                     tool_call_id=tcid,
                     tool_name=name,
                     tool_args=args,
-                    state="streaming" if is_active else "done",
-                    args_delta=tool_deltas.get(tcid),
                 )
             )
 
@@ -235,6 +217,10 @@ class StreamHandler:
             role="assistant",
             parts=parts,
             usage=self._usage if self._is_done else None,
+            stream=messages_.MessageStreamState(
+                events=stream_events,
+                is_done=self._is_done,
+            ),
         )
 
 
