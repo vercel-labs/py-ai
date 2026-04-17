@@ -12,7 +12,7 @@ async def get_weather(city: str) -> str:
 
 
 async def main() -> None:
-    model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
+    model = ai.ai_gateway("anthropic/claude-sonnet-4")
 
     my_agent = ai.agent(tools=[get_weather])
 

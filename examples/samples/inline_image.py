@@ -11,7 +11,7 @@ import pathlib
 
 import ai
 
-model = ai.model("ai-gateway", "google/gemini-3-pro-image")
+model = ai.ai_gateway("google/gemini-3-pro-image")
 
 messages = [
     ai.system_message(

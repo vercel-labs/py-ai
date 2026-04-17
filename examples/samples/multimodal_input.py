@@ -5,7 +5,7 @@ import pathlib
 
 import ai
 
-model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
+model = ai.ai_gateway("anthropic/claude-sonnet-4")
 
 # Load a local image file (replace with your own path).
 image_path = pathlib.Path("sample_image.jpg")

@@ -30,7 +30,7 @@ async def talk_to_mothership(question: str) -> AsyncGenerator[ai.Message]:
 
 
 async def main() -> None:
-    model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
+    model = ai.ai_gateway("anthropic/claude-sonnet-4")
 
     my_agent = ai.agent(tools=[talk_to_mothership])
 

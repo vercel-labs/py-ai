@@ -4,7 +4,7 @@ import asyncio
 
 import ai
 
-model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
+model = ai.ai_gateway("anthropic/claude-sonnet-4")
 
 # Define a tool schema — anything matching the ToolLike protocol works.
 get_weather = ai.ToolSchema(
