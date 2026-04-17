@@ -158,7 +158,7 @@ class MultiAgentApp(textual.app.App):
     # ------------------------------------------------------------------
 
     def _handle_message(self, msg: ai.Message) -> None:
-        label = msg.label or "unknown"
+        label = msg.agent or "unknown"
 
         if (hook_part := msg.get_hook_part()) is not None:
             if hook_part.status == "pending":
@@ -190,7 +190,7 @@ class MultiAgentApp(textual.app.App):
         if msg.is_done:
             for part in msg.parts:
                 match part:
-                    case ai.ToolCallPart(tool_name=name, tool_args=args, state="done"):
+                    case ai.ToolCallPart(tool_name=name, tool_args=args):
                         panel.append_line(f"> {name}({args})")
                     case ai.ToolResultPart(tool_name=name, result=result):
                         panel.append_line(f"< {name} = {result}")

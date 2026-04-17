@@ -29,8 +29,8 @@ async def main() -> None:
         if msg.text_delta:
             print(msg.text_delta, end="", flush=True)
 
-        for tc in msg.tool_calls:
-            if tc.state == "done":
+        if msg.is_done:
+            for tc in msg.tool_calls:
                 print(f"\nTool call: {tc.tool_name}({tc.tool_args})")
     print()
 

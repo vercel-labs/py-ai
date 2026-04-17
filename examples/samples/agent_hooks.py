@@ -3,7 +3,7 @@
 Demonstrates the function-based hook API:
   - await hook("label", payload=Model) to suspend inside the loop
   - resolve_hook("label", data) to unblock from outside
-  - Hook messages arrive with role="signal"
+   - Hook messages arrive with role="internal"
 """
 
 import asyncio
@@ -76,8 +76,8 @@ async def main() -> None:
     ]
 
     async for msg in my_agent.run(model, messages):
-        # Hook signals arrive with role="signal"
-        if msg.role == "signal":
+        # Hook signals arrive with role="internal"
+        if msg.role == "internal":
             hook_part = msg.get_hook_part()
             if hook_part and hook_part.status == "pending":
                 answer = input(f"Approve {hook_part.hook_id}? [y/n] ")
