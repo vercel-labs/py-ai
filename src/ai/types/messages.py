@@ -299,14 +299,14 @@ StreamEvent = Annotated[
 ]
 
 
-class MessageStreamState(pydantic.BaseModel):
+class StreamState(pydantic.BaseModel):
     """Transient streaming state attached to a Message during streaming.
 
-    ``events`` contains the events since the previous yield — never cumulative.
+    ``new_events`` contains the events since the previous yield — never cumulative.
     ``is_done`` is True once the stream has finished.
     """
 
-    events: list[StreamEvent] = pydantic.Field(default_factory=list)
+    new_events: list[StreamEvent] = pydantic.Field(default_factory=list)
     is_done: bool = False
 
 
@@ -317,9 +317,9 @@ class Message(pydantic.BaseModel):
     parts: list[Part]
     id: str = pydantic.Field(default_factory=generate_id)
     turn_id: str | None = None
-    agent: str | None = None
+    source_label: str | None = None
     usage: Usage | None = None
-    stream: MessageStreamState | None = pydantic.Field(default=None, exclude=True)
+    stream: StreamState | None = pydantic.Field(default=None, exclude=True)
 
     @overload
     def replace(self, new: Part, /) -> Message: ...
@@ -380,11 +380,11 @@ class Message(pydantic.BaseModel):
 
     @property
     def text_delta(self) -> str:
-        """Derive from ``stream.events`` — first PartDelta whose part is TextPart."""
+        """First PartDelta in ``stream.new_events`` whose part is a TextPart."""
         if self.stream is None:
             return ""
         parts_map = self._parts_by_id()
-        for ev in self.stream.events:
+        for ev in self.stream.new_events:
             if isinstance(ev, PartDelta):
                 part = parts_map.get(ev.part_id)
                 if isinstance(part, TextPart):
@@ -397,7 +397,7 @@ class Message(pydantic.BaseModel):
         if self.stream is None:
             return ""
         parts_map = self._parts_by_id()
-        for ev in self.stream.events:
+        for ev in self.stream.new_events:
             if isinstance(ev, PartDelta):
                 part = parts_map.get(ev.part_id)
                 if isinstance(part, ReasoningPart):
@@ -406,12 +406,12 @@ class Message(pydantic.BaseModel):
 
     @property
     def tool_deltas(self) -> list[ToolDelta]:
-        """Derive from ``stream.events`` — PartDeltas whose parts are ToolCallPart."""
+        """PartDeltas in ``stream.new_events`` whose parts are ToolCallPart."""
         if self.stream is None:
             return []
         parts_map = self._parts_by_id()
         deltas: list[ToolDelta] = []
-        for ev in self.stream.events:
+        for ev in self.stream.new_events:
             if isinstance(ev, PartDelta):
                 part = parts_map.get(ev.part_id)
                 if isinstance(part, ToolCallPart):

@@ -18,7 +18,7 @@ async def talk_to_mothership(question: str) -> AsyncGenerator[ai.Message]:
         yield ai.Message(
             role="assistant",
             parts=[ai.TextPart(text=step)],
-            agent="tool_progress",
+            source_label="tool_progress",
         )
         await asyncio.sleep(0.3)
 
@@ -40,7 +40,7 @@ async def main() -> None:
     ]
 
     async for msg in my_agent.run(model, messages):
-        if msg.agent == "tool_progress":
+        if msg.source_label == "tool_progress":
             print(f"  [{msg.text}]")
         elif msg.text_delta:
             print(msg.text_delta, end="", flush=True)

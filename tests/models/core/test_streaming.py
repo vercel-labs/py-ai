@@ -17,7 +17,9 @@ def test_text_lifecycle() -> None:
     assert isinstance(part, messages.TextPart)
     assert part.text == ""
     assert m.stream is not None
-    assert any(isinstance(e, PartOpened) and e.part_id == "b1" for e in m.stream.events)
+    assert any(
+        isinstance(e, PartOpened) and e.part_id == "b1" for e in m.stream.new_events
+    )
 
     m = h.handle_event(streaming.TextDelta(block_id="b1", delta="Hello"))
     part = m.parts[0]
@@ -26,7 +28,7 @@ def test_text_lifecycle() -> None:
     assert m.stream is not None
     assert any(
         isinstance(e, PartDelta) and e.part_id == "b1" and e.chunk == "Hello"
-        for e in m.stream.events
+        for e in m.stream.new_events
     )
 
     m = h.handle_event(streaming.TextDelta(block_id="b1", delta=" world"))
@@ -36,16 +38,18 @@ def test_text_lifecycle() -> None:
     assert m.stream is not None
     assert any(
         isinstance(e, PartDelta) and e.part_id == "b1" and e.chunk == " world"
-        for e in m.stream.events
+        for e in m.stream.new_events
     )
 
     m = h.handle_event(streaming.TextEnd(block_id="b1"))
     part = m.parts[0]
     assert isinstance(part, messages.TextPart)
     assert m.stream is not None
-    assert any(isinstance(e, PartClosed) and e.part_id == "b1" for e in m.stream.events)
+    assert any(
+        isinstance(e, PartClosed) and e.part_id == "b1" for e in m.stream.new_events
+    )
     # No delta events in this yield
-    assert not any(isinstance(e, PartDelta) for e in m.stream.events)
+    assert not any(isinstance(e, PartDelta) for e in m.stream.new_events)
 
 
 # -- Reasoning streaming ---------------------------------------------------
@@ -61,7 +65,7 @@ def test_reasoning_lifecycle() -> None:
     assert m.stream is not None
     assert any(
         isinstance(e, PartDelta) and e.part_id == "r1" and e.chunk == "thinking"
-        for e in m.stream.events
+        for e in m.stream.new_events
     )
 
     m = h.handle_event(streaming.ReasoningEnd(block_id="r1", signature="sig123"))
@@ -69,7 +73,9 @@ def test_reasoning_lifecycle() -> None:
     assert isinstance(part, messages.ReasoningPart)
     assert part.signature == "sig123"
     assert m.stream is not None
-    assert any(isinstance(e, PartClosed) and e.part_id == "r1" for e in m.stream.events)
+    assert any(
+        isinstance(e, PartClosed) and e.part_id == "r1" for e in m.stream.new_events
+    )
 
 
 # -- Tool streaming --------------------------------------------------------
@@ -86,7 +92,7 @@ def test_tool_lifecycle() -> None:
     assert m.stream is not None
     assert any(
         isinstance(e, PartDelta) and e.part_id == "tc1" and e.chunk == '{"ci'
-        for e in m.stream.events
+        for e in m.stream.new_events
     )
 
     m = h.handle_event(
@@ -101,10 +107,10 @@ def test_tool_lifecycle() -> None:
     assert isinstance(part, messages.ToolCallPart)
     assert m.stream is not None
     assert any(
-        isinstance(e, PartClosed) and e.part_id == "tc1" for e in m.stream.events
+        isinstance(e, PartClosed) and e.part_id == "tc1" for e in m.stream.new_events
     )
     # No delta events in this yield
-    assert not any(isinstance(e, PartDelta) for e in m.stream.events)
+    assert not any(isinstance(e, PartDelta) for e in m.stream.new_events)
 
 
 # -- Multi-part messages ---------------------------------------------------
@@ -132,7 +138,7 @@ def test_reasoning_then_text_then_tool() -> None:
     # The last event was ToolEnd(tc1), so only that PartClosed is in events
     assert m.stream is not None
     assert any(
-        isinstance(e, PartClosed) and e.part_id == "tc1" for e in m.stream.events
+        isinstance(e, PartClosed) and e.part_id == "tc1" for e in m.stream.new_events
     )
 
 
@@ -158,7 +164,7 @@ def test_multiple_tool_calls() -> None:
     # Last event was ToolEnd(tc2), so its PartClosed is in events
     assert m.stream is not None
     assert any(
-        isinstance(e, PartClosed) and e.part_id == "tc2" for e in m.stream.events
+        isinstance(e, PartClosed) and e.part_id == "tc2" for e in m.stream.new_events
     )
 
 
@@ -216,10 +222,10 @@ def test_deltas_only_on_active_blocks() -> None:
     assert m.stream is not None
     assert any(
         isinstance(e, PartDelta) and e.part_id == "t2" and e.chunk == "second"
-        for e in m.stream.events
+        for e in m.stream.new_events
     )
     assert not any(
-        isinstance(e, PartDelta) and e.part_id == "t1" for e in m.stream.events
+        isinstance(e, PartDelta) and e.part_id == "t1" for e in m.stream.new_events
     )
 
 

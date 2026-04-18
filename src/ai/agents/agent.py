@@ -336,7 +336,7 @@ class Agent:
             source = _collect_messages(loop_fn(context), context.messages)
             async for message in runtime.run(source):
                 if call.label is not None:
-                    message = message.model_copy(update={"agent": call.label})
+                    message = message.model_copy(update={"source_label": call.label})
                 yield message
 
         # Activate middleware for this run (and everything it calls).

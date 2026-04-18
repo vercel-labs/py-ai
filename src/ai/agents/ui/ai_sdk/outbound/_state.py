@@ -82,8 +82,8 @@ class _StreamState:
 
         agent_changed = (
             self.emitted_start
-            and msg.agent is not None
-            and msg.agent != self.current_agent
+            and msg.source_label is not None
+            and msg.source_label != self.current_agent
         )
 
         if not self.emitted_start or agent_changed:
@@ -96,7 +96,7 @@ class _StreamState:
             parts.append(protocol.StartStepPart())
             self.emitted_start = True
             self.in_step = True
-            self.current_agent = msg.agent
+            self.current_agent = msg.source_label
             self.current_turn_id = msg.turn_id
             self._reset_step_tracking()
             return parts
@@ -220,13 +220,13 @@ class _StreamState:
         if msg.stream is not None:
             opened_ids = {
                 e.part_id
-                for e in msg.stream.events
+                for e in msg.stream.new_events
                 if isinstance(e, messages_.PartOpened)
             }
             for tid in list(self.open_text_ids):
                 if tid in opened_ids and not any(
                     isinstance(e, messages_.PartClosed) and e.part_id == tid
-                    for e in msg.stream.events
+                    for e in msg.stream.new_events
                 ):
                     out.append(protocol.TextEndPart(id=tid))
                     self.open_text_ids.discard(tid)

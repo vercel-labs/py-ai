@@ -217,8 +217,8 @@ class StreamHandler:
             role="assistant",
             parts=parts,
             usage=self._usage if self._is_done else None,
-            stream=messages_.MessageStreamState(
-                events=stream_events,
+            stream=messages_.StreamState(
+                new_events=stream_events,
                 is_done=self._is_done,
             ),
         )

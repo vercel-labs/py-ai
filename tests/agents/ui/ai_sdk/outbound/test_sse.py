@@ -42,7 +42,7 @@ async def test_to_sse_emits_data_prefixed_lines() -> None:
             role="assistant",
             turn_id="t1",
             parts=[messages_.TextPart(text="hi")],
-            stream=messages_.MessageStreamState(events=[], is_done=True),
+            stream=messages_.StreamState(new_events=[], is_done=True),
         )
     ]
     lines = [line async for line in to_sse(_gen(msgs))]

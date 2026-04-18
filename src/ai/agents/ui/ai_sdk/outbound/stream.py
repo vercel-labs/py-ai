@@ -14,7 +14,7 @@ async def to_stream(
 ) -> AsyncGenerator[protocol.UIMessageStreamPart]:
     """Walk ``messages`` once, emitting AI SDK UI stream parts.
 
-    Drives off ``Message.stream.events`` for incremental deltas and
+    Drives off ``Message.stream.new_events`` for incremental deltas and
     ``Message.parts`` for terminal tool input/output/approval parts.
     Re-emitted messages (same id, already seen ``is_done``) are skipped.
     """
@@ -27,9 +27,9 @@ async def to_stream(
         for part in state.on_message(msg):
             yield part
 
-        if msg.stream is not None and msg.stream.events:
+        if msg.stream is not None and msg.stream.new_events:
             parts_by_id = {p.id: p for p in msg.parts}
-            for event in msg.stream.events:
+            for event in msg.stream.new_events:
                 for out in state.on_event(msg, event, parts_by_id):
                     yield out
 

@@ -2,7 +2,7 @@
 
 Used by ``outbound.history`` to reconstruct UIMessages from persisted
 ``ai.Message`` lists. The live outbound stream does not use these — it
-emits wire-protocol deltas directly from ``Message.stream.events``.
+emits wire-protocol deltas directly from ``Message.stream.new_events``.
 """
 
 from __future__ import annotations

@@ -158,7 +158,7 @@ class MultiAgentApp(textual.app.App):
     # ------------------------------------------------------------------
 
     def _handle_message(self, msg: ai.Message) -> None:
-        label = msg.agent or "unknown"
+        label = msg.source_label or "unknown"
 
         if (hook_part := msg.get_hook_part()) is not None:
             if hook_part.status == "pending":

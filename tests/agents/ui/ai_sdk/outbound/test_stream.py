@@ -38,7 +38,7 @@ def _text_stream_message(
         role="assistant",
         turn_id=turn_id,
         parts=[messages_.TextPart(id=text_id, text=full_text or chunk)],
-        stream=messages_.MessageStreamState(events=events, is_done=is_done),
+        stream=messages_.StreamState(new_events=events, is_done=is_done),
     )
 
 
@@ -51,8 +51,8 @@ async def test_event_driven_text_streaming() -> None:
             role="assistant",
             turn_id="t1",
             parts=[messages_.TextPart(id=text_id, text="")],
-            stream=messages_.MessageStreamState(
-                events=[messages_.PartOpened(part_id=text_id)],
+            stream=messages_.StreamState(
+                new_events=[messages_.PartOpened(part_id=text_id)],
                 is_done=False,
             ),
         ),
@@ -62,8 +62,8 @@ async def test_event_driven_text_streaming() -> None:
             role="assistant",
             turn_id="t1",
             parts=[messages_.TextPart(id=text_id, text="hi")],
-            stream=messages_.MessageStreamState(
-                events=[messages_.PartDelta(part_id=text_id, chunk="hi")],
+            stream=messages_.StreamState(
+                new_events=[messages_.PartDelta(part_id=text_id, chunk="hi")],
                 is_done=False,
             ),
         ),
@@ -73,8 +73,8 @@ async def test_event_driven_text_streaming() -> None:
             role="assistant",
             turn_id="t1",
             parts=[messages_.TextPart(id=text_id, text="hi")],
-            stream=messages_.MessageStreamState(
-                events=[messages_.PartClosed(part_id=text_id)],
+            stream=messages_.StreamState(
+                new_events=[messages_.PartClosed(part_id=text_id)],
                 is_done=True,
             ),
         ),
@@ -98,14 +98,14 @@ async def test_turn_id_change_emits_step_boundary() -> None:
             role="assistant",
             turn_id="t1",
             parts=[messages_.TextPart(text="hello")],
-            stream=messages_.MessageStreamState(events=[], is_done=True),
+            stream=messages_.StreamState(new_events=[], is_done=True),
         ),
         messages_.Message(
             id="m2",
             role="assistant",
             turn_id="t2",  # different turn → step boundary
             parts=[messages_.TextPart(text="world")],
-            stream=messages_.MessageStreamState(events=[], is_done=True),
+            stream=messages_.StreamState(new_events=[], is_done=True),
         ),
     ]
     out = await _collect(msgs)
@@ -124,16 +124,16 @@ async def test_agent_change_emits_message_boundary() -> None:
         messages_.Message(
             id="m1",
             role="assistant",
-            agent="a1",
+            source_label="a1",
             parts=[messages_.TextPart(text="from a")],
-            stream=messages_.MessageStreamState(events=[], is_done=True),
+            stream=messages_.StreamState(new_events=[], is_done=True),
         ),
         messages_.Message(
             id="m2",
             role="assistant",
-            agent="a2",  # different agent → FinishPart + StartPart
+            source_label="a2",  # different source → FinishPart + StartPart
             parts=[messages_.TextPart(text="from b")],
-            stream=messages_.MessageStreamState(events=[], is_done=True),
+            stream=messages_.StreamState(new_events=[], is_done=True),
         ),
     ]
     out = await _collect(msgs)
@@ -161,7 +161,7 @@ async def test_tool_call_and_result_emit_terminal_parts() -> None:
                     tool_args='{"q":"x"}',
                 )
             ],
-            stream=messages_.MessageStreamState(events=[], is_done=True),
+            stream=messages_.StreamState(new_events=[], is_done=True),
         ),
         messages_.Message(
             role="tool",
@@ -195,7 +195,7 @@ async def test_approval_request_hook_emits_approval_part() -> None:
                     tool_args="{}",
                 )
             ],
-            stream=messages_.MessageStreamState(events=[], is_done=True),
+            stream=messages_.StreamState(new_events=[], is_done=True),
         ),
         messages_.Message(
             role="internal",
@@ -221,8 +221,8 @@ async def test_dedup_on_reemitted_message_id() -> None:
         role="assistant",
         turn_id="t1",
         parts=[messages_.TextPart(id="txt1", text="hi")],
-        stream=messages_.MessageStreamState(
-            events=[
+        stream=messages_.StreamState(
+            new_events=[
                 messages_.PartOpened(part_id="txt1"),
                 messages_.PartDelta(part_id="txt1", chunk="hi"),
                 messages_.PartClosed(part_id="txt1"),
