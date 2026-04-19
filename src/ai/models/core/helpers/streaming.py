@@ -1,10 +1,6 @@
 from __future__ import annotations
 
 import dataclasses
-import json
-from collections.abc import AsyncGenerator
-
-import pydantic
 
 from ....types import messages as messages_
 
@@ -222,31 +218,3 @@ class StreamHandler:
                 is_done=self._is_done,
             ),
         )
-
-
-async def events_to_messages(
-    events: AsyncGenerator[StreamEvent],
-    output_type: type[pydantic.BaseModel] | None = None,
-) -> AsyncGenerator[messages_.Message]:
-    """Convert a stream of events into Message snapshots.
-
-    This is the standalone version of the logic that ``LanguageModel.stream()``
-    uses.  Wire functions call this to turn their ``StreamEvent`` generators
-    into ``Message`` generators suitable for ``Stream``.
-    """
-    handler = StreamHandler()
-    msg: messages_.Message | None = None
-    async for event in events:
-        msg = handler.handle_event(event)
-        yield msg
-
-    # After stream completes, validate and attach structured output part
-    if output_type is not None and msg is not None and msg.text:
-        data = json.loads(msg.text)
-        output_type.model_validate(data)  # fail fast on bad data
-        part = messages_.StructuredOutputPart(
-            data=data,
-            output_type_name=f"{output_type.__module__}.{output_type.__qualname__}",
-        )
-        msg = msg.model_copy(update={"parts": [*msg.parts, part]})
-        yield msg
