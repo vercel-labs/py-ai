@@ -375,18 +375,21 @@ class Message(pydantic.BaseModel):
             return True
         return self.stream.is_done
 
-    def _parts_by_id(self) -> dict[str, Part]:
-        return {p.id: p for p in self.parts}
+    def get_part(self, part_id: str) -> Part | None:
+        """Find a part by id, or return None if not found."""
+        for part in self.parts:
+            if part.id == part_id:
+                return part
+        return None
 
     @property
     def text_delta(self) -> str:
         """First PartDelta in ``stream.new_events`` whose part is a TextPart."""
         if self.stream is None:
             return ""
-        parts_map = self._parts_by_id()
         for ev in self.stream.new_events:
             if isinstance(ev, PartDelta):
-                part = parts_map.get(ev.part_id)
+                part = self.get_part(ev.part_id)
                 if isinstance(part, TextPart):
                     return ev.chunk
         return ""
@@ -396,10 +399,9 @@ class Message(pydantic.BaseModel):
         """First PartDelta whose part is a ReasoningPart."""
         if self.stream is None:
             return ""
-        parts_map = self._parts_by_id()
         for ev in self.stream.new_events:
             if isinstance(ev, PartDelta):
-                part = parts_map.get(ev.part_id)
+                part = self.get_part(ev.part_id)
                 if isinstance(part, ReasoningPart):
                     return ev.chunk
         return ""
@@ -409,11 +411,10 @@ class Message(pydantic.BaseModel):
         """PartDeltas in ``stream.new_events`` whose parts are ToolCallPart."""
         if self.stream is None:
             return []
-        parts_map = self._parts_by_id()
         deltas: list[ToolDelta] = []
         for ev in self.stream.new_events:
             if isinstance(ev, PartDelta):
-                part = parts_map.get(ev.part_id)
+                part = self.get_part(ev.part_id)
                 if isinstance(part, ToolCallPart):
                     deltas.append(
                         ToolDelta(
