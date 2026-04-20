@@ -95,8 +95,10 @@ async def main() -> None:
                     f"  Hook pending: {hook_part.hook_id}"
                     f" (metadata={hook_part.metadata})"
                 )
-        elif msg.text_delta:
-            print(msg.text_delta, end="", flush=True)
+        else:
+            for ev in msg.deltas:
+                if isinstance(ev.part, ai.TextPart):
+                    print(ev.chunk, end="", flush=True)
 
     saved_checkpoint = durability.checkpoint()
     print(f"\n  Checkpoint saved: {len(saved_checkpoint.steps)} steps\n")
@@ -112,8 +114,10 @@ async def main() -> None:
             hook_part = msg.get_hook_part()
             if hook_part:
                 print(f"  Hook {hook_part.status}: {hook_part.hook_id}")
-        elif msg.text_delta:
-            print(msg.text_delta, end="", flush=True)
+        else:
+            for ev in msg.deltas:
+                if isinstance(ev.part, ai.TextPart):
+                    print(ev.chunk, end="", flush=True)
     print()
 
 

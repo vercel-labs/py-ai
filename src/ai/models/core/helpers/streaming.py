@@ -91,21 +91,16 @@ class StreamHandler:
     Accumulates LLM adapter events and produces Messages with stateful parts.
 
     This is the normalization layer between LLM adapters and the rest of the system.
+    Parts are tracked in a single ``_current_parts`` dict keyed by block/tool id,
+    updated in place as events stream in.  Each event carries the just-constructed
+    frozen part snapshot, so consumers never need to look parts up by id.
     """
 
     message_id: str = dataclasses.field(default_factory=messages_.generate_id)
 
-    # Accumulators
-    _text_blocks: dict[str, str] = dataclasses.field(default_factory=dict)
-    _reasoning_blocks: dict[str, tuple[str, str | None]] = dataclasses.field(
-        default_factory=dict
-    )  # (text, signature)
-    _tool_calls: dict[str, tuple[str, str]] = dataclasses.field(
-        default_factory=dict
-    )  # (name, args)
-    _files: dict[str, tuple[str, str]] = dataclasses.field(
-        default_factory=dict
-    )  # block_id -> (media_type, data)
+    # Single source of truth for part state, keyed by id. Insertion order
+    # preserves provider emission order.
+    _current_parts: dict[str, messages_.Part] = dataclasses.field(default_factory=dict)
 
     # Active tracking
     _active_text_id: str | None = None
@@ -123,52 +118,86 @@ class StreamHandler:
 
         match event:
             case TextStart(block_id=bid):
-                self._text_blocks[bid] = ""
+                part: messages_.Part = messages_.TextPart(id=bid, text="")
+                self._current_parts[bid] = part
                 self._active_text_id = bid
-                stream_events.append(messages_.PartOpened(part_id=bid))
+                stream_events.append(messages_.PartOpened(part=part))
 
             case TextDelta(block_id=bid, delta=d):
-                self._text_blocks[bid] += d
-                stream_events.append(messages_.PartDelta(part_id=bid, chunk=d))
+                existing = self._current_parts[bid]
+                assert isinstance(existing, messages_.TextPart)
+                part = messages_.TextPart(id=bid, text=existing.text + d)
+                self._current_parts[bid] = part
+                stream_events.append(messages_.PartDelta(part=part, chunk=d))
 
             case TextEnd(block_id=bid):
                 if self._active_text_id == bid:
                     self._active_text_id = None
-                stream_events.append(messages_.PartClosed(part_id=bid))
+                stream_events.append(
+                    messages_.PartClosed(part=self._current_parts[bid])
+                )
 
             case ReasoningStart(block_id=bid):
-                self._reasoning_blocks[bid] = ("", None)
+                part = messages_.ReasoningPart(id=bid, text="")
+                self._current_parts[bid] = part
                 self._active_reasoning_id = bid
-                stream_events.append(messages_.PartOpened(part_id=bid))
+                stream_events.append(messages_.PartOpened(part=part))
 
             case ReasoningDelta(block_id=bid, delta=d):
-                text, sig = self._reasoning_blocks[bid]
-                self._reasoning_blocks[bid] = (text + d, sig)
-                stream_events.append(messages_.PartDelta(part_id=bid, chunk=d))
+                existing = self._current_parts[bid]
+                assert isinstance(existing, messages_.ReasoningPart)
+                part = messages_.ReasoningPart(
+                    id=bid,
+                    text=existing.text + d,
+                    signature=existing.signature,
+                )
+                self._current_parts[bid] = part
+                stream_events.append(messages_.PartDelta(part=part, chunk=d))
 
             case ReasoningEnd(block_id=bid, signature=sig):
-                text, _ = self._reasoning_blocks[bid]
-                self._reasoning_blocks[bid] = (text, sig)
+                existing = self._current_parts[bid]
+                assert isinstance(existing, messages_.ReasoningPart)
+                part = messages_.ReasoningPart(
+                    id=bid, text=existing.text, signature=sig
+                )
+                self._current_parts[bid] = part
                 if self._active_reasoning_id == bid:
                     self._active_reasoning_id = None
-                stream_events.append(messages_.PartClosed(part_id=bid))
+                stream_events.append(messages_.PartClosed(part=part))
 
             case ToolStart(tool_call_id=tcid, tool_name=name):
-                self._tool_calls[tcid] = (name, "")
+                part = messages_.ToolCallPart(
+                    id=tcid,
+                    tool_call_id=tcid,
+                    tool_name=name,
+                    tool_args="",
+                )
+                self._current_parts[tcid] = part
                 self._active_tool_ids.add(tcid)
-                stream_events.append(messages_.PartOpened(part_id=tcid))
+                stream_events.append(messages_.PartOpened(part=part))
 
             case ToolArgsDelta(tool_call_id=tcid, delta=d):
-                name, args = self._tool_calls[tcid]
-                self._tool_calls[tcid] = (name, args + d)
-                stream_events.append(messages_.PartDelta(part_id=tcid, chunk=d))
+                existing = self._current_parts[tcid]
+                assert isinstance(existing, messages_.ToolCallPart)
+                part = messages_.ToolCallPart(
+                    id=tcid,
+                    tool_call_id=existing.tool_call_id,
+                    tool_name=existing.tool_name,
+                    tool_args=existing.tool_args + d,
+                )
+                self._current_parts[tcid] = part
+                stream_events.append(messages_.PartDelta(part=part, chunk=d))
 
             case ToolEnd(tool_call_id=tcid):
                 self._active_tool_ids.discard(tcid)
-                stream_events.append(messages_.PartClosed(part_id=tcid))
+                stream_events.append(
+                    messages_.PartClosed(part=self._current_parts[tcid])
+                )
 
             case FileEvent(block_id=bid, media_type=mt, data=d):
-                self._files[bid] = (mt, d)
+                self._current_parts[bid] = messages_.FilePart(
+                    id=bid, data=d, media_type=mt
+                )
 
             case MessageDone(usage=usage):
                 self._is_done = True
@@ -183,35 +212,10 @@ class StreamHandler:
         self,
         stream_events: list[messages_.StreamEvent],
     ) -> messages_.Message:
-        parts: list[messages_.Part] = []
-
-        # Reasoning parts first (like thinking blocks)
-        for bid, (text, sig) in self._reasoning_blocks.items():
-            parts.append(messages_.ReasoningPart(id=bid, text=text, signature=sig))
-
-        # Text parts
-        for bid, text in self._text_blocks.items():
-            parts.append(messages_.TextPart(id=bid, text=text))
-
-        # Tool call parts
-        for tcid, (name, args) in self._tool_calls.items():
-            parts.append(
-                messages_.ToolCallPart(
-                    id=tcid,
-                    tool_call_id=tcid,
-                    tool_name=name,
-                    tool_args=args,
-                )
-            )
-
-        # File parts (inline images/videos from LLMs like Gemini, GPT-5)
-        for bid, (media_type, data) in self._files.items():
-            parts.append(messages_.FilePart(id=bid, data=data, media_type=media_type))
-
         return messages_.Message(
             id=self.message_id,
             role="assistant",
-            parts=parts,
+            parts=list(self._current_parts.values()),
             usage=self._usage if self._is_done else None,
             stream=messages_.StreamState(
                 new_events=stream_events,

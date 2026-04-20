@@ -28,31 +28,35 @@ def _text_stream_message(
     is_done: bool,
     full_text: str | None = None,
 ) -> messages_.Message:
+    text = full_text or chunk
+    part = messages_.TextPart(id=text_id, text=text)
     events: list[messages_.StreamEvent]
     if is_done:
-        events = [messages_.PartClosed(part_id=text_id)]
+        events = [messages_.PartClosed(part=part)]
     else:
-        events = [messages_.PartDelta(part_id=text_id, chunk=chunk)]
+        events = [messages_.PartDelta(part=part, chunk=chunk)]
     return messages_.Message(
         id=msg_id,
         role="assistant",
         turn_id=turn_id,
-        parts=[messages_.TextPart(id=text_id, text=full_text or chunk)],
+        parts=[part],
         stream=messages_.StreamState(new_events=events, is_done=is_done),
     )
 
 
 async def test_event_driven_text_streaming() -> None:
     text_id = "txt1"
+    empty_text = messages_.TextPart(id=text_id, text="")
+    hi_text = messages_.TextPart(id=text_id, text="hi")
     msgs = [
         # Initial: PartOpened
         messages_.Message(
             id="m1",
             role="assistant",
             turn_id="t1",
-            parts=[messages_.TextPart(id=text_id, text="")],
+            parts=[empty_text],
             stream=messages_.StreamState(
-                new_events=[messages_.PartOpened(part_id=text_id)],
+                new_events=[messages_.PartOpened(part=empty_text)],
                 is_done=False,
             ),
         ),
@@ -61,9 +65,9 @@ async def test_event_driven_text_streaming() -> None:
             id="m1",
             role="assistant",
             turn_id="t1",
-            parts=[messages_.TextPart(id=text_id, text="hi")],
+            parts=[hi_text],
             stream=messages_.StreamState(
-                new_events=[messages_.PartDelta(part_id=text_id, chunk="hi")],
+                new_events=[messages_.PartDelta(part=hi_text, chunk="hi")],
                 is_done=False,
             ),
         ),
@@ -72,9 +76,9 @@ async def test_event_driven_text_streaming() -> None:
             id="m1",
             role="assistant",
             turn_id="t1",
-            parts=[messages_.TextPart(id=text_id, text="hi")],
+            parts=[hi_text],
             stream=messages_.StreamState(
-                new_events=[messages_.PartClosed(part_id=text_id)],
+                new_events=[messages_.PartClosed(part=hi_text)],
                 is_done=True,
             ),
         ),
@@ -216,16 +220,18 @@ async def test_approval_request_hook_emits_approval_part() -> None:
 
 
 async def test_dedup_on_reemitted_message_id() -> None:
+    empty = messages_.TextPart(id="txt1", text="")
+    hi = messages_.TextPart(id="txt1", text="hi")
     msg = messages_.Message(
         id="m1",
         role="assistant",
         turn_id="t1",
-        parts=[messages_.TextPart(id="txt1", text="hi")],
+        parts=[hi],
         stream=messages_.StreamState(
             new_events=[
-                messages_.PartOpened(part_id="txt1"),
-                messages_.PartDelta(part_id="txt1", chunk="hi"),
-                messages_.PartClosed(part_id="txt1"),
+                messages_.PartOpened(part=empty),
+                messages_.PartDelta(part=hi, chunk="hi"),
+                messages_.PartClosed(part=hi),
             ],
             is_done=True,
         ),

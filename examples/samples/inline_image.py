@@ -26,8 +26,9 @@ async def main() -> None:
 
     # Stream — text deltas arrive as usual, images arrive as FileParts
     async for msg in await ai.stream(model, messages):
-        if msg.text_delta:
-            print(msg.text_delta, end="", flush=True)
+        for ev in msg.deltas:
+            if isinstance(ev.part, ai.TextPart):
+                print(ev.chunk, end="", flush=True)
         last_msg = msg
 
     print()

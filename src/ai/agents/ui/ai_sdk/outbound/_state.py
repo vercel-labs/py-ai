@@ -126,52 +126,47 @@ class _StreamState:
         self,
         msg: messages_.Message,
         event: messages_.StreamEvent,
-        parts_by_id: dict[str, messages_.Part],
     ) -> list[protocol.UIMessageStreamPart]:
-        part = parts_by_id.get(event.part_id)
-        if part is None:
-            return []
+        match event:
+            case messages_.PartOpened(part=messages_.TextPart(id=pid)):
+                self.open_text_ids.add(pid)
+                return [protocol.TextStartPart(id=pid)]
 
-        match event, part:
-            case messages_.PartOpened(), messages_.TextPart():
-                self.open_text_ids.add(event.part_id)
-                return [protocol.TextStartPart(id=event.part_id)]
-
-            case messages_.PartDelta(chunk=chunk), messages_.TextPart():
-                if event.part_id not in self.open_text_ids:
-                    self.open_text_ids.add(event.part_id)
+            case messages_.PartDelta(part=messages_.TextPart(id=pid), chunk=chunk):
+                if pid not in self.open_text_ids:
+                    self.open_text_ids.add(pid)
                     return [
-                        protocol.TextStartPart(id=event.part_id),
-                        protocol.TextDeltaPart(id=event.part_id, delta=chunk),
+                        protocol.TextStartPart(id=pid),
+                        protocol.TextDeltaPart(id=pid, delta=chunk),
                     ]
-                return [protocol.TextDeltaPart(id=event.part_id, delta=chunk)]
+                return [protocol.TextDeltaPart(id=pid, delta=chunk)]
 
-            case messages_.PartClosed(), messages_.TextPart():
-                if event.part_id in self.open_text_ids:
-                    self.open_text_ids.discard(event.part_id)
-                    return [protocol.TextEndPart(id=event.part_id)]
+            case messages_.PartClosed(part=messages_.TextPart(id=pid)):
+                if pid in self.open_text_ids:
+                    self.open_text_ids.discard(pid)
+                    return [protocol.TextEndPart(id=pid)]
                 return []
 
-            case messages_.PartOpened(), messages_.ReasoningPart():
-                self.open_reasoning_ids.add(event.part_id)
-                return [protocol.ReasoningStartPart(id=event.part_id)]
+            case messages_.PartOpened(part=messages_.ReasoningPart(id=pid)):
+                self.open_reasoning_ids.add(pid)
+                return [protocol.ReasoningStartPart(id=pid)]
 
-            case messages_.PartDelta(chunk=chunk), messages_.ReasoningPart():
-                if event.part_id not in self.open_reasoning_ids:
-                    self.open_reasoning_ids.add(event.part_id)
+            case messages_.PartDelta(part=messages_.ReasoningPart(id=pid), chunk=chunk):
+                if pid not in self.open_reasoning_ids:
+                    self.open_reasoning_ids.add(pid)
                     return [
-                        protocol.ReasoningStartPart(id=event.part_id),
-                        protocol.ReasoningDeltaPart(id=event.part_id, delta=chunk),
+                        protocol.ReasoningStartPart(id=pid),
+                        protocol.ReasoningDeltaPart(id=pid, delta=chunk),
                     ]
-                return [protocol.ReasoningDeltaPart(id=event.part_id, delta=chunk)]
+                return [protocol.ReasoningDeltaPart(id=pid, delta=chunk)]
 
-            case messages_.PartClosed(), messages_.ReasoningPart():
-                if event.part_id in self.open_reasoning_ids:
-                    self.open_reasoning_ids.discard(event.part_id)
-                    return [protocol.ReasoningEndPart(id=event.part_id)]
+            case messages_.PartClosed(part=messages_.ReasoningPart(id=pid)):
+                if pid in self.open_reasoning_ids:
+                    self.open_reasoning_ids.discard(pid)
+                    return [protocol.ReasoningEndPart(id=pid)]
                 return []
 
-            case messages_.PartOpened(), messages_.ToolCallPart() as tc:
+            case messages_.PartOpened(part=messages_.ToolCallPart() as tc):
                 if tc.tool_call_id in self.started_tool_inputs:
                     return []
                 self.started_tool_inputs.add(tc.tool_call_id)
@@ -182,7 +177,7 @@ class _StreamState:
                     )
                 ]
 
-            case messages_.PartDelta(chunk=chunk), messages_.ToolCallPart() as tc:
+            case messages_.PartDelta(part=messages_.ToolCallPart() as tc, chunk=chunk):
                 out: list[protocol.UIMessageStreamPart] = []
                 if tc.tool_call_id not in self.started_tool_inputs:
                     self.started_tool_inputs.add(tc.tool_call_id)
@@ -200,7 +195,7 @@ class _StreamState:
                 )
                 return out
 
-            case messages_.PartClosed(), messages_.ToolCallPart():
+            case messages_.PartClosed(part=messages_.ToolCallPart()):
                 # ToolInputAvailablePart is emitted in ``on_terminal`` from
                 # the terminal ``tool_args`` snapshot.
                 return []
@@ -219,13 +214,13 @@ class _StreamState:
         # PartClosed (e.g. provider terminates abruptly — safety net).
         if msg.stream is not None:
             opened_ids = {
-                e.part_id
+                e.part.id
                 for e in msg.stream.new_events
                 if isinstance(e, messages_.PartOpened)
             }
             for tid in list(self.open_text_ids):
                 if tid in opened_ids and not any(
-                    isinstance(e, messages_.PartClosed) and e.part_id == tid
+                    isinstance(e, messages_.PartClosed) and e.part.id == tid
                     for e in msg.stream.new_events
                 ):
                     out.append(protocol.TextEndPart(id=tid))

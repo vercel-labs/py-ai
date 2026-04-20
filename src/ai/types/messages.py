@@ -258,38 +258,48 @@ class Usage(pydantic.BaseModel):
         )
 
 
-class ToolDelta(pydantic.BaseModel):
-    model_config = pydantic.ConfigDict(frozen=True)
-
-    tool_call_id: str
-    tool_name: str
-    args_delta: str
-
-
 # ---------------------------------------------------------------------------
 # Streaming sidecar — transient state excluded from persistence.
 # ---------------------------------------------------------------------------
 
 
 class PartOpened(pydantic.BaseModel):
+    """A new streaming block was opened by the LLM.
+
+    ``part`` holds the initial snapshot of the part (empty text/args).
+    """
+
     model_config = pydantic.ConfigDict(frozen=True)
 
-    part_id: str
+    part: Part
     type: Literal["part_opened"] = "part_opened"
 
 
 class PartDelta(pydantic.BaseModel):
+    """An incremental update to a streaming part.
+
+    ``part`` is the post-delta snapshot (state accumulated up to and including
+    ``chunk``).  ``chunk`` is the new fragment appended this step (plain text
+    for :class:`TextPart` / :class:`ReasoningPart`, a JSON-args fragment for
+    :class:`ToolCallPart`).
+    """
+
     model_config = pydantic.ConfigDict(frozen=True)
 
-    part_id: str
+    part: Part
     chunk: str
     type: Literal["part_delta"] = "part_delta"
 
 
 class PartClosed(pydantic.BaseModel):
+    """A streaming block was closed by the LLM.
+
+    ``part`` holds the final snapshot of the part.
+    """
+
     model_config = pydantic.ConfigDict(frozen=True)
 
-    part_id: str
+    part: Part
     type: Literal["part_closed"] = "part_closed"
 
 
@@ -383,47 +393,16 @@ class Message(pydantic.BaseModel):
         return None
 
     @property
-    def text_delta(self) -> str:
-        """First PartDelta in ``stream.new_events`` whose part is a TextPart."""
-        if self.stream is None:
-            return ""
-        for ev in self.stream.new_events:
-            if isinstance(ev, PartDelta):
-                part = self.get_part(ev.part_id)
-                if isinstance(part, TextPart):
-                    return ev.chunk
-        return ""
+    def deltas(self) -> list[PartDelta]:
+        """PartDelta events from this yield step, in order.
 
-    @property
-    def reasoning_delta(self) -> str:
-        """First PartDelta whose part is a ReasoningPart."""
-        if self.stream is None:
-            return ""
-        for ev in self.stream.new_events:
-            if isinstance(ev, PartDelta):
-                part = self.get_part(ev.part_id)
-                if isinstance(part, ReasoningPart):
-                    return ev.chunk
-        return ""
-
-    @property
-    def tool_deltas(self) -> list[ToolDelta]:
-        """PartDeltas in ``stream.new_events`` whose parts are ToolCallPart."""
+        Empty list means nothing streamed in this step.  Each event carries
+        its post-delta :class:`Part` snapshot via ``ev.part`` and the chunk
+        fragment via ``ev.chunk``.
+        """
         if self.stream is None:
             return []
-        deltas: list[ToolDelta] = []
-        for ev in self.stream.new_events:
-            if isinstance(ev, PartDelta):
-                part = self.get_part(ev.part_id)
-                if isinstance(part, ToolCallPart):
-                    deltas.append(
-                        ToolDelta(
-                            tool_call_id=part.tool_call_id,
-                            tool_name=part.tool_name,
-                            args_delta=ev.chunk,
-                        )
-                    )
-        return deltas
+        return [ev for ev in self.stream.new_events if isinstance(ev, PartDelta)]
 
     @property
     def files(self) -> list[FilePart]:

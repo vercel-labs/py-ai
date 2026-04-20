@@ -90,8 +90,9 @@ async def main() -> None:
                 )
             continue
 
-        if msg.text_delta:
-            print(msg.text_delta, end="", flush=True)
+        for ev in msg.deltas:
+            if isinstance(ev.part, ai.TextPart):
+                print(ev.chunk, end="", flush=True)
     print()
 
 

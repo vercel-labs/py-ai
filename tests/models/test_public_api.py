@@ -32,8 +32,9 @@ async def test_stream_basic() -> None:
     s = await models.stream(MOCK_MODEL, [ai.user_message("Hi")])
     deltas: list[str] = []
     async for msg in s:
-        if msg.text_delta:
-            deltas.append(msg.text_delta)
+        for ev in msg.deltas:
+            if isinstance(ev.part, messages_.TextPart):
+                deltas.append(ev.chunk)
 
     assert mock.call_count == 1
     assert s.text == "Hello world"

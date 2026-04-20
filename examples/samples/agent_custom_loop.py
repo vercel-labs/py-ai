@@ -55,8 +55,9 @@ async def main() -> None:
         model,
         [ai.user_message("Compare the weather and population of New York and Tokyo.")],
     ):
-        if msg.text_delta:
-            print(msg.text_delta, end="", flush=True)
+        for ev in msg.deltas:
+            if isinstance(ev.part, ai.TextPart):
+                print(ev.chunk, end="", flush=True)
     print()
 
 

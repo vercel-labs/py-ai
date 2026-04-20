@@ -42,8 +42,10 @@ async def main() -> None:
     async for msg in my_agent.run(model, messages):
         if msg.source_label == "tool_progress":
             print(f"  [{msg.text}]")
-        elif msg.text_delta:
-            print(msg.text_delta, end="", flush=True)
+        else:
+            for ev in msg.deltas:
+                if isinstance(ev.part, ai.TextPart):
+                    print(ev.chunk, end="", flush=True)
     print()
 
 

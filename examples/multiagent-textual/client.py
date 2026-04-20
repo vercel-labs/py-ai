@@ -176,15 +176,15 @@ class MultiAgentApp(textual.app.App):
         if panel.status == "idle":
             panel.status = "streaming..."
 
-        # Text deltas
-        if msg.text_delta:
-            panel.append_text(msg.text_delta)
-        if msg.reasoning_delta:
-            panel.append_text(msg.reasoning_delta, style="dim")
-
-        # Tool argument deltas
-        for delta in msg.tool_deltas:
-            panel.append_text(delta.args_delta, style="dim")
+        # Text / reasoning / tool-arg deltas
+        for ev in msg.deltas:
+            match ev.part:
+                case ai.TextPart():
+                    panel.append_text(ev.chunk)
+                case ai.ReasoningPart():
+                    panel.append_text(ev.chunk, style="dim")
+                case ai.ToolCallPart():
+                    panel.append_text(ev.chunk, style="dim")
 
         # Completed message — show tool calls and results
         if msg.is_done:

@@ -99,8 +99,9 @@ async def main() -> None:
 
     print("--- starting agent run ---\n")
     async for msg in my_agent.run(model, messages, middleware=[PrintMiddleware()]):
-        if msg.text_delta:
-            print(msg.text_delta, end="", flush=True)
+        for ev in msg.deltas:
+            if isinstance(ev.part, ai.TextPart):
+                print(ev.chunk, end="", flush=True)
     print("\n\n--- done ---")
 
 
