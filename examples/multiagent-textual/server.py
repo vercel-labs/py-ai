@@ -185,7 +185,7 @@ async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
         ],
     )
     async for msg in s:
-        yield msg.model_copy(update={"label": "summary"})
+        yield msg.model_copy(update={"agent": "summary"})
 
 
 # ---------------------------------------------------------------------------

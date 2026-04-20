@@ -5,7 +5,7 @@ import pathlib
 
 import ai
 
-model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
+model = ai.ai_gateway("anthropic/claude-sonnet-4")
 
 # Load a local image file (replace with your own path).
 image_path = pathlib.Path("sample_image.jpg")
@@ -21,8 +21,9 @@ messages = [
 
 async def main() -> None:
     async for msg in await ai.stream(model, messages):
-        if msg.text_delta:
-            print(msg.text_delta, end="", flush=True)
+        for ev in msg.deltas:
+            if isinstance(ev.part, ai.TextPart):
+                print(ev.chunk, end="", flush=True)
     print()
 
 

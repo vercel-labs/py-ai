@@ -13,7 +13,9 @@ Usage::
     msgs = [ai.user_message("hello")]
     s = await ai.stream(model, msgs)
     async for msg in s:
-        print(msg.text_delta, end="")
+        for ev in msg.deltas:
+            if isinstance(ev.part, ai.TextPart):
+                print(ev.chunk, end="", flush=True)
 
     # explicit client for custom auth
     client = ai.Client(base_url="https://custom.example.com/v1", api_key="sk-...")

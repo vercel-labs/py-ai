@@ -17,20 +17,20 @@ async def talk_to_mothership(question: str) -> AsyncGenerator[ai.Message]:
     for step in ["Connecting...", "Transmitting...", "Awaiting response..."]:
         yield ai.Message(
             role="assistant",
-            parts=[ai.TextPart(text=step, state="done")],
-            label="tool_progress",
+            parts=[ai.TextPart(text=step)],
+            source_label="tool_progress",
         )
         await asyncio.sleep(0.3)
 
     # The final yielded message's text is returned as the tool result.
     yield ai.Message(
         role="assistant",
-        parts=[ai.TextPart(text="The mothership says: Soon.", state="done")],
+        parts=[ai.TextPart(text="The mothership says: Soon.")],
     )
 
 
 async def main() -> None:
-    model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
+    model = ai.ai_gateway("anthropic/claude-sonnet-4")
 
     my_agent = ai.agent(tools=[talk_to_mothership])
 
@@ -40,10 +40,12 @@ async def main() -> None:
     ]
 
     async for msg in my_agent.run(model, messages):
-        if msg.label == "tool_progress":
+        if msg.source_label == "tool_progress":
             print(f"  [{msg.text}]")
-        elif msg.text_delta:
-            print(msg.text_delta, end="", flush=True)
+        else:
+            for ev in msg.deltas:
+                if isinstance(ev.part, ai.TextPart):
+                    print(ev.chunk, end="", flush=True)
     print()
 
 

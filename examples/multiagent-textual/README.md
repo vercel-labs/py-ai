@@ -10,7 +10,7 @@ The current implementation uses:
 - `ai.agent(...)` for each branch and the orchestrator
 - `await ai.hook(...)` for branch-specific approvals
 - `ai.yield_from(...)` to forward nested agent output into the outer run
-- `role="signal"` messages for hook state updates over the WebSocket
+- `role="internal"` messages for hook state updates over the WebSocket
 
 ## Setup
 

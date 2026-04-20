@@ -125,7 +125,7 @@ async def _hook_impl(call: middleware_.HookContext) -> pydantic.BaseModel:
     # Emit pending signal message.
     await rt.put_message(
         messages_.Message(
-            role="signal",
+            role="internal",
             parts=[
                 messages_.HookPart(
                     hook_id=label,
@@ -150,10 +150,10 @@ async def _hook_impl(call: middleware_.HookContext) -> pydantic.BaseModel:
     # Clean up live registry.
     _live_hooks.pop(label, None)
 
-    # Emit resolved signal message.
+    # Emit resolved internal message.
     await rt.put_message(
         messages_.Message(
-            role="signal",
+            role="internal",
             parts=[
                 messages_.HookPart(
                     hook_id=label,
@@ -229,10 +229,10 @@ async def cancel_hook(label: str, *, reason: str | None = None) -> None:
     future, hook_metadata, rt = _live_hooks.pop(label)
     future.cancel(reason)
 
-    # Emit cancelled signal message.
+    # Emit cancelled internal message.
     await rt.put_message(
         messages_.Message(
-            role="signal",
+            role="internal",
             parts=[
                 messages_.HookPart(
                     hook_id=label,

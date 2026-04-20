@@ -158,7 +158,7 @@ class MultiAgentApp(textual.app.App):
     # ------------------------------------------------------------------
 
     def _handle_message(self, msg: ai.Message) -> None:
-        label = msg.label or "unknown"
+        label = msg.source_label or "unknown"
 
         if (hook_part := msg.get_hook_part()) is not None:
             if hook_part.status == "pending":
@@ -176,21 +176,21 @@ class MultiAgentApp(textual.app.App):
         if panel.status == "idle":
             panel.status = "streaming..."
 
-        # Text deltas
-        if msg.text_delta:
-            panel.append_text(msg.text_delta)
-        if msg.reasoning_delta:
-            panel.append_text(msg.reasoning_delta, style="dim")
-
-        # Tool argument deltas
-        for delta in msg.tool_deltas:
-            panel.append_text(delta.args_delta, style="dim")
+        # Text / reasoning / tool-arg deltas
+        for ev in msg.deltas:
+            match ev.part:
+                case ai.TextPart():
+                    panel.append_text(ev.chunk)
+                case ai.ReasoningPart():
+                    panel.append_text(ev.chunk, style="dim")
+                case ai.ToolCallPart():
+                    panel.append_text(ev.chunk, style="dim")
 
         # Completed message — show tool calls and results
         if msg.is_done:
             for part in msg.parts:
                 match part:
-                    case ai.ToolCallPart(tool_name=name, tool_args=args, state="done"):
+                    case ai.ToolCallPart(tool_name=name, tool_args=args):
                         panel.append_line(f"> {name}({args})")
                     case ai.ToolResultPart(tool_name=name, result=result):
                         panel.append_line(f"< {name} = {result}")

@@ -6,7 +6,7 @@ import pydantic
 
 import ai
 
-model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
+model = ai.ai_gateway("anthropic/claude-sonnet-4")
 
 
 class Recipe(pydantic.BaseModel):
@@ -22,8 +22,9 @@ messages = [ai.user_message("Give me a simple pancake recipe.")]
 async def main() -> None:
     # Stream with structured output — watch JSON arrive, get validated at the end
     async for msg in await ai.stream(model, messages, output_type=Recipe):
-        if msg.text_delta:
-            print(msg.text_delta, end="", flush=True)
+        for ev in msg.deltas:
+            if isinstance(ev.part, ai.TextPart):
+                print(ev.chunk, end="", flush=True)
         if msg.output:
             recipe: Recipe = msg.output
             print(f"\n\nParsed recipe: {recipe.name}")

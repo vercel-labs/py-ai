@@ -16,7 +16,7 @@ IssueKind = Literal[
     "invalid-tool-args",
     "orphaned-tool-call",
     "orphaned-tool-result",
-    "signal-message",
+    "internal-message",
 ]
 
 
@@ -47,9 +47,9 @@ def _clean_messages(
     result: list[messages_.Message] = []
 
     for msg in messages:
-        # 1. drop signal messages emitted by hooks
-        if msg.role == "signal":
-            issues.append("signal-message")
+        # 1. drop internal messages emitted by hooks
+        if msg.role == "internal":
+            issues.append("internal-message")
             if mode == "strict":
                 result.append(msg)
             continue

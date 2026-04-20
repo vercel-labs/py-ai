@@ -12,7 +12,7 @@ async def get_weather(city: str) -> str:
 
 
 async def main() -> None:
-    model = ai.model("ai-gateway", "anthropic/claude-sonnet-4")
+    model = ai.ai_gateway("anthropic/claude-sonnet-4")
 
     my_agent = ai.agent(tools=[get_weather])
 
@@ -22,8 +22,9 @@ async def main() -> None:
     ]
 
     async for msg in my_agent.run(model, messages):
-        if msg.text_delta:
-            print(msg.text_delta, end="", flush=True)
+        for ev in msg.deltas:
+            if isinstance(ev.part, ai.TextPart):
+                print(ev.chunk, end="", flush=True)
     print()
 
 

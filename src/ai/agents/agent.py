@@ -206,7 +206,9 @@ class LoopFn(Protocol):
 async def _default_loop(context: Context) -> AsyncGenerator[types.Message]:
     while True:
         stream = await models.stream(
-            context.model, context.messages, tools=context.tools
+            context.model,
+            context.messages,
+            tools=context.tools,
         )
         async for message in stream:
             yield message
@@ -220,7 +222,10 @@ async def _default_loop(context: Context) -> AsyncGenerator[types.Message]:
             tasks = [tg.create_task(tc()) for tc in tool_calls]
 
         # Yield one merged tool-result message — history auto-collects it.
-        yield builders.tool_message(*(t.result() for t in tasks))
+        # Left un-stamped: the tool result is the input of the *next* turn,
+        # so the next stream() call will stamp it with that turn's id.
+        tool_msg = builders.tool_message(*(t.result() for t in tasks))
+        yield tool_msg
 
 
 async def _collect_messages(
@@ -331,7 +336,7 @@ class Agent:
             source = _collect_messages(loop_fn(context), context.messages)
             async for message in runtime.run(source):
                 if call.label is not None:
-                    message = message.model_copy(update={"label": call.label})
+                    message = message.model_copy(update={"source_label": call.label})
                 yield message
 
         # Activate middleware for this run (and everything it calls).

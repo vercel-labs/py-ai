@@ -32,12 +32,52 @@ async def test_stream_basic() -> None:
     s = await models.stream(MOCK_MODEL, [ai.user_message("Hi")])
     deltas: list[str] = []
     async for msg in s:
-        if msg.text_delta:
-            deltas.append(msg.text_delta)
+        for ev in msg.deltas:
+            if isinstance(ev.part, messages_.TextPart):
+                deltas.append(ev.chunk)
 
     assert mock.call_count == 1
     assert s.text == "Hello world"
     assert "".join(deltas) == "Hello world"
+
+
+async def test_stream_preserves_existing_turn_ids() -> None:
+    """ai.stream() stamps only inputs without a turn_id; older turns survive."""
+    mock = mock_llm([[text_msg("reply")]])
+
+    old = ai.user_message("earlier")
+    old = old.model_copy(update={"turn_id": "prev"})
+    fresh = ai.user_message("latest")
+
+    s = await models.stream(MOCK_MODEL, [old, fresh])
+    yielded: list[messages_.Message] = []
+    async for msg in s:
+        yielded.append(msg)
+
+    assert mock.call_count == 1
+    # First yielded is the old input — unchanged.
+    assert yielded[0].turn_id == "prev"
+    # Fresh input was stamped with the current turn's id.
+    assert yielded[1].turn_id is not None
+    assert yielded[1].turn_id != "prev"
+    # Response shares the current turn id.
+    response_ids = [m.turn_id for m in yielded if m.role == "assistant"]
+    assert response_ids and all(tid == yielded[1].turn_id for tid in response_ids)
+
+
+async def test_stream_accepts_explicit_turn_id() -> None:
+    """Explicit turn_id kwarg is used verbatim."""
+    mock_llm([[text_msg("ok")]])
+    fresh = ai.user_message("hi")
+
+    s = await models.stream(MOCK_MODEL, [fresh], turn_id="custom-turn")
+    yielded: list[messages_.Message] = []
+    async for msg in s:
+        yielded.append(msg)
+
+    assert s.turn_id == "custom-turn"
+    assert yielded[0].turn_id == "custom-turn"
+    assert yielded[-1].turn_id == "custom-turn"
 
 
 async def test_stream_with_explicit_client() -> None:
@@ -57,7 +97,7 @@ async def test_stream_with_explicit_client() -> None:
         yield messages_.Message(
             id="m1",
             role="assistant",
-            parts=[messages_.TextPart(text="ok", state="done")],
+            parts=[messages_.TextPart(text="ok")],
         )
 
     models.register_stream("mock", _spy_stream)
@@ -89,7 +129,7 @@ async def test_stream_with_output_type() -> None:
         output_type: type[pydantic.BaseModel] | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[messages_.Message]:
-        text_part = messages_.TextPart(text=json_text, state="done")
+        text_part = messages_.TextPart(text=json_text)
         parts: list[messages_.Part] = [text_part]
         if output_type is not None:
             import json

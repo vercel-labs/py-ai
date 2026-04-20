@@ -1,5 +1,4 @@
-from . import adapters, middleware, models
-from .adapters import ai_sdk_ui
+from . import middleware, models
 from .agents import (
     TOOL_APPROVAL_HOOK_TYPE,
     Agent,
@@ -37,13 +36,15 @@ from .types import (
     HookPart,
     Message,
     Part,
-    PartState,
+    PartClosed,
+    PartDelta,
+    PartOpened,
     ReasoningPart,
     StreamResultLike,
+    StreamState,
     StructuredOutputPart,
     TextPart,
     ToolCallPart,
-    ToolDelta,
     ToolLike,
     ToolResultPart,
     ToolSchema,
@@ -63,14 +64,16 @@ __all__ = [
     # Types (from types/)
     "Message",
     "Part",
-    "PartState",
+    "PartClosed",
+    "PartDelta",
+    "PartOpened",
     "TextPart",
     "ToolCallPart",
     "ToolResultPart",
-    "ToolDelta",
     "ReasoningPart",
     "FilePart",
     "HookPart",
+    "StreamState",
     "StructuredOutputPart",
     "ToolLike",
     "ToolSchema",
@@ -121,6 +124,4 @@ __all__ = [
     "middleware",
     # Submodules
     "mcp",
-    "ai_sdk_ui",
-    "adapters",
 ]
