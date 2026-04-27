@@ -58,7 +58,7 @@ class HookPart[T](pydantic.BaseModel):
     id: str = pydantic.Field(default_factory=generate_id)
     hook_id: str
     hook_type: str
-    status: Literal["pending", "resolved"]
+    status: Literal["pending", "resolved", "cancelled"]
     metadata: dict[str, Any] = pydantic.Field(default_factory=dict)
     resolution: T | None = None
 
@@ -187,15 +187,6 @@ Part = Annotated[
 ]
 
 
-ALLOWED_PARTS: dict[str, set[str]] = {
-    "user": {"text", "file"},
-    "assistant": {"text", "tool_call", "reasoning", "structured_output"},
-    "system": {"text"},
-    "tool": {"tool_result"},
-    "internal": {"hook"},
-}
-
-
 class Message(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(frozen=True)
 
@@ -206,13 +197,65 @@ class Message(pydantic.BaseModel):
     source_label: str | None = None
     usage: usage_.Usage | None = None
 
-    @pydantic.model_validator(mode="after")
-    def _check_parts(self) -> Self:
-        allowed = ALLOWED_PARTS[self.role]
-        bad = [p.kind for p in self.parts if p.kind not in allowed]
-        if bad:
-            raise ValueError(
-                f"role={self.role!r} cannot contain parts of kind(s) "
-                f"{sorted(set(bad))}; allowed: {sorted(allowed)}"
-            )
-        return self
+    @property
+    def text(self) -> str:
+        """Concatenated text parts."""
+        return "".join(p.text for p in self.parts if isinstance(p, TextPart))
+
+    @property
+    def reasoning(self) -> str:
+        """Concatenated reasoning parts."""
+        return "".join(p.text for p in self.parts if isinstance(p, ReasoningPart))
+
+    @property
+    def tool_calls(self) -> list[ToolCallPart]:
+        return [p for p in self.parts if isinstance(p, ToolCallPart)]
+
+    @property
+    def tool_results(self) -> list[ToolResultPart]:
+        return [p for p in self.parts if isinstance(p, ToolResultPart)]
+
+    @property
+    def files(self) -> list[FilePart]:
+        return [p for p in self.parts if isinstance(p, FilePart)]
+
+    @property
+    def images(self) -> list[FilePart]:
+        return [p for p in self.files if p.media_type.startswith("image/")]
+
+    @property
+    def videos(self) -> list[FilePart]:
+        return [p for p in self.files if p.media_type.startswith("video/")]
+
+    @property
+    def output(self) -> Any:
+        """Parsed structured output from the first structured-output part."""
+        for part in self.parts:
+            if isinstance(part, StructuredOutputPart):
+                return part.value
+        return None
+
+    def replace(self, old: Part, new: Part | None = None) -> Self:
+        """Return a copy with one part replaced.
+
+        ``replace(new_part)`` matches by ``new_part.id``.
+        ``replace(old_part, new_part)`` matches by object identity.
+        """
+        if new is None:
+            new = old
+            for idx, part in enumerate(self.parts):
+                if part.id == new.id:
+                    parts = list(self.parts)
+                    parts[idx] = new
+                    return self.model_copy(update={"parts": parts})
+            raise ValueError(f"Part id={new.id!r} not found in message {self.id!r}")
+
+        for idx, part in enumerate(self.parts):
+            if part is old:
+                parts = list(self.parts)
+                parts[idx] = new
+                return self.model_copy(update={"parts": parts})
+        raise ValueError(f"Part id={old.id!r} not found in message {self.id!r}")
+
+
+Usage = usage_.Usage

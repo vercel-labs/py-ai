@@ -78,11 +78,11 @@ def _gated_agent(
     gated = ai.agent(tools=tools)
 
     @gated.loop
-    async def gated_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
+    async def gated_loop(context: ai.Context) -> AsyncGenerator[ai.Event]:
         while True:
-            s = await ai.stream(context.model, context.messages, tools=context.tools)
-            async for msg in s:
-                yield msg
+            s = ai.stream(context.model, context.messages, tools=context.tools)
+            async for event in s:
+                yield event
 
             tool_calls = context.resolve(s.tool_calls)
             if not tool_calls:
@@ -110,7 +110,9 @@ def _gated_agent(
                 else:
                     results.append(await tc())
 
-            yield ai.tool_message(*results)
+            tool_msg = ai.tool_message(*results)
+            yield ai.MessageStart(message=tool_msg)
+            yield ai.MessageEnd(message=tool_msg)
 
     return gated
 
@@ -136,7 +138,7 @@ orchestrator = ai.agent()
 
 
 @orchestrator.loop
-async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
+async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.Event]:
     """Run two gated agents in parallel, then summarise their results."""
     query = context.messages[-1].text
 
@@ -175,7 +177,7 @@ async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
     combined = f"Mothership: {r1}\nData centers: {r2}"
 
     # Fan in: summarise.
-    s = await ai.stream(
+    s = ai.stream(
         context.model,
         [
             ai.system_message(
@@ -184,8 +186,25 @@ async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
             ai.user_message(combined),
         ],
     )
-    async for msg in s:
-        yield msg.model_copy(update={"agent": "summary"})
+    async for event in s:
+        if isinstance(event, ai.MessageEnd):
+            yield event.model_copy(
+                update={
+                    "message": event.message.model_copy(
+                        update={"source_label": "summary"}
+                    )
+                }
+            )
+        elif isinstance(event, ai.MessageStart) and event.message is not None:
+            yield event.model_copy(
+                update={
+                    "message": event.message.model_copy(
+                        update={"source_label": "summary"}
+                    )
+                }
+            )
+        else:
+            yield event
 
 
 # ---------------------------------------------------------------------------
@@ -196,8 +215,15 @@ async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
 def _normalise_message(data: dict[str, Any]) -> dict[str, Any]:
     """Ensure ToolResultPart.result is always a dict for safe deserialisation."""
     for part in data.get("parts", []):
-        if part.get("type") == "tool_result" and isinstance(part.get("result"), str):
+        if part.get("kind") == "tool_result" and isinstance(part.get("result"), str):
             part["result"] = {"value": part["result"]}
+    return data
+
+
+def _normalise_event(data: dict[str, Any]) -> dict[str, Any]:
+    message = data.get("message")
+    if isinstance(message, dict):
+        data["message"] = _normalise_message(message)
     return data
 
 
@@ -232,12 +258,17 @@ async def ws_endpoint(websocket: fastapi.WebSocket) -> None:
     reader = asyncio.create_task(read_resolutions())
 
     try:
-        async for msg in result:
-            data = _normalise_message(msg.model_dump())
+        async for event in result:
+            data = _normalise_event(event.model_dump())
             await websocket.send_json(data)
 
-            if hook_part := msg.get_hook_part():
-                print(f"  Hook {hook_part.status}: {hook_part.hook_id}")
+            if isinstance(event, ai.MessageEnd) and event.message.role == "internal":
+                hook_parts = [
+                    p for p in event.message.parts if isinstance(p, ai.HookPart)
+                ]
+                if hook_parts:
+                    hook_part = hook_parts[0]
+                    print(f"  Hook {hook_part.status}: {hook_part.hook_id}")
     finally:
         reader.cancel()
         with contextlib.suppress(asyncio.CancelledError):

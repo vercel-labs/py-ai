@@ -21,10 +21,9 @@ async def main() -> None:
         ai.user_message("What's the weather in Tokyo?"),
     ]
 
-    async for msg in my_agent.run(model, messages):
-        for ev in msg.deltas:
-            if isinstance(ev.part, ai.TextPart):
-                print(ev.chunk, end="", flush=True)
+    async for event in my_agent.run(model, messages):
+        if isinstance(event, ai.TextDelta):
+            print(event.chunk, end="", flush=True)
     print()
 
 

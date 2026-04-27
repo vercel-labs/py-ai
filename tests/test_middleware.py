@@ -12,9 +12,17 @@ import pytest
 import ai
 from ai import middleware, models
 from ai.models.core.helpers import streaming as streaming_
+from ai.types import events as events_
 from ai.types import messages as messages_
 
-from .conftest import MOCK_MODEL, mock_generate, mock_llm, text_msg, tool_call_msg
+from .conftest import (
+    MOCK_MODEL,
+    collect_messages,
+    mock_generate,
+    mock_llm,
+    text_msg,
+    tool_call_msg,
+)
 
 # ── Helpers ──────────────────────────────────────────────────────
 
@@ -97,16 +105,19 @@ async def test_wrap_hook_is_called() -> None:
     my_agent = ai.agent()
 
     @my_agent.loop
-    async def custom(context: ai.Context) -> AsyncGenerator[ai.Message]:
-        async for msg in await ai.models.stream(context.model, context.messages):
-            yield msg
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.Event]:
+        async for event in ai.models.stream(context.model, context.messages):
+            yield event
         await ai.hook("test_hook", payload=Confirmation)
 
     mock_llm([[text_msg("OK")]])
 
-    async for msg in my_agent.run(
+    async for event in my_agent.run(
         MOCK_MODEL, [ai.user_message("go")], middleware=[Spy()]
     ):
+        if not isinstance(event, ai.MessageEnd):
+            continue
+        msg = event.message
         if any(isinstance(p, ai.HookPart) and p.status == "pending" for p in msg.parts):
             ai.resolve_hook("test_hook", {"approved": True, "reason": "ok"})
 
@@ -178,22 +189,32 @@ async def test_model_context_can_be_modified() -> None:
             tools: Sequence[Any] | None = None,
             output_type: type[pydantic.BaseModel] | None = None,
             **kw: Any,
-        ) -> AsyncGenerator[messages_.Message]:
+        ) -> AsyncGenerator[events_.Event]:
             captured_messages.append(list(messages))
             seq = self._responses[self._idx]
             self._idx += 1
-            handler = streaming_.StreamHandler()
+            message_id = seq[0].id if seq else messages_.generate_id()
+            handler = streaming_.StreamHandler(message_id=message_id)
+            yield handler.message_start()
             for msg in seq:
                 for i, part in enumerate(msg.parts):
                     if isinstance(part, messages_.TextPart):
                         bid = f"text-{i}"
-                        yield handler.handle_event(streaming_.TextStart(block_id=bid))
+                        for event in handler.handle_event(
+                            streaming_.TextStart(block_id=bid)
+                        ):
+                            yield event
                         if part.text:
-                            yield handler.handle_event(
+                            for event in handler.handle_event(
                                 streaming_.TextDelta(block_id=bid, delta=part.text)
-                            )
-                        yield handler.handle_event(streaming_.TextEnd(block_id=bid))
-            yield handler.handle_event(streaming_.MessageDone())
+                            ):
+                                yield event
+                        for event in handler.handle_event(
+                            streaming_.TextEnd(block_id=bid)
+                        ):
+                            yield event
+            for event in handler.handle_event(streaming_.MessageDone()):
+                yield event
 
     adapter = CapturingAdapter([[text_msg("Concise!")]])
     models.register_stream("mock", adapter.stream)
@@ -228,14 +249,14 @@ async def test_nested_agent_extends_middleware() -> None:
     inner = ai.agent()
 
     @ai.tool  # type: ignore[arg-type]
-    async def run_inner(query: str) -> AsyncGenerator[ai.Message]:
+    async def run_inner(query: str) -> AsyncGenerator[ai.Event]:
         """Run sub-agent with its own middleware."""
-        async for msg in inner.run(
+        async for event in inner.run(
             MOCK_MODEL,
             [ai.user_message(query)],
             middleware=[Tagger("B")],
         ):
-            yield msg
+            yield event
 
     outer = ai.agent(tools=[run_inner])
 
@@ -269,19 +290,19 @@ async def test_wrap_agent_run_ordering() -> None:
     class Outer(ai.Middleware):
         async def wrap_agent_run(
             self, call: middleware.AgentRunContext, next: Any
-        ) -> AsyncGenerator[ai.Message]:
+        ) -> AsyncGenerator[ai.Event]:
             order.append("outer-before")
-            async for msg in next(call):
-                yield msg
+            async for event in next(call):
+                yield event
             order.append("outer-after")
 
     class Inner(ai.Middleware):
         async def wrap_agent_run(
             self, call: middleware.AgentRunContext, next: Any
-        ) -> AsyncGenerator[ai.Message]:
+        ) -> AsyncGenerator[ai.Event]:
             order.append("inner-before")
-            async for msg in next(call):
-                yield msg
+            async for event in next(call):
+                yield event
             order.append("inner-after")
 
     my_agent = ai.agent()
@@ -354,12 +375,10 @@ async def test_wrap_tool_context_fields_flow_to_result() -> None:
     call2 = [text_msg("done")]
     mock_llm([call1, call2])
 
-    tool_result_msgs: list[ai.Message] = []
-    async for m in my_agent.run(
-        MOCK_MODEL, [ai.user_message("go")], middleware=[Rewriter()]
-    ):
-        if m.role == "tool" and m.tool_results:
-            tool_result_msgs.append(m)
+    msgs = await collect_messages(
+        my_agent.run(MOCK_MODEL, [ai.user_message("go")], middleware=[Rewriter()])
+    )
+    tool_result_msgs = [m for m in msgs if m.role == "tool" and m.tool_results]
 
     assert len(tool_result_msgs) >= 1
     # The result message should use the rewritten name, not the original.
@@ -408,26 +427,26 @@ async def test_middleware_can_wrap_stream_result() -> None:
         ) -> ai.StreamResultLike:
             stream_result = await next(call)
 
-            async def _transformed() -> AsyncGenerator[messages_.Message]:
-                async for msg in stream_result:
-                    yield msg
+            async def _transformed() -> AsyncGenerator[events_.Event]:
+                async for event in stream_result:
+                    yield event
                 # After the stream ends, yield one more snapshot with extra text.
-                yield messages_.Message(
+                msg = messages_.Message(
                     id="appended",
                     role="assistant",
                     parts=[messages_.TextPart(text="original + appended")],
                 )
+                yield events_.MessageStart(message=msg.model_copy(update={"parts": []}))
+                yield events_.MessageEnd(message=msg)
 
             return ai.StreamResult.from_generator(_transformed())
 
     my_agent = ai.agent()
     mock_llm([[text_msg("original")]])
 
-    msgs: list[ai.Message] = []
-    async for m in my_agent.run(
-        MOCK_MODEL, [ai.user_message("Hi")], middleware=[TextAppender()]
-    ):
-        msgs.append(m)
+    msgs = await collect_messages(
+        my_agent.run(MOCK_MODEL, [ai.user_message("Hi")], middleware=[TextAppender()])
+    )
 
     # The last message should be from the appended stream.
     texts = [m.text for m in msgs if m.text]
@@ -483,12 +502,10 @@ async def test_middleware_can_fix_bad_tool_kwargs() -> None:
     call2 = [text_msg("done")]
     mock_llm([call1, call2])
 
-    tool_result_msgs: list[ai.Message] = []
-    async for m in my_agent.run(
-        MOCK_MODEL, [ai.user_message("go")], middleware=[ArgFixer()]
-    ):
-        if m.role == "tool" and m.tool_results:
-            tool_result_msgs.append(m)
+    msgs = await collect_messages(
+        my_agent.run(MOCK_MODEL, [ai.user_message("go")], middleware=[ArgFixer()])
+    )
+    tool_result_msgs = [m for m in msgs if m.role == "tool" and m.tool_results]
 
     assert len(tool_result_msgs) >= 1
     # The fixer middleware supplied x=99, so double should return 198.

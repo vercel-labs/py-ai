@@ -1,6 +1,23 @@
 import ai
 import asyncio
 
+import inspect
+import pydantic
+import json
+
+from typing import get_type_hints
+
+
+def get_schema(fn) -> dict:
+    sig = inspect.signature(fn)
+    hints = get_type_hints(fn)
+
+    fields = {}
+    for name, p in sig.parameters.items():
+        t = hints.get(name, str)
+        default = ... if p.default is inspect.Parameter.empty else p.default
+        fields[name] = (t, default)
+
 
 async def main() -> None:
     model = ai.ai_gateway("anthropic/claude-opus-4.7")

@@ -39,19 +39,30 @@ class StreamResult:
     def __aiter__(self) -> AsyncGenerator[events_.Event]:
         return self._iterate()
 
+    def _stamp_message(self, msg: messages.Message) -> messages.Message:
+        if msg.turn_id is None and self._turn_id is not None:
+            return msg.model_copy(update={"turn_id": self._turn_id})
+        return msg
+
     async def _iterate(self) -> AsyncGenerator[events_.Event]:
         # Re-emit input messages as MessageStart + MessageEnd event pairs.
         for msg in self._input_messages:
-            if msg.turn_id is None and self._turn_id is not None:
-                msg = msg.model_copy(update={"turn_id": self._turn_id})
+            msg = self._stamp_message(msg)
             yield events_.MessageStart(message=msg)
             yield events_.MessageEnd(message=msg)
 
         # Stream adapter events.
         async for event in self._gen:
+            if isinstance(event, events_.MessageStart) and event.message is not None:
+                event = event.model_copy(
+                    update={"message": self._stamp_message(event.message)}
+                )
+
             # Capture the final message from MessageEnd.
             if isinstance(event, events_.MessageEnd):
-                self._message = event.message
+                message = self._stamp_message(event.message)
+                event = event.model_copy(update={"message": message})
+                self._message = message
                 self._usage = event.usage
             yield event
 
@@ -77,9 +88,7 @@ class StreamResult:
     def tool_calls(self) -> list[messages.ToolCallPart]:
         if self._message is None:
             return []
-        return [
-            p for p in self._message.parts if isinstance(p, messages.ToolCallPart)
-        ]
+        return [p for p in self._message.parts if isinstance(p, messages.ToolCallPart)]
 
     @property
     def usage(self) -> usage_.Usage | None:

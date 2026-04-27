@@ -10,7 +10,7 @@ import mcp.types
 import ai
 from ai.agents.mcp.client import _mcp_tool_to_native
 
-from ...conftest import MOCK_MODEL, mock_llm, text_msg, tool_call_msg
+from ...conftest import MOCK_MODEL, collect_messages, mock_llm, text_msg, tool_call_msg
 
 
 def _fake_mcp_tool(
@@ -88,9 +88,9 @@ async def test_mcp_tool_executes_through_agent() -> None:
     call2 = [text_msg("Done.", id="msg-2")]
     llm = mock_llm([call1, call2])
 
-    msgs: list[ai.Message] = []
-    async for msg in my_agent.run(MOCK_MODEL, [ai.user_message("echo hello")]):
-        msgs.append(msg)
+    msgs = await collect_messages(
+        my_agent.run(MOCK_MODEL, [ai.user_message("echo hello")])
+    )
 
     # Tool was called with the right args.
     assert len(call_log) == 1

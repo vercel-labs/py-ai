@@ -1,3 +1,4 @@
+from . import media
 from .events import (
     End,
     Event,
@@ -31,7 +32,6 @@ from .messages import (
 from .proto import StreamResultLike, ToolLike
 from .tools import ToolSchema
 from .usage import Usage
-from . import media
 
 __all__ = [
     "End",

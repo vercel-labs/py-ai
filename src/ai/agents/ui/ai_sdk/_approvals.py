@@ -6,13 +6,15 @@ delete this module and replace call sites with direct field access.
 
 from __future__ import annotations
 
+from typing import Any
+
 from ....types import messages as messages_
 from ...hooks import TOOL_APPROVAL_HOOK_TYPE
 
 _PREFIX = "approve_"
 
 
-def tool_call_id_for(hook_part: messages_.HookPart) -> str | None:
+def tool_call_id_for(hook_part: messages_.HookPart[Any]) -> str | None:
     """Return the tool_call_id encoded in a ToolApproval hook id, or None."""
     if hook_part.hook_type != TOOL_APPROVAL_HOOK_TYPE:
         return None

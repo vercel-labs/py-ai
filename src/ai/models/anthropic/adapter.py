@@ -282,18 +282,22 @@ async def stream(
 
     block_types: dict[int, str] = {}
     tool_ids: dict[int, str] = {}
+    tool_names: dict[int, str] = {}
     signature_buffer: dict[int, str] = {}
     # Accumulate parts for the final Message
     parts: list[types.Part] = []
     _text_parts: dict[str, str] = {}  # block_id -> accumulated text
     _reasoning_parts: dict[str, str] = {}  # block_id -> accumulated text
     _tool_parts: dict[str, str] = {}  # tool_call_id -> accumulated args
+    message_id = types.generate_id()
 
     try:
         stream_cm = sdk_client.messages.stream(**api_kwargs)
 
         async with stream_cm as sdk_stream:
-            yield events.MessageStart()
+            yield events.MessageStart(
+                message=types.Message(id=message_id, role="assistant", parts=[])
+            )
             async for event in sdk_stream:
                 match event.type:
                     case "content_block_start":
@@ -310,6 +314,7 @@ async def stream(
                                 yield events.ReasoningStart(block_id=str(idx))
                             case "tool_use":
                                 tool_ids[idx] = block.id
+                                tool_names[idx] = block.name
                                 _tool_parts[block.id] = ""
                                 yield events.ToolStart(
                                     tool_call_id=block.id,
@@ -331,8 +336,7 @@ async def stream(
                                 )
                             case "thinking_delta":
                                 _reasoning_parts[str(idx)] = (
-                                    _reasoning_parts.get(str(idx), "")
-                                    + delta.thinking
+                                    _reasoning_parts.get(str(idx), "") + delta.thinking
                                 )
                                 yield events.ReasoningDelta(
                                     chunk=delta.thinking,
@@ -384,7 +388,7 @@ async def stream(
                                         types.ToolCallPart(
                                             id=tool_id,
                                             tool_call_id=tool_id,
-                                            tool_name=block_types.get(idx, ""),
+                                            tool_name=tool_names.get(idx, ""),
                                             tool_args=_tool_parts.get(tool_id, ""),
                                         )
                                     )
@@ -402,6 +406,7 @@ async def stream(
                 raw=sdk_usage.model_dump(exclude_none=True) or None,
             )
             final_message = types.Message(
+                id=message_id,
                 role="assistant",
                 parts=parts,
                 usage=usage,

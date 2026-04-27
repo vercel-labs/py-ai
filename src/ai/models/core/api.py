@@ -14,8 +14,8 @@ from ... import middleware as middleware_
 from ...types import events as events_
 from ...types import integrity as integrity_
 from ...types import messages as messages_
+from ...types import proto as proto_
 from ...types import stream as stream_
-from ...types import tools as tools_
 from . import adapters
 from . import client as client_
 from . import model as model_
@@ -26,11 +26,11 @@ def stream(
     model: model_.Model,
     messages: list[messages_.Message],
     *,
-    tools: Sequence[tools_.ToolLike] | None = None,
+    tools: Sequence[proto_.ToolLike] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
     turn_id: str | None = None,
     **kwargs: Any,
-) -> stream_.StreamResultLike:
+) -> proto_.StreamResultLike:
     """Stream an LLM response.
 
     Returns a :class:`StreamResultLike` that is async-iterable and
@@ -39,7 +39,7 @@ def stream(
 
     Call-site is a plain ``async for`` — no outer ``await`` needed::
 
-        async for msg in ai.stream(model, messages):
+        async for event in ai.stream(model, messages):
             ...
 
     One call is one turn: a single request and its response.  The model
@@ -69,7 +69,7 @@ def stream(
     # Capture in closure for the inner function.
     _turn_id = turn_id
 
-    async def _real(call: middleware_.ModelContext) -> stream_.StreamResultLike:
+    async def _real(call: middleware_.ModelContext) -> proto_.StreamResultLike:
         c = client_.auto_client(call.model)
         adapter_fn = adapters.get_stream_adapter(call.model.adapter)
         return types_.StreamResult(
@@ -91,7 +91,7 @@ def stream(
         async for event in inner:
             yield event
 
-    return stream_.StreamResult.from_generator(_driver())
+    return stream_.StreamResult(_driver(), turn_id=turn_id)
 
 
 async def generate(

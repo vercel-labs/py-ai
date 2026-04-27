@@ -12,7 +12,7 @@ from .mcp import client as mcp_client
 
 
 class Runtime:
-    """Central message queue. Producers put messages, run() yields them."""
+    """Central event queue. Producers put events, run() yields them."""
 
     class _Sentinel:
         pass
@@ -20,16 +20,20 @@ class Runtime:
     _SENTINEL = _Sentinel()
 
     def __init__(self) -> None:
-        self._message_queue: asyncio.Queue[types.Message | Runtime._Sentinel] = (
+        self._event_queue: asyncio.Queue[types.Event | Runtime._Sentinel] = (
             asyncio.Queue()
         )
         self._hook_labels: set[str] = set()
 
+    async def put_event(self, event: types.Event) -> None:
+        await self._event_queue.put(event)
+
     async def put_message(self, message: types.Message) -> None:
-        await self._message_queue.put(message)
+        await self.put_event(types.MessageStart(message=message))
+        await self.put_event(types.MessageEnd(message=message))
 
     async def signal_done(self) -> None:
-        await self._message_queue.put(self._SENTINEL)
+        await self._event_queue.put(self._SENTINEL)
 
     def track_hook_label(self, label: str) -> None:
         """Register a hook label for cleanup when the run ends."""
@@ -57,9 +61,9 @@ async def _stop_when_done(runtime: Runtime, task: Awaitable[None]) -> None:
 
 
 async def run(
-    source: AsyncIterable[types.Message],
-) -> AsyncGenerator[types.Message]:
-    """Run *source* and yield every message that gets put into the Runtime queue."""
+    source: AsyncIterable[types.Event],
+) -> AsyncGenerator[types.Event]:
+    """Run *source* and yield every event that gets put into the Runtime queue."""
     rt = Runtime()
     token = _runtime.set(rt)
 
@@ -68,15 +72,15 @@ async def run(
     mcp_token = mcp_client._pool.set(mcp_pool)
 
     async def _drain() -> None:
-        async for message in source:
-            await rt.put_message(message)
+        async for event in source:
+            await rt.put_event(event)
 
     try:
         async with asyncio.TaskGroup() as tg:
             tg.create_task(_stop_when_done(rt, _drain()))
 
             while True:
-                item = await rt._message_queue.get()
+                item = await rt._event_queue.get()
                 if isinstance(item, Runtime._Sentinel):
                     return
                 yield item

@@ -1,6 +1,6 @@
 from typing import Any
-import pydantic
 
+import pydantic
 
 _PARAMS_CONFIG = pydantic.ConfigDict(frozen=True, populate_by_name=True)
 

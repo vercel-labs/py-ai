@@ -113,7 +113,7 @@ class StreamHandler:
 
     def message_start(self) -> events_.MessageStart:
         """Emit a MessageStart event at the beginning of a stream."""
-        return events_.MessageStart()
+        return events_.MessageStart(message=self._build_message())
 
     def handle_event(self, event: StreamEvent) -> list[events_.Event]:
         """Process an adapter event and return public Event objects."""

@@ -10,9 +10,10 @@ import pydantic
 import ai
 from ai import models
 from ai.models.core.helpers import streaming as streaming_
+from ai.types import events as events_
 from ai.types import messages as messages_
 
-from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_call_msg
+from ..conftest import MOCK_MODEL, collect_messages, mock_llm, text_msg, tool_call_msg
 
 # ---------------------------------------------------------------------------
 # Generator tool: yields intermediate messages, returns final text
@@ -44,9 +45,9 @@ async def test_generator_tool_streams_and_returns_result() -> None:
     reply = [text_msg("Done!", id="msg-2")]
     llm = mock_llm([call, reply])
 
-    collected: list[ai.Message] = []
-    async for msg in my_agent.run(MOCK_MODEL, [ai.user_message("Go")]):
-        collected.append(msg)
+    collected = await collect_messages(
+        my_agent.run(MOCK_MODEL, [ai.user_message("Go")])
+    )
 
     assert llm.call_count == 2
 
@@ -87,7 +88,7 @@ class _CapturingAdapter:
         tools: Sequence[ai.ToolLike] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         **kwargs: Any,
-    ) -> AsyncGenerator[messages_.Message]:
+    ) -> AsyncGenerator[events_.Event]:
         if self._idx >= len(self._responses):
             raise RuntimeError("_CapturingAdapter: no more responses")
         self.call_count += 1
@@ -95,35 +96,46 @@ class _CapturingAdapter:
         seq = self._responses[self._idx]
         self._idx += 1
 
-        handler = streaming_.StreamHandler()
+        message_id = seq[0].id if seq else messages_.generate_id()
+        handler = streaming_.StreamHandler(message_id=message_id)
+        yield handler.message_start()
         for msg in seq:
             for i, part in enumerate(msg.parts):
                 if isinstance(part, messages_.TextPart):
                     bid = f"text-{i}"
-                    yield handler.handle_event(streaming_.TextStart(block_id=bid))
+                    for event in handler.handle_event(
+                        streaming_.TextStart(block_id=bid)
+                    ):
+                        yield event
                     if part.text:
-                        yield handler.handle_event(
+                        for event in handler.handle_event(
                             streaming_.TextDelta(block_id=bid, delta=part.text)
-                        )
-                    yield handler.handle_event(streaming_.TextEnd(block_id=bid))
+                        ):
+                            yield event
+                    for event in handler.handle_event(streaming_.TextEnd(block_id=bid)):
+                        yield event
                 elif isinstance(part, messages_.ToolCallPart):
-                    yield handler.handle_event(
+                    for event in handler.handle_event(
                         streaming_.ToolStart(
                             tool_call_id=part.tool_call_id,
                             tool_name=part.tool_name,
                         )
-                    )
+                    ):
+                        yield event
                     if part.tool_args:
-                        yield handler.handle_event(
+                        for event in handler.handle_event(
                             streaming_.ToolArgsDelta(
                                 tool_call_id=part.tool_call_id,
                                 delta=part.tool_args,
                             )
-                        )
-                    yield handler.handle_event(
+                        ):
+                            yield event
+                    for event in handler.handle_event(
                         streaming_.ToolEnd(tool_call_id=part.tool_call_id)
-                    )
-        yield handler.handle_event(streaming_.MessageDone())
+                    ):
+                        yield event
+        for event in handler.handle_event(streaming_.MessageDone()):
+            yield event
 
 
 @ai.tool
@@ -133,7 +145,7 @@ async def inner_fact(topic: str) -> str:
 
 
 @ai.tool  # type: ignore[arg-type]
-async def research_tool(topic: str) -> AsyncGenerator[ai.Message]:
+async def research_tool(topic: str) -> AsyncGenerator[ai.Event]:
     """Nested agent that researches a topic."""
     inner = ai.agent(tools=[inner_fact])
 
@@ -141,8 +153,8 @@ async def research_tool(topic: str) -> AsyncGenerator[ai.Message]:
         ai.system_message("Be concise."),
         ai.user_message(f"Research: {topic}"),
     ]
-    async for msg in inner.run(MOCK_MODEL, msgs, label="inner"):
-        yield msg
+    async for event in inner.run(MOCK_MODEL, msgs, label="inner"):
+        yield event
 
 
 async def test_yield_from_nested_agent() -> None:
@@ -168,9 +180,9 @@ async def test_yield_from_nested_agent() -> None:
     adapter = _CapturingAdapter([outer_call, inner_reply, outer_reply])
     models.register_stream("mock", adapter.stream)
 
-    collected: list[ai.Message] = []
-    async for msg in outer.run(MOCK_MODEL, [ai.user_message("Tell me about Mars")]):
-        collected.append(msg)
+    collected = await collect_messages(
+        outer.run(MOCK_MODEL, [ai.user_message("Tell me about Mars")])
+    )
 
     assert adapter.call_count == 3
 

@@ -20,10 +20,9 @@ messages = [
 
 
 async def main() -> None:
-    async for msg in await ai.stream(model, messages):
-        for ev in msg.deltas:
-            if isinstance(ev.part, ai.TextPart):
-                print(ev.chunk, end="", flush=True)
+    async for event in ai.stream(model, messages):
+        if isinstance(event, ai.TextDelta):
+            print(event.chunk, end="", flush=True)
     print()
 
 

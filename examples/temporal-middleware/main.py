@@ -117,9 +117,12 @@ async def llm_call_activity(params: LLMParams) -> LLMResult:
     messages = [ai.Message.model_validate(m) for m in params.messages]
     tools = [ai.ToolSchema(return_type=None, **t) for t in params.tool_schemas]
 
-    s = await ai.models.stream(model, messages, tools=tools)
-    result = await ai.models.buffer(s)
-    return LLMResult(message=result.model_dump())
+    s = ai.models.stream(model, messages, tools=tools)
+    async for _event in s:
+        pass
+    if s.message is None:
+        raise RuntimeError("LLM stream ended without a final message")
+    return LLMResult(message=s.message.model_dump())
 
 
 # ── Middleware ───────────────────────────────────────────────────
@@ -153,8 +156,9 @@ class TemporalMiddleware(ai.Middleware):
         )
         msg = ai.Message.model_validate(result.message)
 
-        async def _single() -> AsyncGenerator[ai.Message]:
-            yield msg
+        async def _single() -> AsyncGenerator[ai.Event]:
+            yield ai.MessageStart(message=msg)
+            yield ai.MessageEnd(message=msg)
 
         return ai.StreamResult.from_generator(_single())
 
@@ -213,9 +217,9 @@ class WeatherWorkflow:
         mw = TemporalMiddleware(tool_schemas)
 
         final_text = ""
-        async for msg in weather_agent.run(model, messages, middleware=[mw]):
-            if msg.text:
-                final_text = msg.text
+        async for event in weather_agent.run(model, messages, middleware=[mw]):
+            if isinstance(event, ai.MessageEnd) and event.message.text:
+                final_text = event.message.text
         return final_text
 
 

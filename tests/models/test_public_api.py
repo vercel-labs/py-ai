@@ -9,9 +9,17 @@ import pydantic
 
 import ai
 from ai import models
+from ai.types import events as events_
 from ai.types import messages as messages_
 
-from ..conftest import MOCK_MODEL, MOCK_PROVIDER, MockProvider, mock_llm, text_msg
+from ..conftest import (
+    MOCK_MODEL,
+    MOCK_PROVIDER,
+    MockProvider,
+    collect_messages,
+    mock_llm,
+    text_msg,
+)
 
 
 # Module-level model so StructuredOutputPart can resolve it by FQN.
@@ -29,12 +37,11 @@ async def test_stream_basic() -> None:
     """ai.models.stream() yields deltas and exposes .text after iteration."""
     mock = mock_llm([[text_msg("Hello world")]])
 
-    s = await models.stream(MOCK_MODEL, [ai.user_message("Hi")])
+    s = models.stream(MOCK_MODEL, [ai.user_message("Hi")])
     deltas: list[str] = []
-    async for msg in s:
-        for ev in msg.deltas:
-            if isinstance(ev.part, messages_.TextPart):
-                deltas.append(ev.chunk)
+    async for event in s:
+        if isinstance(event, events_.TextDelta):
+            deltas.append(event.chunk)
 
     assert mock.call_count == 1
     assert s.text == "Hello world"
@@ -49,10 +56,8 @@ async def test_stream_preserves_existing_turn_ids() -> None:
     old = old.model_copy(update={"turn_id": "prev"})
     fresh = ai.user_message("latest")
 
-    s = await models.stream(MOCK_MODEL, [old, fresh])
-    yielded: list[messages_.Message] = []
-    async for msg in s:
-        yielded.append(msg)
+    s = models.stream(MOCK_MODEL, [old, fresh])
+    yielded = await collect_messages(s)
 
     assert mock.call_count == 1
     # First yielded is the old input — unchanged.
@@ -70,10 +75,8 @@ async def test_stream_accepts_explicit_turn_id() -> None:
     mock_llm([[text_msg("ok")]])
     fresh = ai.user_message("hi")
 
-    s = await models.stream(MOCK_MODEL, [fresh], turn_id="custom-turn")
-    yielded: list[messages_.Message] = []
-    async for msg in s:
-        yielded.append(msg)
+    s = models.stream(MOCK_MODEL, [fresh], turn_id="custom-turn")
+    yielded = await collect_messages(s)
 
     assert s.turn_id == "custom-turn"
     assert yielded[0].turn_id == "custom-turn"
@@ -92,13 +95,15 @@ async def test_stream_with_explicit_client() -> None:
         tools: Sequence[ai.ToolLike] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         **kwargs: Any,
-    ) -> AsyncGenerator[messages_.Message]:
+    ) -> AsyncGenerator[events_.Event]:
         received_clients.append(client)
-        yield messages_.Message(
+        msg = messages_.Message(
             id="m1",
             role="assistant",
             parts=[messages_.TextPart(text="ok")],
         )
+        yield events_.MessageStart(message=msg.model_copy(update={"parts": []}))
+        yield events_.MessageEnd(message=msg)
 
     models.register_stream("mock", _spy_stream)
 
@@ -106,7 +111,7 @@ async def test_stream_with_explicit_client() -> None:
     explicit_model = models.Model(
         id="mock-model", adapter="mock", provider=MOCK_PROVIDER, client=explicit
     )
-    s = await models.stream(explicit_model, [ai.user_message("Hi")])
+    s = models.stream(explicit_model, [ai.user_message("Hi")])
     async for _ in s:
         pass
 
@@ -128,7 +133,7 @@ async def test_stream_with_output_type() -> None:
         tools: Sequence[ai.ToolLike] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         **kwargs: Any,
-    ) -> AsyncGenerator[messages_.Message]:
+    ) -> AsyncGenerator[events_.Event]:
         text_part = messages_.TextPart(text=json_text)
         parts: list[messages_.Part] = [text_part]
         if output_type is not None:
@@ -140,11 +145,16 @@ async def test_stream_with_output_type() -> None:
                     output_type_name=f"{output_type.__module__}.{output_type.__qualname__}",
                 )
             )
-        yield messages_.Message(id="m1", role="assistant", parts=parts)
+        msg = messages_.Message(id="m1", role="assistant", parts=parts)
+        yield events_.MessageStart(message=msg.model_copy(update={"parts": []}))
+        yield events_.TextStart(block_id=text_part.id)
+        yield events_.TextDelta(block_id=text_part.id, chunk=json_text)
+        yield events_.TextEnd(block_id=text_part.id)
+        yield events_.MessageEnd(message=msg)
 
     models.register_stream("mock", _structured_stream)
 
-    s = await models.stream(
+    s = models.stream(
         MOCK_MODEL, [ai.user_message("Give me a recipe")], output_type=_Recipe
     )
     async for _ in s:

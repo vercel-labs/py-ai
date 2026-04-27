@@ -15,7 +15,7 @@ import pydantic
 from ...types import events as events_
 from ...types import media
 from ...types import messages as messages_
-from ...types import tools as tools_
+from ...types import proto as proto_
 from ..core import client as client_
 from ..core import model as model_
 from ..core.helpers import files, streaming
@@ -26,7 +26,7 @@ from ..core.helpers import files, streaming
 
 
 def _tools_to_openai(
-    tools: Sequence[tools_.ToolLike],
+    tools: Sequence[proto_.ToolLike],
 ) -> list[dict[str, Any]]:
     """Convert internal Tool objects to OpenAI tool schema format."""
     return [
@@ -201,7 +201,7 @@ async def stream(
     model: model_.Model,
     messages: list[messages_.Message],
     *,
-    tools: Sequence[tools_.ToolLike] | None = None,
+    tools: Sequence[proto_.ToolLike] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
     thinking: bool = False,
     budget_tokens: int | None = None,
@@ -314,9 +314,7 @@ async def stream(
             if reasoning_value:
                 if not reasoning_started:
                     reasoning_started = True
-                    for e in _emit(
-                        streaming.ReasoningStart(block_id="reasoning")
-                    ):
+                    for e in _emit(streaming.ReasoningStart(block_id="reasoning")):
                         yield e
                 for e in _emit(
                     streaming.ReasoningDelta(
@@ -327,9 +325,7 @@ async def stream(
 
             if delta.content:
                 if reasoning_started:
-                    for e in _emit(
-                        streaming.ReasoningEnd(block_id="reasoning")
-                    ):
+                    for e in _emit(streaming.ReasoningEnd(block_id="reasoning")):
                         yield e
                     reasoning_started = False
 
@@ -382,23 +378,17 @@ async def stream(
             if choice.finish_reason is not None:
                 finish_reason = choice.finish_reason
                 if reasoning_started:
-                    for e in _emit(
-                        streaming.ReasoningEnd(block_id="reasoning")
-                    ):
+                    for e in _emit(streaming.ReasoningEnd(block_id="reasoning")):
                         yield e
                 if text_started:
                     for e in _emit(streaming.TextEnd(block_id="text")):
                         yield e
                 for tc in tc_state.values():
                     if tc["started"] and tc["id"]:
-                        for e in _emit(
-                            streaming.ToolEnd(tool_call_id=tc["id"])
-                        ):
+                        for e in _emit(streaming.ToolEnd(tool_call_id=tc["id"])):
                             yield e
 
-        for e in _emit(
-            streaming.MessageDone(finish_reason=finish_reason, usage=usage)
-        ):
+        for e in _emit(streaming.MessageDone(finish_reason=finish_reason, usage=usage)):
             yield e
     finally:
         await sdk_client.close()

@@ -15,7 +15,7 @@ import pydantic
 from ...types import events as events_
 from ...types import media
 from ...types import messages as messages_
-from ...types import tools as tools_
+from ...types import proto as proto_
 from ...types import usage as usage_
 from ..core import client as client_
 from ..core import model as model_
@@ -124,7 +124,7 @@ async def _messages_to_prompt(
 
 async def _build_request_body(
     messages: list[messages_.Message],
-    tools: Sequence[tools_.ToolLike] | None = None,
+    tools: Sequence[proto_.ToolLike] | None = None,
     output_type: type[Any] | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
@@ -286,7 +286,7 @@ async def stream(
     model: model_.Model,
     messages: list[messages_.Message],
     *,
-    tools: Sequence[tools_.ToolLike] | None = None,
+    tools: Sequence[proto_.ToolLike] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
     **kwargs: Any,
 ) -> AsyncGenerator[events_.Event]:

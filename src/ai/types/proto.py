@@ -29,6 +29,9 @@ class StreamResultLike(Protocol):
     def __aiter__(self) -> AsyncGenerator[events_.Event]: ...
 
     @property
+    def message(self) -> messages.Message | None: ...
+
+    @property
     def text(self) -> str: ...
 
     @property

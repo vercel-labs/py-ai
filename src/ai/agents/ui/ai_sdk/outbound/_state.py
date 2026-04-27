@@ -1,14 +1,10 @@
-"""Stream state bookkeeping for the live outbound walk.
-
-Owns message/step boundary logic (via ``turn_id`` + ``agent``), tracks
-which parts have open text/reasoning blocks, and guards against
-re-emission when the runtime re-yields an already-finalized message.
-"""
+"""Stream state bookkeeping for the event-first outbound walk."""
 
 from __future__ import annotations
 
 from typing import Any
 
+from .....types import events as events_
 from .....types import messages as messages_
 from .. import _approvals, protocol
 
@@ -35,19 +31,22 @@ class _StreamState:
         self.emitted_start: bool = False
         self.in_step: bool = False
 
-        # Message-level dedup — an ``is_done`` message re-emitted as input to a
-        # later ``stream()`` call must not fire events twice.
         self.seen_done: set[str] = set()
+        self.skip_current_message: bool = False
+        self.started_current_message: bool = False
 
-        # Tool-call dedup — keyed by tool_call_id.
         self.started_tool_inputs: set[str] = set()
+        self.tool_names: dict[str, str] = {}
         self.input_available_emitted: set[str] = set()
         self.emitted_tool_results: set[str] = set()
         self.emitted_approval_requests: set[str] = set()
 
-        # Open streaming blocks — keyed by part id.
         self.open_text_ids: set[str] = set()
         self.open_reasoning_ids: set[str] = set()
+        self.completed_text_ids: set[str] = set()
+        self.completed_reasoning_ids: set[str] = set()
+        self.text_delta_ids: set[str] = set()
+        self.reasoning_delta_ids: set[str] = set()
 
     # -- boundary helpers ----------------------------------------------------
 
@@ -55,9 +54,11 @@ class _StreamState:
         parts: list[protocol.UIMessageStreamPart] = []
         for rid in list(self.open_reasoning_ids):
             parts.append(protocol.ReasoningEndPart(id=rid))
+            self.completed_reasoning_ids.add(rid)
         self.open_reasoning_ids.clear()
         for tid in list(self.open_text_ids):
             parts.append(protocol.TextEndPart(id=tid))
+            self.completed_text_ids.add(tid)
         self.open_text_ids.clear()
         return parts
 
@@ -70,16 +71,36 @@ class _StreamState:
 
     def _reset_step_tracking(self) -> None:
         self.started_tool_inputs.clear()
+        self.tool_names.clear()
         self.input_available_emitted.clear()
         self.emitted_tool_results.clear()
         self.emitted_approval_requests.clear()
 
+    @staticmethod
+    def _is_visible_message(msg: messages_.Message) -> bool:
+        return msg.role not in ("user", "system")
+
     # -- phase: message start ------------------------------------------------
+
+    def on_message_start(
+        self, msg: messages_.Message | None
+    ) -> list[protocol.UIMessageStreamPart]:
+        self.started_current_message = False
+        self.skip_current_message = False
+        if msg is None:
+            return []
+        if msg.id in self.seen_done or not self._is_visible_message(msg):
+            self.skip_current_message = True
+            return []
+        self.started_current_message = True
+        return self.on_message(msg)
 
     def on_message(self, msg: messages_.Message) -> list[protocol.UIMessageStreamPart]:
         """Emit UIMessage/step boundary parts for *msg*."""
-        parts: list[protocol.UIMessageStreamPart] = []
+        if not self._is_visible_message(msg):
+            return []
 
+        parts: list[protocol.UIMessageStreamPart] = []
         agent_changed = (
             self.emitted_start
             and msg.source_label is not None
@@ -101,10 +122,6 @@ class _StreamState:
             self._reset_step_tracking()
             return parts
 
-        # Same UIMessage — check for step boundary via turn_id change. Only
-        # non-None → different-non-None transitions fire a step boundary;
-        # None carries the current step (tool results yielded by the loop are
-        # intentionally left unstamped until the next stream() stamps them).
         if (
             msg.turn_id is not None
             and self.current_turn_id is not None
@@ -120,118 +137,144 @@ class _StreamState:
 
         return parts
 
-    # -- phase: per-event (mid-stream) ---------------------------------------
+    # -- phase: streaming events --------------------------------------------
 
-    def on_event(
-        self,
-        msg: messages_.Message,
-        event: messages_.StreamEvent,
-    ) -> list[protocol.UIMessageStreamPart]:
+    def on_event(self, event: events_.Event) -> list[protocol.UIMessageStreamPart]:
+        if self.skip_current_message:
+            return []
+
         match event:
-            case messages_.PartOpened(part=messages_.TextPart(id=pid)):
+            case events_.TextStart(block_id=pid):
                 self.open_text_ids.add(pid)
                 return [protocol.TextStartPart(id=pid)]
 
-            case messages_.PartDelta(part=messages_.TextPart(id=pid), chunk=chunk):
+            case events_.TextDelta(block_id=pid, chunk=chunk):
+                out: list[protocol.UIMessageStreamPart] = []
                 if pid not in self.open_text_ids:
                     self.open_text_ids.add(pid)
-                    return [
-                        protocol.TextStartPart(id=pid),
-                        protocol.TextDeltaPart(id=pid, delta=chunk),
-                    ]
-                return [protocol.TextDeltaPart(id=pid, delta=chunk)]
+                    out.append(protocol.TextStartPart(id=pid))
+                self.text_delta_ids.add(pid)
+                out.append(protocol.TextDeltaPart(id=pid, delta=chunk))
+                return out
 
-            case messages_.PartClosed(part=messages_.TextPart(id=pid)):
+            case events_.TextEnd(block_id=pid):
                 if pid in self.open_text_ids:
                     self.open_text_ids.discard(pid)
+                    self.completed_text_ids.add(pid)
                     return [protocol.TextEndPart(id=pid)]
                 return []
 
-            case messages_.PartOpened(part=messages_.ReasoningPart(id=pid)):
+            case events_.ReasoningStart(block_id=pid):
                 self.open_reasoning_ids.add(pid)
                 return [protocol.ReasoningStartPart(id=pid)]
 
-            case messages_.PartDelta(part=messages_.ReasoningPart(id=pid), chunk=chunk):
+            case events_.ReasoningDelta(block_id=pid, chunk=chunk):
+                out = []
                 if pid not in self.open_reasoning_ids:
                     self.open_reasoning_ids.add(pid)
-                    return [
-                        protocol.ReasoningStartPart(id=pid),
-                        protocol.ReasoningDeltaPart(id=pid, delta=chunk),
-                    ]
-                return [protocol.ReasoningDeltaPart(id=pid, delta=chunk)]
+                    out.append(protocol.ReasoningStartPart(id=pid))
+                self.reasoning_delta_ids.add(pid)
+                out.append(protocol.ReasoningDeltaPart(id=pid, delta=chunk))
+                return out
 
-            case messages_.PartClosed(part=messages_.ReasoningPart(id=pid)):
+            case events_.ReasoningEnd(block_id=pid):
                 if pid in self.open_reasoning_ids:
                     self.open_reasoning_ids.discard(pid)
+                    self.completed_reasoning_ids.add(pid)
                     return [protocol.ReasoningEndPart(id=pid)]
                 return []
 
-            case messages_.PartOpened(part=messages_.ToolCallPart() as tc):
-                if tc.tool_call_id in self.started_tool_inputs:
+            case events_.ToolStart(tool_call_id=tcid, tool_name=name):
+                self.tool_names[tcid] = name
+                if tcid in self.started_tool_inputs:
                     return []
-                self.started_tool_inputs.add(tc.tool_call_id)
+                self.started_tool_inputs.add(tcid)
                 return [
                     protocol.ToolInputStartPart(
-                        tool_call_id=tc.tool_call_id,
-                        tool_name=tc.tool_name,
+                        tool_call_id=tcid,
+                        tool_name=name,
                     )
                 ]
 
-            case messages_.PartDelta(part=messages_.ToolCallPart() as tc, chunk=chunk):
-                out: list[protocol.UIMessageStreamPart] = []
-                if tc.tool_call_id not in self.started_tool_inputs:
-                    self.started_tool_inputs.add(tc.tool_call_id)
+            case events_.ToolDelta(tool_call_id=tcid, chunk=chunk):
+                out = []
+                if tcid not in self.started_tool_inputs:
+                    self.started_tool_inputs.add(tcid)
                     out.append(
                         protocol.ToolInputStartPart(
-                            tool_call_id=tc.tool_call_id,
-                            tool_name=tc.tool_name,
+                            tool_call_id=tcid,
+                            tool_name=self.tool_names.get(tcid, ""),
                         )
                     )
                 out.append(
                     protocol.ToolInputDeltaPart(
-                        tool_call_id=tc.tool_call_id,
+                        tool_call_id=tcid,
                         input_text_delta=chunk,
                     )
                 )
                 return out
 
-            case messages_.PartClosed(part=messages_.ToolCallPart()):
-                # ToolInputAvailablePart is emitted in ``on_terminal`` from
-                # the terminal ``tool_args`` snapshot.
+            case events_.ToolEnd():
                 return []
 
         return []
 
-    # -- phase: terminal (tool results, approvals, final tool-input) ---------
+    # -- phase: terminal message --------------------------------------------
+
+    def _static_content(
+        self, msg: messages_.Message
+    ) -> list[protocol.UIMessageStreamPart]:
+        out: list[protocol.UIMessageStreamPart] = []
+
+        for part in msg.parts:
+            if isinstance(part, messages_.ReasoningPart):
+                if part.id not in self.completed_reasoning_ids:
+                    if part.id not in self.open_reasoning_ids:
+                        out.append(protocol.ReasoningStartPart(id=part.id))
+                    if part.text and part.id not in self.reasoning_delta_ids:
+                        out.append(
+                            protocol.ReasoningDeltaPart(id=part.id, delta=part.text)
+                        )
+                    out.append(protocol.ReasoningEndPart(id=part.id))
+                    self.open_reasoning_ids.discard(part.id)
+                    self.completed_reasoning_ids.add(part.id)
+
+            elif isinstance(part, messages_.TextPart):
+                if part.id not in self.completed_text_ids:
+                    if part.id not in self.open_text_ids:
+                        out.append(protocol.TextStartPart(id=part.id))
+                    if part.text and part.id not in self.text_delta_ids:
+                        out.append(protocol.TextDeltaPart(id=part.id, delta=part.text))
+                    out.append(protocol.TextEndPart(id=part.id))
+                    self.open_text_ids.discard(part.id)
+                    self.completed_text_ids.add(part.id)
+
+            elif isinstance(part, messages_.FilePart):
+                out.append(
+                    protocol.FilePart(
+                        url=part.data if isinstance(part.data, str) else "",
+                        media_type=part.media_type,
+                    )
+                )
+
+        return out
 
     def on_terminal(self, msg: messages_.Message) -> list[protocol.UIMessageStreamPart]:
-        if not msg.is_done:
+        if msg.id in self.seen_done or not self._is_visible_message(msg):
+            self.seen_done.add(msg.id)
             return []
 
         out: list[protocol.UIMessageStreamPart] = []
+        if not self.started_current_message:
+            out.extend(self.on_message(msg))
 
-        # Close any blocks that were opened but didn't see an explicit
-        # PartClosed (e.g. provider terminates abruptly — safety net).
-        if msg.stream is not None:
-            opened_ids = {
-                e.part.id
-                for e in msg.stream.new_events
-                if isinstance(e, messages_.PartOpened)
-            }
-            for tid in list(self.open_text_ids):
-                if tid in opened_ids and not any(
-                    isinstance(e, messages_.PartClosed) and e.part.id == tid
-                    for e in msg.stream.new_events
-                ):
-                    out.append(protocol.TextEndPart(id=tid))
-                    self.open_text_ids.discard(tid)
+        out.extend(self._static_content(msg))
 
         for part in msg.parts:
             if isinstance(part, messages_.ToolCallPart):
                 if part.tool_call_id in self.input_available_emitted:
                     continue
                 self.input_available_emitted.add(part.tool_call_id)
-                # Ensure ToolInputStart was emitted (no streaming events case).
                 if part.tool_call_id not in self.started_tool_inputs:
                     self.started_tool_inputs.add(part.tool_call_id)
                     out.append(
@@ -294,6 +337,9 @@ class _StreamState:
                         )
                     )
 
+        self.seen_done.add(msg.id)
+        self.skip_current_message = False
+        self.started_current_message = False
         return out
 
     # -- phase: stream finish ------------------------------------------------

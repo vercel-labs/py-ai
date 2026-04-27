@@ -100,9 +100,12 @@ async def llm_call_activity(params: LLMParams) -> LLMResult:
     messages = [ai.Message.model_validate(m) for m in params.messages]
     tools = [ai.ToolSchema(return_type=None, **t) for t in params.tool_schemas]
 
-    s = await ai.models.stream(model, messages, tools=tools)
-    result = await ai.models.buffer(s)
-    return LLMResult(message=result.model_dump())
+    s = ai.models.stream(model, messages, tools=tools)
+    async for _event in s:
+        pass
+    if s.message is None:
+        raise RuntimeError("LLM stream ended without a final message")
+    return LLMResult(message=s.message.model_dump())
 
 
 # ── Agent with custom loop ───────────────────────────────────────
@@ -115,7 +118,7 @@ weather_agent = ai.agent(tools=[get_weather, get_population])
 
 
 @weather_agent.loop
-async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
+async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.Event]:
     tool_schemas = [
         {"name": t.name, "description": t.description, "param_schema": t.param_schema}
         for t in context.tools
@@ -133,7 +136,8 @@ async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
             retry_policy=temporalio.common.RetryPolicy(maximum_attempts=3),
         )
         msg = ai.Message.model_validate(result.message)
-        yield msg
+        yield ai.MessageStart(message=msg)
+        yield ai.MessageEnd(message=msg)
 
         # 2. No tool calls → done
         if not msg.tool_calls:
@@ -156,7 +160,9 @@ async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.Message]:
 
         tasks = [asyncio.ensure_future(run_tool(tc)) for tc in msg.tool_calls]
         parts = await asyncio.gather(*tasks)
-        yield ai.tool_message(*parts)
+        tool_msg = ai.tool_message(*parts)
+        yield ai.MessageStart(message=tool_msg)
+        yield ai.MessageEnd(message=tool_msg)
 
 
 # ── Workflow ─────────────────────────────────────────────────────
@@ -175,9 +181,9 @@ class WeatherWorkflow:
         ]
 
         final_text = ""
-        async for msg in weather_agent.run(model, messages):
-            if msg.text:
-                final_text = msg.text
+        async for event in weather_agent.run(model, messages):
+            if isinstance(event, ai.MessageEnd) and event.message.text:
+                final_text = event.message.text
         return final_text
 
 
