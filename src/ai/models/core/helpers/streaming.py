@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import dataclasses
 
+from ....types import events as events_
 from ....types import messages as messages_
+from ....types import usage as usage_
 
 
 @dataclasses.dataclass
@@ -67,7 +69,7 @@ class FileEvent:
 @dataclasses.dataclass
 class MessageDone:
     finish_reason: str | None = None
-    usage: messages_.Usage | None = None
+    usage: usage_.Usage | None = None
 
 
 StreamEvent = (
@@ -88,12 +90,11 @@ StreamEvent = (
 @dataclasses.dataclass
 class StreamHandler:
     """
-    Accumulates LLM adapter events and produces Messages with stateful parts.
+    Accumulates LLM adapter events and produces public Event objects.
 
     This is the normalization layer between LLM adapters and the rest of the system.
     Parts are tracked in a single ``_current_parts`` dict keyed by block/tool id,
-    updated in place as events stream in.  Each event carries the just-constructed
-    frozen part snapshot, so consumers never need to look parts up by id.
+    updated in place as events stream in.
     """
 
     message_id: str = dataclasses.field(default_factory=messages_.generate_id)
@@ -108,40 +109,41 @@ class StreamHandler:
     _active_tool_ids: set[str] = dataclasses.field(default_factory=set)
 
     _is_done: bool = False
-    _usage: messages_.Usage | None = None
+    _usage: usage_.Usage | None = None
 
-    def handle_event(self, event: StreamEvent) -> messages_.Message:
-        """Process event and return current Message state."""
+    def message_start(self) -> events_.MessageStart:
+        """Emit a MessageStart event at the beginning of a stream."""
+        return events_.MessageStart(message=self._build_message())
 
-        # Sidecar events for this yield (reset each call).
-        stream_events: list[messages_.StreamEvent] = []
+    def handle_event(self, event: StreamEvent) -> list[events_.Event]:
+        """Process an adapter event and return public Event objects."""
+
+        out: list[events_.Event] = []
 
         match event:
             case TextStart(block_id=bid):
                 part: messages_.Part = messages_.TextPart(id=bid, text="")
                 self._current_parts[bid] = part
                 self._active_text_id = bid
-                stream_events.append(messages_.PartOpened(part=part))
+                out.append(events_.TextStart(block_id=bid))
 
             case TextDelta(block_id=bid, delta=d):
                 existing = self._current_parts[bid]
                 assert isinstance(existing, messages_.TextPart)
                 part = messages_.TextPart(id=bid, text=existing.text + d)
                 self._current_parts[bid] = part
-                stream_events.append(messages_.PartDelta(part=part, chunk=d))
+                out.append(events_.TextDelta(chunk=d, block_id=bid))
 
             case TextEnd(block_id=bid):
                 if self._active_text_id == bid:
                     self._active_text_id = None
-                stream_events.append(
-                    messages_.PartClosed(part=self._current_parts[bid])
-                )
+                out.append(events_.TextEnd(block_id=bid))
 
             case ReasoningStart(block_id=bid):
                 part = messages_.ReasoningPart(id=bid, text="")
                 self._current_parts[bid] = part
                 self._active_reasoning_id = bid
-                stream_events.append(messages_.PartOpened(part=part))
+                out.append(events_.ReasoningStart(block_id=bid))
 
             case ReasoningDelta(block_id=bid, delta=d):
                 existing = self._current_parts[bid]
@@ -152,7 +154,7 @@ class StreamHandler:
                     signature=existing.signature,
                 )
                 self._current_parts[bid] = part
-                stream_events.append(messages_.PartDelta(part=part, chunk=d))
+                out.append(events_.ReasoningDelta(chunk=d, block_id=bid))
 
             case ReasoningEnd(block_id=bid, signature=sig):
                 existing = self._current_parts[bid]
@@ -163,7 +165,7 @@ class StreamHandler:
                 self._current_parts[bid] = part
                 if self._active_reasoning_id == bid:
                     self._active_reasoning_id = None
-                stream_events.append(messages_.PartClosed(part=part))
+                out.append(events_.ReasoningEnd(block_id=bid, signature=sig))
 
             case ToolStart(tool_call_id=tcid, tool_name=name):
                 part = messages_.ToolCallPart(
@@ -174,7 +176,7 @@ class StreamHandler:
                 )
                 self._current_parts[tcid] = part
                 self._active_tool_ids.add(tcid)
-                stream_events.append(messages_.PartOpened(part=part))
+                out.append(events_.ToolStart(tool_call_id=tcid, tool_name=name))
 
             case ToolArgsDelta(tool_call_id=tcid, delta=d):
                 existing = self._current_parts[tcid]
@@ -186,39 +188,32 @@ class StreamHandler:
                     tool_args=existing.tool_args + d,
                 )
                 self._current_parts[tcid] = part
-                stream_events.append(messages_.PartDelta(part=part, chunk=d))
+                out.append(events_.ToolDelta(chunk=d, tool_call_id=tcid))
 
             case ToolEnd(tool_call_id=tcid):
                 self._active_tool_ids.discard(tcid)
-                stream_events.append(
-                    messages_.PartClosed(part=self._current_parts[tcid])
-                )
+                out.append(events_.ToolEnd(tool_call_id=tcid))
 
             case FileEvent(block_id=bid, media_type=mt, data=d):
                 self._current_parts[bid] = messages_.FilePart(
                     id=bid, data=d, media_type=mt
                 )
 
-            case MessageDone(usage=usage):
+            case MessageDone(usage=u):
                 self._is_done = True
-                self._usage = usage
+                self._usage = u
                 self._active_text_id = None
                 self._active_reasoning_id = None
                 self._active_tool_ids.clear()
+                msg = self._build_message()
+                out.append(events_.MessageEnd(message=msg, usage=u))
 
-        return self._build_message(stream_events)
+        return out
 
-    def _build_message(
-        self,
-        stream_events: list[messages_.StreamEvent],
-    ) -> messages_.Message:
+    def _build_message(self) -> messages_.Message:
         return messages_.Message(
             id=self.message_id,
             role="assistant",
             parts=list(self._current_parts.values()),
             usage=self._usage if self._is_done else None,
-            stream=messages_.StreamState(
-                new_events=stream_events,
-                is_done=self._is_done,
-            ),
         )

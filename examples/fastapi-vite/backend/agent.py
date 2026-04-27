@@ -25,7 +25,7 @@ chat_agent = ai.agent(tools=TOOLS)
 
 
 @chat_agent.loop
-async def graph(context: ai.Context) -> AsyncGenerator[ai.Message]:
+async def graph(context: ai.Context) -> AsyncGenerator[ai.Event]:
     """Agent graph with human-in-the-loop tool approval.
 
     Loops: stream LLM -> request approval -> execute tools -> repeat.
@@ -34,9 +34,9 @@ async def graph(context: ai.Context) -> AsyncGenerator[ai.Message]:
     Reject buttons and sends the decision back on the next request.
     """
     while True:
-        s = await ai.models.stream(context.model, context.messages, tools=context.tools)
-        async for msg in s:
-            yield msg
+        s = ai.models.stream(context.model, context.messages, tools=context.tools)
+        async for event in s:
+            yield event
 
         tool_calls = context.resolve(s.tool_calls)
         if not tool_calls:
@@ -45,7 +45,9 @@ async def graph(context: ai.Context) -> AsyncGenerator[ai.Message]:
         results = await asyncio.gather(
             *(_execute_with_approval(tc) for tc in tool_calls)
         )
-        yield ai.tool_message(*results)
+        tool_msg = ai.tool_message(*results)
+        yield ai.MessageStart(message=tool_msg)
+        yield ai.MessageEnd(message=tool_msg)
 
 
 async def _execute_with_approval(tc: ai.ToolCall) -> ai.Message:

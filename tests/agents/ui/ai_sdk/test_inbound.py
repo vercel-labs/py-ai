@@ -79,7 +79,7 @@ def test_to_messages_approval_hook_emitted_as_internal() -> None:
     )
     assert [m.role for m in result] == ["assistant", "internal"]
     hook = result[1].parts[0]
-    assert hook.type == "hook"
+    assert hook.kind == "hook"
     assert hook.hook_id == "approve_tc1"
 
 

@@ -59,7 +59,7 @@ def _error_result(error_text: str | None, output: Any) -> dict[str, Any] | None:
     return normalized
 
 
-def _approval_hook_part(tp: ui_message.UIToolPart) -> messages_.HookPart | None:
+def _approval_hook_part(tp: ui_message.UIToolPart) -> messages_.HookPart[Any] | None:
     """Reconstruct approval hook state from a UI tool part when possible."""
     approval = tp.approval
     if approval is None:
@@ -241,7 +241,7 @@ def _parse(
     for ui_msg in ui_messages:
         assistant_parts: list[messages_.Part] = []
         tool_result_parts: list[messages_.ToolResultPart] = []
-        hook_parts: list[messages_.HookPart] = []
+        hook_parts: list[messages_.HookPart[Any]] = []
 
         for part in ui_msg.parts:
             match part:

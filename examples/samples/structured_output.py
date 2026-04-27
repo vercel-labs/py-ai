@@ -21,12 +21,11 @@ messages = [ai.user_message("Give me a simple pancake recipe.")]
 
 async def main() -> None:
     # Stream with structured output — watch JSON arrive, get validated at the end
-    async for msg in await ai.stream(model, messages, output_type=Recipe):
-        for ev in msg.deltas:
-            if isinstance(ev.part, ai.TextPart):
-                print(ev.chunk, end="", flush=True)
-        if msg.output:
-            recipe: Recipe = msg.output
+    async for event in ai.stream(model, messages, output_type=Recipe):
+        if isinstance(event, ai.TextDelta):
+            print(event.chunk, end="", flush=True)
+        elif isinstance(event, ai.MessageEnd) and event.message.output:
+            recipe: Recipe = event.message.output
             print(f"\n\nParsed recipe: {recipe.name}")
             print(f"  Ingredients: {', '.join(recipe.ingredients)}")
             print(f"  Prep time: {recipe.prep_time_minutes} min")

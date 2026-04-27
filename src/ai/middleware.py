@@ -22,9 +22,9 @@ from typing import TYPE_CHECKING, Any
 
 import pydantic
 
+from .types import events as events_
 from .types import messages as messages_
-from .types import tools as tools_
-from .types.stream import StreamResultLike
+from .types.proto import StreamResultLike, ToolLike
 
 # ---------------------------------------------------------------------------
 # Call context objects — frozen dataclasses with isolated mutable fields.
@@ -47,7 +47,7 @@ class ModelContext:
 
     model: Model
     messages: list[messages_.Message]
-    tools: Sequence[tools_.ToolLike] | None
+    tools: Sequence[ToolLike] | None
     output_type: type[pydantic.BaseModel] | None
     kwargs: dict[str, Any]
 
@@ -113,11 +113,12 @@ class AgentRunContext:
 # Middleware base class — override the methods you care about.
 # ---------------------------------------------------------------------------
 
-# Message alias for brevity in signatures.
+# Event/message aliases for brevity in signatures.
+_Event = events_.Event
 _Message = messages_.Message
 
-# Agent run next-function type: call -> async generator of messages.
-_AgentRunNext = Callable[[AgentRunContext], AsyncGenerator[_Message]]
+# Agent run next-function type: call -> async generator of events.
+_AgentRunNext = Callable[[AgentRunContext], AsyncGenerator[_Event]]
 
 
 class Middleware:
@@ -130,21 +131,21 @@ class Middleware:
         self,
         call: AgentRunContext,
         next: _AgentRunNext,
-    ) -> AsyncGenerator[_Message]:
+    ) -> AsyncGenerator[_Event]:
         """Wrap an agent run.
 
-        ``next(call)`` returns an async generator of ``Message`` objects.
+        ``next(call)`` returns an async generator of ``Event`` objects.
         Override to add tracing, durability checkpoints, or other
         run-scoped behavior::
 
             async def wrap_agent_run(self, call, next):
                 span = start_span("agent.run")
-                async for msg in next(call):
-                    yield msg
+                async for event in next(call):
+                    yield event
                 span.end()
         """
-        async for msg in next(call):
-            yield msg
+        async for event in next(call):
+            yield event
 
     async def wrap_model(
         self,
@@ -154,7 +155,7 @@ class Middleware:
         """Wrap a model streaming call.
 
         ``next(call)`` returns a :class:`~ai.types.StreamResultLike` that
-        is async-iterable over ``Message`` snapshots.  You can do work
+        is async-iterable over ``Event`` objects.  You can do work
         before, iterate / transform the stream, or do cleanup after.
 
         To transform the stream, use
@@ -163,8 +164,8 @@ class Middleware:
             async def wrap_model(self, call, next):
                 stream = await next(call)
                 async def _add_suffix():
-                    async for msg in stream:
-                        yield msg
+                    async for event in stream:
+                        yield event
                 from ai.models import StreamResult
                 return StreamResult.from_generator(_add_suffix())
         """
@@ -343,9 +344,9 @@ def _build_agent_run_chain(
     for m in reversed(mw):
 
         def _make(m: Middleware, nxt: _AgentRunNext) -> _AgentRunNext:
-            async def _wrapped(call: AgentRunContext) -> AsyncGenerator[_Message]:
-                async for msg in m.wrap_agent_run(call, nxt):
-                    yield msg
+            async def _wrapped(call: AgentRunContext) -> AsyncGenerator[_Event]:
+                async for event in m.wrap_agent_run(call, nxt):
+                    yield event
 
             return _wrapped
 

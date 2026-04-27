@@ -5,7 +5,7 @@ from __future__ import annotations
 import ai
 from ai.types import messages
 
-from ..conftest import MOCK_MODEL, mock_llm, text_msg, tool_call_msg
+from ..conftest import MOCK_MODEL, collect_messages, mock_llm, text_msg, tool_call_msg
 
 # -- Tool definitions for tests --------------------------------------------
 
@@ -30,9 +30,7 @@ async def test_agent_text_only() -> None:
     my_agent = ai.agent(tools=[double])
 
     llm = mock_llm([[text_msg("Hello!")]])
-    msgs: list[ai.Message] = []
-    async for m in my_agent.run(MOCK_MODEL, [ai.user_message("Hi")]):
-        msgs.append(m)
+    msgs = await collect_messages(my_agent.run(MOCK_MODEL, [ai.user_message("Hi")]))
     assert llm.call_count == 1
     assert any(m.text == "Hello!" for m in msgs)
 
@@ -48,9 +46,9 @@ async def test_agent_tool_then_text() -> None:
     call2 = [text_msg("The answer is 10.")]
     llm = mock_llm([call1, call2])
 
-    msgs: list[ai.Message] = []
-    async for m in my_agent.run(MOCK_MODEL, [ai.user_message("Double 5")]):
-        msgs.append(m)
+    msgs = await collect_messages(
+        my_agent.run(MOCK_MODEL, [ai.user_message("Double 5")])
+    )
     assert llm.call_count == 2
     tool_results = [m for m in msgs if m.role == "tool" and m.tool_results]
     assert len(tool_results) >= 1
@@ -83,9 +81,9 @@ async def test_agent_parallel_tools() -> None:
     call2 = [text_msg("6 and 14", id="msg-2")]
     llm = mock_llm([[two_tools], call2])
 
-    msgs: list[ai.Message] = []
-    async for m in my_agent.run(MOCK_MODEL, [ai.user_message("Double 3 and 7")]):
-        msgs.append(m)
+    msgs = await collect_messages(
+        my_agent.run(MOCK_MODEL, [ai.user_message("Double 3 and 7")])
+    )
     assert llm.call_count == 2
     tool_result_msgs = [m for m in msgs if m.role == "tool" and m.tool_results]
     assert len(tool_result_msgs) >= 1
@@ -105,9 +103,9 @@ async def test_agent_multi_turn() -> None:
     turn3 = [text_msg("Done: hello world, 6", id="msg-3")]
     llm = mock_llm([turn1, turn2, turn3])
 
-    msgs: list[ai.Message] = []
-    async for m in my_agent.run(MOCK_MODEL, [ai.user_message("Concat then double")]):
-        msgs.append(m)
+    await collect_messages(
+        my_agent.run(MOCK_MODEL, [ai.user_message("Concat then double")])
+    )
     assert llm.call_count == 3
 
 
@@ -131,18 +129,17 @@ async def test_two_user_messages_produce_four_turns() -> None:
     def dedup(stream: list[ai.Message]) -> list[ai.Message]:
         seen: dict[str, ai.Message] = {}
         for m in stream:
-            if m.is_done:
-                seen[m.id] = m
+            seen[m.id] = m
         return list(seen.values())
 
-    run1_stream: list[ai.Message] = []
-    async for m in my_agent.run(MOCK_MODEL, [ai.user_message("Double 5")]):
-        run1_stream.append(m)
+    run1_stream = await collect_messages(
+        my_agent.run(MOCK_MODEL, [ai.user_message("Double 5")])
+    )
     history = dedup(run1_stream)
 
-    run2_stream: list[ai.Message] = []
-    async for m in my_agent.run(MOCK_MODEL, [*history, ai.user_message("Double 7")]):
-        run2_stream.append(m)
+    run2_stream = await collect_messages(
+        my_agent.run(MOCK_MODEL, [*history, ai.user_message("Double 7")])
+    )
     final = dedup(run2_stream)
 
     # Chronological list of terminal non-internal messages.  Insertion order

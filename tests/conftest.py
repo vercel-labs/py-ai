@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, AsyncIterable, Sequence
 from typing import Any
 
 import pydantic
@@ -8,6 +8,7 @@ import pydantic
 import ai
 from ai import models
 from ai.types import builders
+from ai.types import events as events_
 from ai.types import messages as messages_
 
 
@@ -108,7 +109,7 @@ class MockAdapter:
         tools: Sequence[ai.ToolLike] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         **kwargs: Any,
-    ) -> AsyncGenerator[messages_.Message]:
+    ) -> AsyncGenerator[events_.Event]:
         if self._call_index >= len(self._responses):
             raise RuntimeError("MockAdapter: no more responses configured")
         self.call_count += 1
@@ -117,49 +118,78 @@ class MockAdapter:
 
         from ai.models.core.helpers import streaming as streaming_
 
-        handler = streaming_.StreamHandler()
+        message_id = seq[0].id if seq else messages_.generate_id()
+        handler = streaming_.StreamHandler(message_id=message_id)
+        yield handler.message_start()
 
         for msg in seq:
             for i, part in enumerate(msg.parts):
                 if isinstance(part, messages_.TextPart):
                     bid = f"text-{i}"
-                    yield handler.handle_event(streaming_.TextStart(block_id=bid))
+                    for event in handler.handle_event(
+                        streaming_.TextStart(block_id=bid)
+                    ):
+                        yield event
                     if part.text:
-                        yield handler.handle_event(
+                        for event in handler.handle_event(
                             streaming_.TextDelta(block_id=bid, delta=part.text)
-                        )
-                    yield handler.handle_event(streaming_.TextEnd(block_id=bid))
+                        ):
+                            yield event
+                    for event in handler.handle_event(streaming_.TextEnd(block_id=bid)):
+                        yield event
 
                 elif isinstance(part, messages_.ReasoningPart):
                     bid = f"reasoning-{i}"
-                    yield handler.handle_event(streaming_.ReasoningStart(block_id=bid))
+                    for event in handler.handle_event(
+                        streaming_.ReasoningStart(block_id=bid)
+                    ):
+                        yield event
                     if part.text:
-                        yield handler.handle_event(
+                        for event in handler.handle_event(
                             streaming_.ReasoningDelta(block_id=bid, delta=part.text)
-                        )
-                    yield handler.handle_event(
+                        ):
+                            yield event
+                    for event in handler.handle_event(
                         streaming_.ReasoningEnd(block_id=bid, signature=part.signature)
-                    )
+                    ):
+                        yield event
 
                 elif isinstance(part, messages_.ToolCallPart):
-                    yield handler.handle_event(
+                    for event in handler.handle_event(
                         streaming_.ToolStart(
                             tool_call_id=part.tool_call_id,
                             tool_name=part.tool_name,
                         )
-                    )
+                    ):
+                        yield event
                     if part.tool_args:
-                        yield handler.handle_event(
+                        for event in handler.handle_event(
                             streaming_.ToolArgsDelta(
                                 tool_call_id=part.tool_call_id,
                                 delta=part.tool_args,
                             )
-                        )
-                    yield handler.handle_event(
+                        ):
+                            yield event
+                    for event in handler.handle_event(
                         streaming_.ToolEnd(tool_call_id=part.tool_call_id)
-                    )
+                    ):
+                        yield event
 
-        yield handler.handle_event(streaming_.MessageDone())
+                elif isinstance(part, messages_.StructuredOutputPart):
+                    handler._current_parts[part.id] = part
+
+                elif isinstance(part, messages_.FilePart):
+                    for event in handler.handle_event(
+                        streaming_.FileEvent(
+                            block_id=part.id,
+                            media_type=part.media_type,
+                            data=part.data if isinstance(part.data, str) else "",
+                        )
+                    ):
+                        yield event
+
+        for event in handler.handle_event(streaming_.MessageDone()):
+            yield event
 
 
 def mock_llm(responses: list[list[messages_.Message]]) -> MockAdapter:
@@ -170,6 +200,17 @@ def mock_llm(responses: list[list[messages_.Message]]) -> MockAdapter:
     adapter = MockAdapter(responses)
     models.register_stream("mock", adapter.stream)
     return adapter
+
+
+async def collect_messages(
+    source: AsyncIterable[events_.Event],
+) -> list[messages_.Message]:
+    """Collect terminal messages from an event stream."""
+    result: list[messages_.Message] = []
+    async for event in source:
+        if isinstance(event, events_.MessageEnd):
+            result.append(event.message)
+    return result
 
 
 class MockGenerateAdapter:

@@ -14,8 +14,9 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import pydantic
 
+from ...types import events as events_
 from ...types import messages as messages_
-from ...types import tools as tools_
+from ...types import proto as types_proto_
 
 if TYPE_CHECKING:
     from .client import Client
@@ -89,9 +90,8 @@ class Provider(Protocol):
 class StreamFn(Protocol):
     """Protocol for streaming adapter functions.
 
-    Implementations yield ``Message`` snapshots as the response streams
-    in.  Each snapshot is a complete, self-contained message reflecting
-    the accumulated state up to that point.
+    Implementations yield event objects as the response streams in. The
+    terminal assistant state is surfaced as a ``MessageEnd.message``.
     """
 
     def __call__(
@@ -100,10 +100,10 @@ class StreamFn(Protocol):
         model: Model,
         messages: list[messages_.Message],
         *,
-        tools: Sequence[tools_.ToolLike] | None = None,
+        tools: Sequence[types_proto_.ToolLike] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         **kwargs: Any,
-    ) -> AsyncGenerator[messages_.Message]: ...
+    ) -> AsyncGenerator[events_.Event]: ...
 
 
 @runtime_checkable

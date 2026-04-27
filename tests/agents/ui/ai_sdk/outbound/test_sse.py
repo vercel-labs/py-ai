@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 
 from ai.agents.ui.ai_sdk import protocol, to_sse
 from ai.agents.ui.ai_sdk.outbound.sse import format_sse, serialize_part
+from ai.types import events as events_
 from ai.types import messages as messages_
 
 
@@ -29,23 +30,25 @@ def test_serialize_data_part_uses_type_with_prefix() -> None:
 
 
 async def _gen(
-    msgs: list[messages_.Message],
-) -> AsyncGenerator[messages_.Message]:
-    for m in msgs:
-        yield m
+    stream_events: list[events_.Event],
+) -> AsyncGenerator[events_.Event]:
+    for event in stream_events:
+        yield event
 
 
 async def test_to_sse_emits_data_prefixed_lines() -> None:
-    msgs = [
-        messages_.Message(
-            id="m1",
-            role="assistant",
-            turn_id="t1",
-            parts=[messages_.TextPart(text="hi")],
-            stream=messages_.StreamState(new_events=[], is_done=True),
+    msg = messages_.Message(
+        id="m1",
+        role="assistant",
+        turn_id="t1",
+        parts=[messages_.TextPart(text="hi")],
+    )
+    lines = [
+        line
+        async for line in to_sse(
+            _gen([events_.MessageStart(message=msg), events_.MessageEnd(message=msg)])
         )
     ]
-    lines = [line async for line in to_sse(_gen(msgs))]
     assert all(line.startswith("data: ") for line in lines)
     # first line is the start part
     first = json.loads(lines[0].removeprefix("data: ").rstrip())

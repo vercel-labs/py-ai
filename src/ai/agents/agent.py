@@ -199,19 +199,38 @@ class Context(pydantic.BaseModel):
         ]
 
 
+StreamItem = types.Event | types.Message
+
+
 class LoopFn(Protocol):
-    def __call__(self, context: Context) -> AsyncGenerator[types.Message]: ...
+    def __call__(self, context: Context) -> AsyncGenerator[StreamItem]: ...
 
 
-async def _default_loop(context: Context) -> AsyncGenerator[types.Message]:
+async def _message_events(message: types.Message) -> AsyncGenerator[types.Event]:
+    yield types.MessageStart(message=message)
+    yield types.MessageEnd(message=message)
+
+
+async def _coerce_events(
+    source: AsyncIterable[StreamItem],
+) -> AsyncGenerator[types.Event]:
+    async for item in source:
+        if isinstance(item, types.Message):
+            async for event in _message_events(item):
+                yield event
+        else:
+            yield item
+
+
+async def _default_loop(context: Context) -> AsyncGenerator[types.Event]:
     while True:
-        stream = await models.stream(
+        stream = models.stream(
             context.model,
             context.messages,
             tools=context.tools,
         )
-        async for message in stream:
-            yield message
+        async for event in stream:
+            yield event
 
         tool_calls = context.resolve(stream.tool_calls)
         if not tool_calls:
@@ -225,33 +244,35 @@ async def _default_loop(context: Context) -> AsyncGenerator[types.Message]:
         # Left un-stamped: the tool result is the input of the *next* turn,
         # so the next stream() call will stamp it with that turn's id.
         tool_msg = builders.tool_message(*(t.result() for t in tasks))
-        yield tool_msg
+        async for event in _message_events(tool_msg):
+            yield event
 
 
 async def _collect_messages(
-    source: AsyncGenerator[types.Message],
+    source: AsyncIterable[StreamItem],
     messages: list[types.Message],
-) -> AsyncGenerator[types.Message]:
-    """Intercept yielded messages and collect done ones into *messages*.
+) -> AsyncGenerator[types.Event]:
+    """Intercept yielded events and collect MessageEnd messages into *messages*.
 
     This runs on the **producer** side (same coroutine as the loop function),
     so ``messages`` is always up-to-date by the time the loop reads it for
     the next model call — avoiding the race that would occur if collection
     happened on the consumer side of the runtime queue.
     """
-    async for message in source:
-        if message.is_done:
+    async for event in _coerce_events(source):
+        if isinstance(event, types.MessageEnd):
+            message = event.message
             for i, existing in enumerate(messages):
                 if existing.id == message.id:
                     messages[i] = message
                     break
             else:
                 messages.append(message)
-        yield message
+        yield event
 
 
-async def yield_from(source: AsyncIterable[types.Message]) -> str:
-    """Drain *source*, forwarding each message to the current runtime.
+async def yield_from(source: AsyncIterable[StreamItem]) -> str:
+    """Drain *source*, forwarding each event to the current runtime.
 
     Use inside a custom loop to stream messages from a sub-agent to the
     consumer without adding them to the parent agent's message history::
@@ -269,9 +290,10 @@ async def yield_from(source: AsyncIterable[types.Message]) -> str:
     """
     rt = runtime.get_runtime()
     last: types.Message | None = None
-    async for message in source:
-        await rt.put_message(message)
-        last = message
+    async for item in _coerce_events(source):
+        await rt.put_event(item)
+        if isinstance(item, types.MessageEnd):
+            last = item.message
     return last.text if last else ""
 
 
@@ -303,8 +325,8 @@ class Agent:
         *,
         label: str | None = None,
         middleware: list[middleware_.Middleware] | None = None,
-    ) -> AsyncGenerator[types.Message]:
-        """Run the agent loop, yielding messages to the consumer.
+    ) -> AsyncGenerator[types.Event]:
+        """Run the agent loop, yielding events to the consumer.
 
         Args:
             model: The model to use for LLM calls.
@@ -327,17 +349,31 @@ class Agent:
 
         async def _real(
             call: middleware_.AgentRunContext,
-        ) -> AsyncGenerator[types.Message]:
+        ) -> AsyncGenerator[types.Event]:
             context = Context(
                 model=call.model,
                 messages=list(call.messages),
                 tools=call.tools,
             )
             source = _collect_messages(loop_fn(context), context.messages)
-            async for message in runtime.run(source):
+            async for event in runtime.run(source):
                 if call.label is not None:
-                    message = message.model_copy(update={"source_label": call.label})
-                yield message
+                    event_message: types.Message | None = None
+                    if isinstance(event, types.MessageEnd) or (
+                        isinstance(event, types.MessageStart)
+                        and event.message is not None
+                    ):
+                        event_message = event.message
+
+                    if event_message is not None:
+                        event = event.model_copy(
+                            update={
+                                "message": event_message.model_copy(
+                                    update={"source_label": call.label}
+                                )
+                            }
+                        )
+                yield event
 
         # Activate middleware for this run (and everything it calls).
         # When middleware is None (default), inherit the parent's middleware

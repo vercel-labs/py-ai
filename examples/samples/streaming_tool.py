@@ -1,6 +1,6 @@
 """Streaming from inside a tool via an async generator.
 
-An async generator tool yields messages that flow through the runtime
+An async generator tool yields events that flow through the runtime
 sink to the consumer in real time. The final yielded message's text
 becomes the tool result.
 """
@@ -12,21 +12,25 @@ import ai
 
 
 @ai.tool  # type: ignore[arg-type]  # async generator tools are supported at runtime
-async def talk_to_mothership(question: str) -> AsyncGenerator[ai.Message]:
+async def talk_to_mothership(question: str) -> AsyncGenerator[ai.Event]:
     """Ask the mothership a question. Streams progress back to the caller."""
     for step in ["Connecting...", "Transmitting...", "Awaiting response..."]:
-        yield ai.Message(
+        msg = ai.Message(
             role="assistant",
             parts=[ai.TextPart(text=step)],
             source_label="tool_progress",
         )
+        yield ai.MessageStart(message=msg)
+        yield ai.MessageEnd(message=msg)
         await asyncio.sleep(0.3)
 
     # The final yielded message's text is returned as the tool result.
-    yield ai.Message(
+    msg = ai.Message(
         role="assistant",
         parts=[ai.TextPart(text="The mothership says: Soon.")],
     )
+    yield ai.MessageStart(message=msg)
+    yield ai.MessageEnd(message=msg)
 
 
 async def main() -> None:
@@ -39,13 +43,14 @@ async def main() -> None:
         ai.user_message("When will the robots take over?"),
     ]
 
-    async for msg in my_agent.run(model, messages):
-        if msg.source_label == "tool_progress":
-            print(f"  [{msg.text}]")
-        else:
-            for ev in msg.deltas:
-                if isinstance(ev.part, ai.TextPart):
-                    print(ev.chunk, end="", flush=True)
+    async for event in my_agent.run(model, messages):
+        if isinstance(event, ai.TextDelta):
+            print(event.chunk, end="", flush=True)
+        elif (
+            isinstance(event, ai.MessageEnd)
+            and event.message.source_label == "tool_progress"
+        ):
+            print(f"  [{event.message.text}]")
     print()
 
 

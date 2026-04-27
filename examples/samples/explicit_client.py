@@ -19,10 +19,9 @@ messages = [ai.user_message("Hello!")]
 
 async def main() -> None:
     try:
-        async for msg in await ai.models.stream(model, messages):
-            for ev in msg.deltas:
-                if isinstance(ev.part, ai.TextPart):
-                    print(ev.chunk, end="", flush=True)
+        async for event in ai.models.stream(model, messages):
+            if isinstance(event, ai.TextDelta):
+                print(event.chunk, end="", flush=True)
         print()
     finally:
         await client.aclose()

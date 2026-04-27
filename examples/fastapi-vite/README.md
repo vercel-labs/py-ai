@@ -16,13 +16,14 @@ to suspend execution whenever the LLM wants to call a tool. The flow is:
 
 1. LLM emits a tool call
 2. Backend calls `await ai.hook(...)` with `payload=ai.ToolApproval`
-3. The runtime emits a `role="internal"` message containing a pending `HookPart`
+3. The runtime emits a `MessageEnd` event containing an internal `HookPart`
 4. The frontend renders Approve / Reject buttons via the
    `<Confirmation>` component (from AI Elements)
 5. When the user clicks a button, `addToolApprovalResponse()` patches
    the message and sends a new request with the decision
-6. The backend resumes from the checkpoint, calls `ai.resolve_hook(...)`,
-   and either executes the tool or returns an error tool-result message
+6. The backend pre-registers the approval via `ai.resolve_hook(...)` on the
+   next request, then either executes the tool or returns an error tool-result
+   message
 
 Tool results are appended as separate `role="tool"` messages. The
 assistant tool-call message remains immutable.
@@ -60,7 +61,5 @@ The frontend dev server proxies `/api` requests to the backend at `localhost:800
 
 ## Storage
 
-Checkpoints are persisted to `./data/` as JSON files via `FileStorage`.
-The storage backend implements a simple `Storage` protocol — swap in
-Redis, Postgres, or any async key-value store by providing a different
-implementation.
+The demo backend is stateless. The frontend sends the conversation history
+and approval responses on each request.

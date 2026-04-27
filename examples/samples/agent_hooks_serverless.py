@@ -1,14 +1,14 @@
 """Serverless hook pattern: interrupt_loop=True.
 
 Demonstrates the serverless/stateless pattern where the agent run suspends
-cleanly when a hook has no resolution, and resumes from a checkpoint on
-re-entry with a pre-registered resolution.
+cleanly when a hook has no resolution, then re-enters with a pre-registered
+resolution.
 
 Flow:
   1. First run: hook fires, interrupt_loop=True cancels the future,
-     CancelledError is caught, run ends with a checkpoint.
+     CancelledError is caught and the run ends.
   2. Second run: resolve_hook() pre-registers the answer, agent.run()
-     replays from checkpoint, hook finds the resolution immediately.
+     replays from the same input, and hook finds the resolution immediately.
 """
 
 import asyncio
@@ -36,13 +36,13 @@ async def main() -> None:
     my_agent = ai.agent(tools=[delete_file])
 
     @my_agent.loop
-    async def with_confirmation(context: ai.Context) -> AsyncGenerator[ai.Message]:
+    async def with_confirmation(context: ai.Context) -> AsyncGenerator[ai.Event]:
         while True:
-            s = await ai.models.stream(
+            s = ai.models.stream(
                 context.model, context.messages, tools=context.tools
             )
-            async for msg in s:
-                yield msg
+            async for event in s:
+                yield event
 
             tool_calls = context.resolve(s.tool_calls)
             if not tool_calls:
@@ -59,7 +59,6 @@ async def main() -> None:
                     )
                 except asyncio.CancelledError:
                     # No resolution available — bail out cleanly.
-                    # The checkpoint captures everything up to this point.
                     return
 
                 if confirmation.approved:
@@ -74,7 +73,9 @@ async def main() -> None:
                         )
                     )
 
-            yield ai.tool_message(*results)
+            tool_msg = ai.tool_message(*results)
+            yield ai.MessageStart(message=tool_msg)
+            yield ai.MessageEnd(message=tool_msg)
 
     messages = [
         ai.system_message("Delete files when asked. Always use the delete_file tool."),
@@ -85,39 +86,34 @@ async def main() -> None:
     print("--- Run 1: hook fires, no resolution, run suspends ---")
     pending_hook_labels: list[str] = []
 
-    durability = ai.EventLogProvider()
-    async for msg in my_agent.run(model, messages, durability=durability):
-        if msg.role == "internal":
-            hook_part = msg.get_hook_part()
-            if hook_part and hook_part.status == "pending":
+    async for event in my_agent.run(model, messages):
+        if isinstance(event, ai.TextDelta):
+            print(event.chunk, end="", flush=True)
+        elif isinstance(event, ai.MessageEnd) and event.message.role == "internal":
+            hook_parts = [p for p in event.message.parts if isinstance(p, ai.HookPart)]
+            hook_part = hook_parts[0] if hook_parts else None
+            if hook_part is not None and hook_part.status == "pending":
                 pending_hook_labels.append(hook_part.hook_id)
                 print(
                     f"  Hook pending: {hook_part.hook_id}"
                     f" (metadata={hook_part.metadata})"
                 )
-        else:
-            for ev in msg.deltas:
-                if isinstance(ev.part, ai.TextPart):
-                    print(ev.chunk, end="", flush=True)
 
-    saved_checkpoint = durability.checkpoint()
-    print(f"\n  Checkpoint saved: {len(saved_checkpoint.steps)} steps\n")
+    print("\n  Run interrupted; approval will be pre-registered for re-entry.\n")
 
     # -- Second run: pre-register resolution, replay from checkpoint --
     print("--- Run 2: pre-register approval, resume from checkpoint ---")
     for label in pending_hook_labels:
         ai.resolve_hook(label, Confirmation(approved=True, reason="user approved"))
 
-    durability = ai.EventLogProvider(saved_checkpoint)
-    async for msg in my_agent.run(model, messages, durability=durability):
-        if msg.role == "internal":
-            hook_part = msg.get_hook_part()
-            if hook_part:
+    async for event in my_agent.run(model, messages):
+        if isinstance(event, ai.TextDelta):
+            print(event.chunk, end="", flush=True)
+        elif isinstance(event, ai.MessageEnd) and event.message.role == "internal":
+            hook_parts = [p for p in event.message.parts if isinstance(p, ai.HookPart)]
+            hook_part = hook_parts[0] if hook_parts else None
+            if hook_part is not None:
                 print(f"  Hook {hook_part.status}: {hook_part.hook_id}")
-        else:
-            for ev in msg.deltas:
-                if isinstance(ev.part, ai.TextPart):
-                    print(ev.chunk, end="", flush=True)
     print()
 
 

@@ -25,7 +25,7 @@ import pytest
 import ai
 from ai.models.ai_gateway import ai_gateway, errors
 from ai.models.core import model as model_
-from ai.types import messages
+from ai.types import events, messages
 
 from .conftest import mock_client, sse, user_msg
 
@@ -45,12 +45,27 @@ async def _collect(
     msgs: list[messages.Message],
     model: model_.Model = _TEST_MODEL,
     **kwargs: Any,
-) -> list[messages.Message]:
-    """Drain ``stream()`` and return all yielded messages."""
-    result: list[messages.Message] = []
-    async for msg in stream_mod.stream(client, model, msgs, **kwargs):
-        result.append(msg)
+) -> list[events.Event]:
+    """Drain ``stream()`` and return all yielded events."""
+    result: list[events.Event] = []
+    async for event in stream_mod.stream(client, model, msgs, **kwargs):
+        result.append(event)
     return result
+
+
+async def _final(
+    client: Any,
+    msgs: list[messages.Message],
+    model: model_.Model = _TEST_MODEL,
+    **kwargs: Any,
+) -> messages.Message:
+    """Drain ``stream()`` and return the terminal assistant message."""
+    result: list[messages.Message] = []
+    async for event in stream_mod.stream(client, model, msgs, **kwargs):
+        if isinstance(event, events.MessageEnd):
+            result.append(event.message)
+    assert result
+    return result[-1]
 
 
 # ---------------------------------------------------------------------------
@@ -79,11 +94,8 @@ class TestStreaming:
             return httpx.Response(200, text=body)
 
         client = mock_client(httpx.MockTransport(handler))
-        msgs = await _collect(client, [user_msg("Hi")])
-
-        final = msgs[-1]
+        final = await _final(client, [user_msg("Hi")])
         assert final.text == "Hello World"
-        assert final.is_done
         assert final.usage is not None
         assert final.usage.input_tokens == 5
         assert final.usage.output_tokens == 2
@@ -102,9 +114,7 @@ class TestStreaming:
         def handler(req: httpx.Request) -> httpx.Response:
             return httpx.Response(200, text=body)
 
-        final = (
-            await _collect(mock_client(httpx.MockTransport(handler)), [user_msg("?")])
-        )[-1]
+        final = await _final(mock_client(httpx.MockTransport(handler)), [user_msg("?")])
         assert final.reasoning == "think"
         assert final.text == "42"
 
@@ -128,11 +138,9 @@ class TestStreaming:
         def handler(req: httpx.Request) -> httpx.Response:
             return httpx.Response(200, text=body)
 
-        final = (
-            await _collect(
-                mock_client(httpx.MockTransport(handler)), [user_msg("search")]
-            )
-        )[-1]
+        final = await _final(
+            mock_client(httpx.MockTransport(handler)), [user_msg("search")]
+        )
         tc = final.tool_calls
         assert len(tc) == 1
         assert tc[0].tool_name == "search"
@@ -161,16 +169,13 @@ class TestStreaming:
         def handler(req: httpx.Request) -> httpx.Response:
             return httpx.Response(200, text=body)
 
-        final = (
-            await _collect(
-                mock_client(httpx.MockTransport(handler)), [user_msg("draw me")]
-            )
-        )[-1]
+        final = await _final(
+            mock_client(httpx.MockTransport(handler)), [user_msg("draw me")]
+        )
         assert final.text == "Here is an image:"
         assert len(final.images) == 1
         assert final.images[0].media_type == "image/png"
         assert final.images[0].data == "iVBORw0KGgo="
-        assert final.is_done
 
     async def test_complete_tool_call_part(self) -> None:
         """Non-streaming ``tool-call`` part (one shot) must also work."""
@@ -191,11 +196,9 @@ class TestStreaming:
         def handler(req: httpx.Request) -> httpx.Response:
             return httpx.Response(200, text=body)
 
-        final = (
-            await _collect(
-                mock_client(httpx.MockTransport(handler)), [user_msg("weather")]
-            )
-        )[-1]
+        final = await _final(
+            mock_client(httpx.MockTransport(handler)), [user_msg("weather")]
+        )
         assert len(final.tool_calls) == 1
         assert json.loads(final.tool_calls[0].tool_args) == {"city": "SF"}
 

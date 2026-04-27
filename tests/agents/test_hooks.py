@@ -27,16 +27,19 @@ async def test_resolve_live_future() -> None:
     my_agent = ai.agent()
 
     @my_agent.loop
-    async def custom(context: ai.Context) -> AsyncGenerator[ai.Message]:
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.Event]:
         nonlocal resolved_value
-        async for msg in await ai.models.stream(context.model, context.messages):
-            yield msg
+        async for event in ai.models.stream(context.model, context.messages):
+            yield event
         result = await ai.hook("confirm_1", payload=Confirmation)
         resolved_value = result
 
     mock_llm([[text_msg("OK")]])
 
-    async for msg in my_agent.run(MOCK_MODEL, [ai.user_message("go")]):
+    async for event in my_agent.run(MOCK_MODEL, [ai.user_message("go")]):
+        if not isinstance(event, ai.MessageEnd):
+            continue
+        msg = event.message
         # When we see the pending hook message, resolve it.
         if any(isinstance(p, ai.HookPart) and p.status == "pending" for p in msg.parts):
             ai.resolve_hook("confirm_1", {"approved": True, "reason": "looks good"})
@@ -55,10 +58,10 @@ async def test_cancel_live_hook() -> None:
     my_agent = ai.agent()
 
     @my_agent.loop
-    async def custom(context: ai.Context) -> AsyncGenerator[ai.Message]:
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.Event]:
         nonlocal was_cancelled
-        async for msg in await ai.models.stream(context.model, context.messages):
-            yield msg
+        async for event in ai.models.stream(context.model, context.messages):
+            yield event
         try:
             await ai.hook("cancel_me", payload=Confirmation)
         except asyncio.CancelledError:
@@ -66,7 +69,10 @@ async def test_cancel_live_hook() -> None:
 
     mock_llm([[text_msg("OK")]])
 
-    async for msg in my_agent.run(MOCK_MODEL, [ai.user_message("go")]):
+    async for event in my_agent.run(MOCK_MODEL, [ai.user_message("go")]):
+        if not isinstance(event, ai.MessageEnd):
+            continue
+        msg = event.message
         if any(isinstance(p, ai.HookPart) and p.status == "pending" for p in msg.parts):
             await ai.cancel_hook("cancel_me", reason="denied")
 
@@ -90,10 +96,10 @@ async def test_pre_registered_resolution_consumed() -> None:
     my_agent = ai.agent()
 
     @my_agent.loop
-    async def custom(context: ai.Context) -> AsyncGenerator[ai.Message]:
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.Event]:
         nonlocal resolved_value
-        async for msg in await ai.models.stream(context.model, context.messages):
-            yield msg
+        async for event in ai.models.stream(context.model, context.messages):
+            yield event
         resolved_value = await ai.hook("pre_reg_1", payload=Confirmation)
 
     # Pre-register BEFORE run.
@@ -129,15 +135,18 @@ async def test_resolved_hook_emits_message() -> None:
     my_agent = ai.agent()
 
     @my_agent.loop
-    async def custom(context: ai.Context) -> AsyncGenerator[ai.Message]:
-        async for msg in await ai.models.stream(context.model, context.messages):
-            yield msg
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.Event]:
+        async for event in ai.models.stream(context.model, context.messages):
+            yield event
         await ai.hook("emit_test", payload=Confirmation)
 
     mock_llm([[text_msg("OK")]])
 
     msgs: list[ai.Message] = []
-    async for msg in my_agent.run(MOCK_MODEL, [ai.user_message("go")]):
+    async for event in my_agent.run(MOCK_MODEL, [ai.user_message("go")]):
+        if not isinstance(event, ai.MessageEnd):
+            continue
+        msg = event.message
         msgs.append(msg)
         if any(isinstance(p, ai.HookPart) and p.status == "pending" for p in msg.parts):
             ai.resolve_hook("emit_test", {"approved": False})
@@ -158,9 +167,9 @@ async def test_hook_metadata_in_pending() -> None:
     my_agent = ai.agent()
 
     @my_agent.loop
-    async def custom(context: ai.Context) -> AsyncGenerator[ai.Message]:
-        async for msg in await ai.models.stream(context.model, context.messages):
-            yield msg
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.Event]:
+        async for event in ai.models.stream(context.model, context.messages):
+            yield event
         await ai.hook(
             "meta_test",
             payload=Confirmation,
@@ -170,8 +179,9 @@ async def test_hook_metadata_in_pending() -> None:
 
     mock_llm([[text_msg("OK")]])
     msgs: list[ai.Message] = []
-    async for msg in my_agent.run(MOCK_MODEL, [ai.user_message("go")]):
-        msgs.append(msg)
+    async for event in my_agent.run(MOCK_MODEL, [ai.user_message("go")]):
+        if isinstance(event, ai.MessageEnd):
+            msgs.append(event.message)
 
     hook_msgs = [m for m in msgs if any(isinstance(p, ai.HookPart) for p in m.parts)]
     assert len(hook_msgs) >= 1

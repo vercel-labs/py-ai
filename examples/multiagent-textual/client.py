@@ -13,6 +13,7 @@ import asyncio
 import json
 
 import rich.text
+import pydantic
 import textual
 import textual.app
 import textual.containers
@@ -111,6 +112,8 @@ class MultiAgentApp(textual.app.App):
         self._hook_queue: asyncio.Queue[ai.HookPart] = asyncio.Queue()
         self._current_hook: ai.HookPart | None = None
         self._ws: websockets.ClientConnection | None = None
+        self._event_adapter = pydantic.TypeAdapter(ai.Event)
+        self._current_label = "unknown"
 
     def compose(self) -> textual.app.ComposeResult:
         yield AgentPanel("mothership", "mothership")
@@ -147,20 +150,45 @@ class MultiAgentApp(textual.app.App):
                         self._on_run_complete()
                         break
 
-                    msg = ai.Message.model_validate(data)
-                    self._handle_message(msg)
+                    event = self._event_adapter.validate_python(data)
+                    self._handle_event(event)
 
         except (ConnectionRefusedError, OSError) as exc:
             self._set_input_placeholder(f"connection failed: {exc}")
 
     # ------------------------------------------------------------------
-    # Message routing
+    # Event routing
     # ------------------------------------------------------------------
 
-    def _handle_message(self, msg: ai.Message) -> None:
-        label = msg.source_label or "unknown"
+    def _handle_event(self, event: ai.Event) -> None:
+        if isinstance(event, ai.MessageStart) and event.message is not None:
+            self._current_label = event.message.source_label or "unknown"
+            panel = self._get_panel(self._current_label)
+            if panel is not None and panel.status == "idle":
+                panel.status = "streaming..."
+            return
 
-        if (hook_part := msg.get_hook_part()) is not None:
+        if isinstance(event, ai.TextDelta):
+            panel = self._get_panel(self._current_label)
+            if panel is not None:
+                panel.append_text(event.chunk)
+            return
+
+        if isinstance(event, ai.ReasoningDelta | ai.ToolDelta):
+            panel = self._get_panel(self._current_label)
+            if panel is not None:
+                panel.append_text(event.chunk, style="dim")
+            return
+
+        if not isinstance(event, ai.MessageEnd):
+            return
+
+        msg = event.message
+        label = msg.source_label or self._current_label
+
+        hook_parts = [p for p in msg.parts if isinstance(p, ai.HookPart)]
+        if hook_parts:
+            hook_part = hook_parts[0]
             if hook_part.status == "pending":
                 self._on_hook_pending(hook_part)
                 return
@@ -172,28 +200,12 @@ class MultiAgentApp(textual.app.App):
         if panel is None:
             return
 
-        # Mark panel as actively streaming
-        if panel.status == "idle":
-            panel.status = "streaming..."
-
-        # Text / reasoning / tool-arg deltas
-        for ev in msg.deltas:
-            match ev.part:
-                case ai.TextPart():
-                    panel.append_text(ev.chunk)
-                case ai.ReasoningPart():
-                    panel.append_text(ev.chunk, style="dim")
-                case ai.ToolCallPart():
-                    panel.append_text(ev.chunk, style="dim")
-
-        # Completed message — show tool calls and results
-        if msg.is_done:
-            for part in msg.parts:
-                match part:
-                    case ai.ToolCallPart(tool_name=name, tool_args=args):
-                        panel.append_line(f"> {name}({args})")
-                    case ai.ToolResultPart(tool_name=name, result=result):
-                        panel.append_line(f"< {name} = {result}")
+        for part in msg.parts:
+            match part:
+                case ai.ToolCallPart(tool_name=name, tool_args=args):
+                    panel.append_line(f"> {name}({args})")
+                case ai.ToolResultPart(tool_name=name, result=result):
+                    panel.append_line(f"< {name} = {result}")
 
     # ------------------------------------------------------------------
     # Hook lifecycle

@@ -21,7 +21,7 @@ async def get_facts(topic: str) -> str:
 # This tool is an async generator — it streams intermediate messages
 # through the runtime sink, then returns the final result.
 @ai.tool  # type: ignore[arg-type]  # async generator tools are supported at runtime
-async def research(topic: str) -> AsyncGenerator[ai.Message]:
+async def research(topic: str) -> AsyncGenerator[ai.Event]:
     """Research a topic in depth using a sub-agent."""
     researcher = ai.agent(tools=[get_facts])
 
@@ -30,8 +30,8 @@ async def research(topic: str) -> AsyncGenerator[ai.Message]:
         ai.user_message(f"Research: {topic}"),
     ]
 
-    async for msg in researcher.run(model, messages):
-        yield msg
+    async for event in researcher.run(model, messages):
+        yield event
 
 
 async def main() -> None:
@@ -44,10 +44,9 @@ async def main() -> None:
         ai.user_message("Tell me about Mars."),
     ]
 
-    async for msg in orchestrator.run(model, messages):
-        for ev in msg.deltas:
-            if isinstance(ev.part, ai.TextPart):
-                print(ev.chunk, end="", flush=True)
+    async for event in orchestrator.run(model, messages):
+        if isinstance(event, ai.TextDelta):
+            print(event.chunk, end="", flush=True)
     print()
 
 

@@ -25,8 +25,8 @@ class PrintMiddleware(ai.Middleware):
         print(f">>> [run] agent starting  label={label}  tools={len(call.tools)}")
         t0 = time.perf_counter()
 
-        async for msg in next(call):
-            yield msg
+        async for event in next(call):
+            yield event
 
         elapsed = time.perf_counter() - t0
         print(f"<<< [run] agent finished  label={label}  {elapsed:.2f}s")
@@ -39,7 +39,7 @@ class PrintMiddleware(ai.Middleware):
 
         result = await next(call)
 
-        # The result is a StreamResult — async-iterable of Message snapshots.
+        # The result is a StreamResult — async-iterable of Event objects.
         # We return it as-is; the consumer iterates it normally.
         print("<<< [model] stream started")
         return result
@@ -98,10 +98,9 @@ async def main() -> None:
     ]
 
     print("--- starting agent run ---\n")
-    async for msg in my_agent.run(model, messages, middleware=[PrintMiddleware()]):
-        for ev in msg.deltas:
-            if isinstance(ev.part, ai.TextPart):
-                print(ev.chunk, end="", flush=True)
+    async for event in my_agent.run(model, messages, middleware=[PrintMiddleware()]):
+        if isinstance(event, ai.TextDelta):
+            print(event.chunk, end="", flush=True)
     print("\n\n--- done ---")
 
 

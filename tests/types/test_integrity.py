@@ -12,6 +12,7 @@ import pytest
 import ai
 from ai import models
 from ai.types import builders, messages
+from ai.types import events as events_
 from ai.types.integrity import IntegrityError, prepare_messages
 
 from ..conftest import MOCK_MODEL, mock_generate, mock_llm, text_msg
@@ -481,7 +482,7 @@ async def test_stream_calls_prepare_messages() -> None:
     with patch(
         "ai.models.core.api.integrity_.prepare_messages", wraps=lambda m: m
     ) as spy:
-        s = await models.stream(MOCK_MODEL, msgs)
+        s = models.stream(MOCK_MODEL, msgs)
         async for _ in s:
             pass
         spy.assert_called_once_with(msgs)
@@ -503,12 +504,12 @@ async def test_stream_sanitizes_internal_messages() -> None:
         tools: Sequence[ai.ToolLike] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         **kwargs: Any,
-    ) -> AsyncGenerator[messages.Message]:
+    ) -> AsyncGenerator[events_.Event]:
         received.append(list(messages))
-        async for m in original_adapter(
+        async for event in original_adapter(
             client, model, messages, tools=tools, output_type=output_type, **kwargs
         ):
-            yield m
+            yield event
 
     models.register_stream("mock", _spy_stream)
 
@@ -517,7 +518,7 @@ async def test_stream_sanitizes_internal_messages() -> None:
         messages.Message(role="internal", parts=[messages.TextPart(text="internal")]),
         ai.assistant_message("hello"),
     ]
-    s = await models.stream(MOCK_MODEL, msgs)
+    s = models.stream(MOCK_MODEL, msgs)
     async for _ in s:
         pass
 

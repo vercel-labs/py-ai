@@ -11,22 +11,21 @@ Usage::
 
     # stream — auto-creates client from env vars
     msgs = [ai.user_message("hello")]
-    s = await ai.stream(model, msgs)
-    async for msg in s:
-        for ev in msg.deltas:
-            if isinstance(ev.part, ai.TextPart):
-                print(ev.chunk, end="", flush=True)
+    s = ai.stream(model, msgs)
+    async for event in s:
+        if isinstance(event, ai.TextDelta):
+            print(event.chunk, end="", flush=True)
 
     # explicit client for custom auth
     client = ai.Client(base_url="https://custom.example.com/v1", api_key="sk-...")
     model = openai("gpt-5.4", client=client)
-    s = await ai.stream(model, msgs)
+    s = ai.stream(model, msgs)
 
     # list available models
     ids = await openai.list()
 """
 
-from ..types.stream import StreamResultLike
+from ..types.proto import StreamResultLike
 from .ai_gateway import ai_gateway
 from .anthropic import anthropic
 from .core.adapters import register_generate, register_stream

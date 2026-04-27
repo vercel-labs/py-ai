@@ -1,8 +1,8 @@
 """Shared conversions between internal Part objects and UIMessagePart objects.
 
 Used by ``outbound.history`` to reconstruct UIMessages from persisted
-``ai.Message`` lists. The live outbound stream does not use these — it
-emits wire-protocol deltas directly from ``Message.stream.new_events``.
+``ai.Message`` lists. The live outbound stream does not use these; it
+emits wire-protocol deltas directly from event streams.
 """
 
 from __future__ import annotations

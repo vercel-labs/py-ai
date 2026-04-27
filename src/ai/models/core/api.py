@@ -5,36 +5,42 @@ These wire together adapters, middleware chains, and auto-client creation.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import AsyncGenerator, Sequence
 from typing import Any
 
 import pydantic
 
 from ... import middleware as middleware_
+from ...types import events as events_
 from ...types import integrity as integrity_
 from ...types import messages as messages_
+from ...types import proto as proto_
 from ...types import stream as stream_
-from ...types import tools as tools_
 from . import adapters
 from . import client as client_
 from . import model as model_
 from . import types as types_
 
 
-async def stream(
+def stream(
     model: model_.Model,
     messages: list[messages_.Message],
     *,
-    tools: Sequence[tools_.ToolLike] | None = None,
+    tools: Sequence[proto_.ToolLike] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
     turn_id: str | None = None,
     **kwargs: Any,
-) -> stream_.StreamResultLike:
+) -> proto_.StreamResultLike:
     """Stream an LLM response.
 
     Returns a :class:`StreamResultLike` that is async-iterable and
     collects the final ``Message``.  After iteration, access ``.text``,
     ``.tool_calls``, ``.usage``, etc.
+
+    Call-site is a plain ``async for`` — no outer ``await`` needed::
+
+        async for event in ai.stream(model, messages):
+            ...
 
     One call is one turn: a single request and its response.  The model
     response carries ``turn_id``; re-emitted input messages keep any
@@ -43,6 +49,9 @@ async def stream(
 
     The client is resolved from the model: ``model.client`` if set,
     otherwise auto-created from ``model.base_url`` / ``model.api_key_env``.
+
+    Middleware dispatch and adapter setup are deferred to the first
+    iteration; any async preflight work happens there.
     """
     messages = integrity_.prepare_messages(messages)
 
@@ -60,7 +69,7 @@ async def stream(
     # Capture in closure for the inner function.
     _turn_id = turn_id
 
-    async def _real(call: middleware_.ModelContext) -> stream_.StreamResultLike:
+    async def _real(call: middleware_.ModelContext) -> proto_.StreamResultLike:
         c = client_.auto_client(call.model)
         adapter_fn = adapters.get_stream_adapter(call.model.adapter)
         return types_.StreamResult(
@@ -76,8 +85,13 @@ async def stream(
             input_messages=call.messages,
         )
 
-    chain = middleware_._build_model_chain(_real)
-    return await chain(call)
+    async def _driver() -> AsyncGenerator[events_.Event]:
+        chain = middleware_._build_model_chain(_real)
+        inner = await chain(call)
+        async for event in inner:
+            yield event
+
+    return stream_.StreamResult(_driver(), turn_id=turn_id)
 
 
 async def generate(

@@ -1019,7 +1019,7 @@ wheels = [
 
 [[package]]
 name = "vercel-ai-sdk"
-version = "0.0.1.dev9"
+version = "0.0.1.dev10"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },

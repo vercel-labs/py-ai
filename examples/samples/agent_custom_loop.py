@@ -25,14 +25,14 @@ async def main() -> None:
     my_agent = ai.agent(tools=tools)
 
     @my_agent.loop
-    async def custom(context: ai.Context) -> AsyncGenerator[ai.Message]:
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.Event]:
         """Stream, execute tools with logging, repeat."""
         while True:
-            s = await ai.models.stream(
+            s = ai.models.stream(
                 context.model, context.messages, tools=context.tools
             )
-            async for msg in s:
-                yield msg
+            async for event in s:
+                yield event
 
             tool_calls = context.resolve(s.tool_calls)
             if not tool_calls:
@@ -49,15 +49,16 @@ async def main() -> None:
                 tasks = [tg.create_task(tc()) for tc in tool_calls]
 
             # Yield one merged tool-result message — history auto-collects it.
-            yield ai.tool_message(*(t.result() for t in tasks))
+            tool_msg = ai.tool_message(*(t.result() for t in tasks))
+            yield ai.MessageStart(message=tool_msg)
+            yield ai.MessageEnd(message=tool_msg)
 
-    async for msg in my_agent.run(
+    async for event in my_agent.run(
         model,
         [ai.user_message("Compare the weather and population of New York and Tokyo.")],
     ):
-        for ev in msg.deltas:
-            if isinstance(ev.part, ai.TextPart):
-                print(ev.chunk, end="", flush=True)
+        if isinstance(event, ai.TextDelta):
+            print(event.chunk, end="", flush=True)
     print()
 
 
