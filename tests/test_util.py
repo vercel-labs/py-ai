@@ -124,9 +124,10 @@ async def test_error_cancels_other_iterables() -> None:
         raise RuntimeError("boom")
         yield "unreachable"  # noqa: B027
 
-    with pytest.raises(RuntimeError, match="boom"):
+    with pytest.raises(ExceptionGroup) as exc_info:
         await _collect(util.merge(good(), bad()))
 
+    assert exc_info.group_contains(RuntimeError, match="boom")
     assert "good" in closed
 
 
@@ -137,8 +138,10 @@ async def test_error_propagates() -> None:
         yield 1
         raise ValueError("oops")
 
-    with pytest.raises(ValueError, match="oops"):
+    with pytest.raises(ExceptionGroup) as exc_info:
         await _collect(util.merge(failing()))
+
+    assert exc_info.group_contains(ValueError, match="oops")
 
 
 async def test_items_before_error_are_yielded() -> None:
@@ -155,10 +158,11 @@ async def test_items_before_error_are_yielded() -> None:
         raise RuntimeError("fail")
 
     results: list[str] = []
-    with pytest.raises(RuntimeError, match="fail"):
+    with pytest.raises(ExceptionGroup) as exc_info:
         async for item in util.merge(ok(), fails_later()):
             results.append(item)
 
+    assert exc_info.group_contains(RuntimeError, match="fail")
     assert "x" in results
 
 
@@ -182,5 +186,7 @@ async def test_cleanup_with_non_generator_iterable() -> None:
         raise RuntimeError("boom")
         yield 0  # noqa: B027
 
-    with pytest.raises(RuntimeError, match="boom"):
+    with pytest.raises(ExceptionGroup) as exc_info:
         await _collect(util.merge(SimpleIter(), failing()))
+
+    assert exc_info.group_contains(RuntimeError, match="boom")
