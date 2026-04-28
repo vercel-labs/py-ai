@@ -5,13 +5,13 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable
-from typing import Any, Protocol, get_type_hints
+from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable, Sequence
+from typing import Any, Protocol, Self, get_type_hints, overload
 
 import pydantic
 
 from .. import middleware as middleware_
-from .. import models, types
+from .. import models, types, util
 from ..types import builders
 from . import events as events_
 from . import runtime
@@ -187,6 +187,64 @@ class ToolCall:
         return await chain(call)
 
 
+class ToolRunner:
+    def __init__(self, stream: models.Stream) -> None:
+        self._stream = stream
+        # finish_future gets set when the stream exhausts. We won't
+        # exhaust until that happens, since the stream can cause more
+        # tools to get triggered.
+        self._finish_future = stream.finish_future
+        # A future that gets signalled when we add a new tool, so that
+        # asyncio.wait gets woken up and cycles around in the loop to
+        # wait on the new thing as well.
+        self._sched_waiter: asyncio.Future[None] = (
+            asyncio.get_running_loop().create_future()
+        )
+        self._active: set[asyncio.Future[types.Message] | asyncio.Future[None]] = {
+            self._finish_future
+        }
+        self._tool_results: list[types.Message] = []
+        self._tg_base = asyncio.TaskGroup()
+
+    async def __aenter__(self) -> Self:
+        self._tg = await self._tg_base.__aenter__()
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        await self._tg_base.__aexit__(*args)
+
+    def events(self) -> AsyncGenerator[types.Event | types.Message]:
+        return self._iterate()
+
+    def schedule(self, tc: ToolCall) -> None:
+        self._active.add(self._tg.create_task(tc()))
+        self._sched_waiter.set_result(None)
+
+    def get_tool_message(self) -> types.Message | None:
+        if self._tool_results:
+            return builders.tool_message(*self._tool_results)
+        return None
+
+    async def _iterate(self) -> AsyncGenerator[types.Event | types.Message]:
+        while self._active:
+            done, _ = await asyncio.wait(
+                [*self._active, self._sched_waiter],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for t in done:
+                self._active.discard(t)
+                if t is self._finish_future:
+                    t.result()
+                elif t is self._sched_waiter:
+                    t.result()
+                    self._sched_waiter = asyncio.get_running_loop().create_future()
+                else:
+                    res = t.result()
+                    assert res is not None
+                    self._tool_results.append(res)
+                    yield res
+
+
 class Context(pydantic.BaseModel):
     """Everything that goes into the LLM."""
 
@@ -194,14 +252,41 @@ class Context(pydantic.BaseModel):
     messages: list[types.Message]
     tools: list[Tool[..., Any]]
 
+    _tools_by_name: dict[str, Tool[..., Any]] = pydantic.PrivateAttr()
+
     model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
 
-    def resolve(self, tool_parts: list[types.ToolCallPart]) -> list[ToolCall]:
-        """Resolve ToolCallParts into callable ToolCall objects."""
-        tools_by_name = {t.name: t for t in self.tools}
-        return [
-            ToolCall(part=tp, tool=tools_by_name[tp.tool_name]) for tp in tool_parts
-        ]
+    def model_post_init(self, __context: Any) -> None:
+        self._tools_by_name = {t.name: t for t in self.tools}
+
+    def keep_running(self) -> bool:
+        """Call at top of an agent loop to see whether to keep running."""
+        return bool(
+            self.messages and self.messages[-1].role not in ("assistant", "internal")
+        )
+
+    @overload
+    def resolve(self, tool_part: types.ToolCallPart) -> ToolCall: ...
+    @overload
+    def resolve(self, tool_part: Sequence[types.ToolCallPart]) -> list[ToolCall]: ...
+
+    def resolve(
+        self, tool_part: types.ToolCallPart | Sequence[types.ToolCallPart]
+    ) -> ToolCall | list[ToolCall]:
+        """Resolve ToolCallPart(s) into callable ToolCall object(s)."""
+        if isinstance(tool_part, types.ToolCallPart):
+            return ToolCall(
+                part=tool_part, tool=self._tools_by_name[tool_part.tool_name]
+            )
+        return [self.resolve(tp) for tp in tool_part]
+
+    def add(self, message: types.Message | Sequence[types.Message] | None) -> None:
+        if message is None:
+            return
+        if isinstance(message, types.Message):
+            self.messages.append(message)
+        else:
+            self.messages.extend(message)
 
 
 class LoopFn(Protocol):
@@ -306,29 +391,36 @@ class Agent:
         self._loop_fn = fn
         return fn
 
-    async def default_loop(self, context: Context) -> AsyncGenerator[StreamItem]:
-        while True:
-            stream = models.stream(
-                context.model,
-                context.messages,
-                tools=context.tools,
-            )
-            async for stream_event in stream:
-                yield stream_event
+    async def default_loop(
+        self, context: Context
+    ) -> AsyncGenerator[events_.AgentEvent]:
+        """Stream, execute tools with logging, repeat."""
+        while context.keep_running():
+            async with (
+                models.stream(
+                    context.model, context.messages, tools=context.tools
+                ) as stream,
+                ToolRunner(stream) as tr,
+            ):
+                async for event in util.merge(stream, tr.events()):
+                    if isinstance(event, types.Message):
+                        # FIXME: swallow event for now, since
+                        # otherwise it gets batched up. We need to
+                        # turn this into a ToolResult and get rid of
+                        # auto-batching.
+                        pass
+                    else:
+                        yield event
 
-            # Yield the assistant message for silent history collection.
-            if stream.message is not None and stream.message.parts:
-                yield stream.message
+                    if isinstance(event, types.ToolEnd):
+                        tool = context.resolve(event.tool_call)
+                        tr.schedule(tool)
 
-            tool_calls = context.resolve(stream.tool_calls)
-            if not tool_calls:
-                break
-
-            # Execute tool calls in parallel.
-            async with asyncio.TaskGroup() as tg:
-                tasks = [tg.create_task(tc()) for tc in tool_calls]
-
-            yield tool_result(*(t.result() for t in tasks))
+                context.add(stream.message)
+                # This adds the tool message to the history, which
+                # also has the effect of causing another turn through
+                # the loop.
+                context.add(tr.get_tool_message())
 
     async def run(
         self,

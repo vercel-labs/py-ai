@@ -1,3 +1,4 @@
+import asyncio
 import dataclasses
 from collections.abc import AsyncGenerator, Sequence
 from typing import Any, Protocol, Self, runtime_checkable
@@ -67,6 +68,13 @@ class Stream:
         self._gen = gen
         self._message: types.Message = types.Message(role="assistant", parts=[])
         self._parts: dict[str, types.Part] = {}
+        self._finish_future: asyncio.Future[None] = (
+            asyncio.get_event_loop().create_future()
+        )
+
+    @property
+    def finish_future(self) -> asyncio.Future[None]:
+        return self._finish_future
 
     async def __aenter__(self) -> Self:
         return self
@@ -76,14 +84,21 @@ class Stream:
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
         tb: object,
-    ) -> None:
+    ) -> bool:
         await self._gen.aclose()
+        return False
 
     def __aiter__(self) -> Self:
         return self
 
-    async def __anext__(self) -> types.Event:
-        event = await self._gen.__anext__()
+    async def __anext__(self: Self) -> types.Event:
+        try:
+            event = await self._gen.__anext__()
+        except Exception:
+            # Usually this fires on StopAsyncIteration, but could be a
+            # real exception too
+            self._finish_future.set_result(None)
+            raise
         updates = self._aggregate_event(event)
         return event.model_copy(update={"message": self._message, **updates})
 
