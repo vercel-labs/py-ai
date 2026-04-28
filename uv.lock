@@ -48,6 +48,15 @@ wheels = [
 ]
 
 [[package]]
+name = "async-solipsism"
+version = "0.9"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/03/c6/136e3d282bbd292fd350f854e5e1690de78a9eb21591792c759ba840550c/async_solipsism-0.9.tar.gz", hash = "sha256:552325d3b6e4f1415fbcc9aa7dc2ba8fb3f30c39b1864ad9d104fdb666b3612d", size = 30760, upload-time = "2025-12-28T12:33:16.377Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b6/be/b11466a6fa2b9685d1fa10ab79e1234d4af065603b3e1a001dd36d6f8898/async_solipsism-0.9-py3-none-any.whl", hash = "sha256:3ef10bd7dc4ee8d18564d480d88f196e44fa0bc1e8ebe9357dd9932b2154e6dc", size = 26390, upload-time = "2025-12-28T12:33:17.921Z" },
+]
+
+[[package]]
 name = "attrs"
 version = "25.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1032,6 +1041,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "async-solipsism" },
     { name = "mypy" },
     { name = "pyright" },
     { name = "pytest" },
@@ -1053,6 +1063,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "async-solipsism", specifier = ">=0.9" },
     { name = "mypy", specifier = ">=1.11" },
     { name = "pyright", specifier = ">=1.1.408" },
     { name = "pytest", specifier = ">=8.0" },
