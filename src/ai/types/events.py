@@ -102,8 +102,8 @@ class FileEvent(BaseEvent):
     kind: Literal["file"] = "file"
 
 
-class HookSuspention(BaseEvent):
-    kind: Literal["hook_suspention"] = "hook_suspention"
+class HookSuspension(BaseEvent):
+    kind: Literal["hook_suspension"] = "hook_suspension"
 
 
 class HookResolution(BaseEvent):
@@ -123,7 +123,7 @@ Event = Annotated[
     | ToolDelta
     | ToolEnd
     | FileEvent
-    | HookSuspention
+    | HookSuspension
     | HookResolution,
     pydantic.Field(discriminator="kind"),
 ]
