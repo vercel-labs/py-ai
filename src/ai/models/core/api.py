@@ -67,7 +67,6 @@ class Stream:
         self._gen = gen
         self._message: types.Message = types.Message(role="assistant", parts=[])
         self._parts: dict[str, types.Part] = {}
-        self._finished_tools: set[str] = set()
 
     async def __aenter__(self) -> Self:
         return self
@@ -138,22 +137,18 @@ class Stream:
                 ):
                     existing_reasoning.signature = sig
             case types.ToolStart(tool_call_id=tcid, tool_name=name):
-                if tcid not in self._parts:
-                    tcp = types.ToolCallPart(
-                        id=tcid,
-                        tool_call_id=tcid,
-                        tool_name=name,
-                        tool_args="",
-                    )
-                    self._message.parts.append(tcp)
-                    self._parts[tcid] = tcp
+                tcp = types.ToolCallPart(
+                    id=tcid,
+                    tool_call_id=tcid,
+                    tool_name=name,
+                    tool_args="",
+                )
+                self._message.parts.append(tcp)
+                self._parts[tcid] = tcp
             case types.ToolDelta(tool_call_id=tcid, chunk=c):
-                if tcid not in self._finished_tools:
-                    existing_tool = self._parts.get(tcid)
-                    if isinstance(existing_tool, types.ToolCallPart):
-                        existing_tool.tool_args += c
-            case types.ToolEnd(tool_call_id=tcid):
-                self._finished_tools.add(tcid)
+                existing_tool = self._parts.get(tcid)
+                if isinstance(existing_tool, types.ToolCallPart):
+                    existing_tool.tool_args += c
             case types.FileEvent(block_id=bid, media_type=mt, data=d, filename=fname):
                 fp = types.FilePart(
                     id=bid or types.generate_id(),

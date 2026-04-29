@@ -158,9 +158,16 @@ async def _build_request_body(
 # ---------------------------------------------------------------------------
 
 
-def _expand_tool_call(data: dict[str, Any]) -> list[events_.Event]:
-    """Expand a complete ``tool-call`` part into Start + Delta + End."""
+def _expand_tool_call(
+    data: dict[str, Any], streamed_tool_ids: set[str]
+) -> list[events_.Event]:
+    """Expand a complete ``tool-call`` part into Start + Delta + End.
+
+    Returns empty when the tool was already streamed via ``tool-input-*``.
+    """
     tc_id = data.get("toolCallId", "")
+    if tc_id in streamed_tool_ids:
+        return []
     tool_name = data.get("toolName", "")
     tool_input = data.get("input", "")
     args_str = tool_input if isinstance(tool_input, str) else json.dumps(tool_input)
@@ -198,7 +205,9 @@ def _parse_usage(data: Any) -> usage_.Usage:
     )
 
 
-def _parse_stream_part(data: dict[str, Any]) -> list[events_.Event]:
+def _parse_stream_part(
+    data: dict[str, Any], streamed_tool_ids: set[str]
+) -> list[events_.Event]:
     """Convert a ``LanguageModelV3StreamPart`` to public events."""
     match data.get("type", ""):
         case "text-start":
@@ -230,9 +239,11 @@ def _parse_stream_part(data: dict[str, Any]) -> list[events_.Event]:
             return [events_.ReasoningEnd(block_id=data.get("id", "reasoning"))]
 
         case "tool-input-start":
+            tcid = data.get("id", "")
+            streamed_tool_ids.add(tcid)
             return [
                 events_.ToolStart(
-                    tool_call_id=data.get("id", ""),
+                    tool_call_id=tcid,
                     tool_name=data.get("toolName", ""),
                 )
             ]
@@ -249,7 +260,7 @@ def _parse_stream_part(data: dict[str, Any]) -> list[events_.Event]:
             return [events_.ToolEnd(tool_call_id=data.get("id", ""))]
 
         case "tool-call":
-            return _expand_tool_call(data)
+            return _expand_tool_call(data, streamed_tool_ids)
 
         case "file":
             return [
@@ -313,8 +324,9 @@ async def stream(
                 )
 
             yield events_.StreamStart()
+            streamed_tool_ids: set[str] = set()
             async for data in _common.parse_sse_lines(response):
-                for event in _parse_stream_part(data):
+                for event in _parse_stream_part(data, streamed_tool_ids):
                     yield event
     except errors.GatewayError:
         raise
