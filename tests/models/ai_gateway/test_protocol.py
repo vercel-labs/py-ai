@@ -235,7 +235,7 @@ class TestParseStreamPartComplex:
     def test_text_delta_uses_textDelta_key(self) -> None:
         """The gateway sends ``textDelta`` (camelCase), not ``delta``."""
         events = stream_mod._parse_stream_part(
-            {"type": "text-delta", "id": "t1", "textDelta": "Hello"}
+            {"type": "text-delta", "id": "t1", "textDelta": "Hello"}, set()
         )
         assert isinstance(events[0], events_.TextDelta)
         assert events[0].chunk == "Hello"
@@ -249,7 +249,8 @@ class TestParseStreamPartComplex:
                 "toolCallId": "tc-1",
                 "toolName": "get_weather",
                 "input": {"city": "SF"},
-            }
+            },
+            set(),
         )
         assert len(events) == 3
         assert isinstance(events[0], events_.ToolStart)
@@ -257,6 +258,24 @@ class TestParseStreamPartComplex:
         assert isinstance(events[1], events_.ToolDelta)
         assert json.loads(events[1].chunk) == {"city": "SF"}
         assert isinstance(events[2], events_.ToolEnd)
+
+    def test_tool_call_skipped_when_already_streamed(self) -> None:
+        """A ``tool-call`` that duplicates a streamed tool is dropped."""
+        seen: set[str] = set()
+        stream_mod._parse_stream_part(
+            {"type": "tool-input-start", "id": "tc-1", "toolName": "get_weather"},
+            seen,
+        )
+        events = stream_mod._parse_stream_part(
+            {
+                "type": "tool-call",
+                "toolCallId": "tc-1",
+                "toolName": "get_weather",
+                "input": {"city": "SF"},
+            },
+            seen,
+        )
+        assert events == []
 
     def test_finish_flat_usage(self) -> None:
         events = stream_mod._parse_stream_part(
@@ -267,7 +286,8 @@ class TestParseStreamPartComplex:
                     "prompt_tokens": 10,
                     "completion_tokens": 20,
                 },
-            }
+            },
+            set(),
         )
         done = events[0]
         assert isinstance(done, events_.StreamEnd)
@@ -293,7 +313,8 @@ class TestParseStreamPartComplex:
                         "reasoning": 30,
                     },
                 },
-            }
+            },
+            set(),
         )
         done = events[0]
         assert isinstance(done, events_.StreamEnd)
@@ -311,7 +332,8 @@ class TestParseStreamPartComplex:
                 "id": "f1",
                 "mediaType": "image/png",
                 "data": "iVBORw0KGgo=",
-            }
+            },
+            set(),
         )
         assert len(events) == 1
         assert isinstance(events[0], events_.FileEvent)
@@ -321,14 +343,16 @@ class TestParseStreamPartComplex:
 
     def test_file_part_defaults(self) -> None:
         """A minimal ``file`` part uses sensible defaults."""
-        events = stream_mod._parse_stream_part({"type": "file", "data": "somedata"})
+        events = stream_mod._parse_stream_part(
+            {"type": "file", "data": "somedata"}, set()
+        )
         assert len(events) == 1
         assert isinstance(events[0], events_.FileEvent)
         assert events[0].media_type == "application/octet-stream"
 
     def test_unknown_types_produce_no_events(self) -> None:
         for t in ("stream-start", "raw", "response-metadata", "banana"):
-            assert stream_mod._parse_stream_part({"type": t}) == []
+            assert stream_mod._parse_stream_part({"type": t}, set()) == []
 
 
 # ---------------------------------------------------------------------------
