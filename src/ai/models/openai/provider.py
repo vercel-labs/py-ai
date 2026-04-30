@@ -1,16 +1,11 @@
-"""OpenAI provider singleton.
+"""OpenAI provider.
 
 Defines the callable :data:`openai` provider, which satisfies the
-:class:`~ai.models.core.proto.Provider` protocol.  The singleton is
-re-exported from this package's ``__init__`` for convenience.
-"""
-
-from __future__ import annotations
+:class:`~ai.models.core.proto.Provider` protocol."""
 
 import os
 
-from ..core import client as client_
-from ..core.model import Model
+from .. import core
 
 _BASE_URL = "https://api.openai.com/v1"
 _API_KEY_ENV = "OPENAI_API_KEY"
@@ -38,14 +33,14 @@ class _OpenAI:
     def name(self) -> str:
         return "openai"
 
-    def client(self) -> client_.Client:
+    def client(self) -> core.client.Client:
         """Create a :class:`Client` from env-var credentials."""
-        return client_.Client(
+        return core.client.Client(
             base_url=_BASE_URL,
             api_key=os.environ.get(_API_KEY_ENV),
         )
 
-    async def check(self, client: client_.Client, model: Model) -> bool:
+    async def check(self, client: core.client.Client, model: core.model.Model) -> bool:
         """Delegate to :func:`openai.check.check`."""
         from . import check as check_
 
@@ -56,16 +51,16 @@ class _OpenAI:
         model_id: str,
         *,
         base_url: str | None = None,
-        client: client_.Client | None = None,
-    ) -> Model:
-        return Model(
+        client: core.client.Client | None = None,
+    ) -> core.model.Model:
+        return core.model.Model(
             id=model_id,
             adapter=self.adapter,
             provider=self,
             client=client,
         )
 
-    async def list(self, *, client: client_.Client | None = None) -> list[str]:
+    async def list(self, *, client: core.client.Client | None = None) -> list[str]:
         """List available model IDs from the OpenAI API."""
         c = client or self.client()
         headers = {"Authorization": f"Bearer {c.api_key}"}
