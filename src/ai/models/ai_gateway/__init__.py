@@ -26,7 +26,6 @@ if TYPE_CHECKING:
 
 _BASE_URL = "https://ai-gateway.vercel.sh/v3/ai"
 _API_KEY_ENV = "AI_GATEWAY_API_KEY"
-_PROTOCOL_VERSION = "0.0.1"
 
 
 class _AIGateway:
@@ -80,17 +79,11 @@ class _AIGateway:
 
     async def list(self, *, client: client_.Client | None = None) -> list[str]:
         """List available model IDs from the AI Gateway."""
-        c = client or self.client()
-        base_url = c.base_url.rstrip("/")
-        headers: dict[str, str] = {
-            "ai-gateway-protocol-version": _PROTOCOL_VERSION,
-        }
-        if c.api_key:
-            headers["Authorization"] = f"Bearer {c.api_key}"
-            headers["ai-gateway-auth-method"] = "api-key"
+        from . import sdk
 
-        config_url = f"{base_url}/config"
-        response = await c.http.get(config_url, headers=headers)
+        c = client or self.client()
+        gateway = sdk.GatewayClient(c)
+        response = await gateway.get("config")
         response.raise_for_status()
         data: dict[str, Any] = response.json()
         return sorted(str(m["id"]) for m in data.get("models", []))
@@ -109,11 +102,11 @@ __all__ = [
 
 def __getattr__(name: str) -> object:
     if name == "generate":
-        from .generate import generate
+        from .adapter import generate
 
         return generate
     if name == "stream":
-        from .stream import stream
+        from .adapter import stream
 
         return stream
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

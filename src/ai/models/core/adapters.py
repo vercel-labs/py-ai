@@ -31,8 +31,8 @@ def _ensure_adapters() -> None:
         return
     _adapters_loaded = True
 
-    from ..ai_gateway.generate import generate as ai_gw_generate
-    from ..ai_gateway.stream import stream as ai_gw_stream
+    from ..ai_gateway.adapter import generate as ai_gw_generate
+    from ..ai_gateway.adapter import stream as ai_gw_stream
     from ..anthropic.adapter import stream as anthropic_stream
     from ..openai.adapter import stream as openai_stream
 

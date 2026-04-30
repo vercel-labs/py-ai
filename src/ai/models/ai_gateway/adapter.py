@@ -1,10 +1,11 @@
-"""AI Gateway v3 streaming adapter — language-model endpoint.
+"""AI Gateway v3 adapter.
 
-Handles text, tool-call, reasoning, and inline file streaming via SSE.
-"""
+Converts internal messages to AI Gateway wire payloads and maps gateway
+responses back to public event/message types."""
 
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import AsyncGenerator, Sequence
 from typing import Any
@@ -20,10 +21,56 @@ from ...types import usage as usage_
 from ..core import client as client_
 from ..core import model as model_
 from ..core.helpers import files
-from . import _common, errors
+from ..core.params import GenerateParams as GenerateParams
+from ..core.params import ImageParams as ImageParams
+from ..core.params import VideoParams as VideoParams
+from . import errors, sdk
 
 # ---------------------------------------------------------------------------
-# Request building — Message list → v3 prompt
+# Shared request helpers
+# ---------------------------------------------------------------------------
+
+
+def _extract_prompt(messages: list[messages_.Message]) -> str:
+    """Concatenate all text from user/system messages into one prompt."""
+    parts: list[str] = []
+    for msg in messages:
+        if msg.role in ("user", "system"):
+            for p in msg.parts:
+                if isinstance(p, messages_.TextPart):
+                    parts.append(p.text)
+    return " ".join(parts)
+
+
+def _extract_input_files(
+    messages: list[messages_.Message],
+) -> list[messages_.FilePart]:
+    """Collect all file parts from user messages."""
+    files_: list[messages_.FilePart] = []
+    for msg in messages:
+        if msg.role == "user":
+            for p in msg.parts:
+                if isinstance(p, messages_.FilePart):
+                    files_.append(p)
+    return files_
+
+
+def _file_part_to_wire(part: messages_.FilePart) -> dict[str, Any]:
+    """Convert a :class:`FilePart` to the gateway wire format for input files."""
+    data = part.data
+    if isinstance(data, str) and media.is_url(data):
+        return {"type": "url", "url": data}
+    if isinstance(data, bytes):
+        b64 = base64.b64encode(data).decode("ascii")
+    elif isinstance(data, str):
+        b64 = data
+    else:
+        b64 = str(data)
+    return {"type": "file", "data": b64, "mediaType": part.media_type}
+
+
+# ---------------------------------------------------------------------------
+# Streaming request building — Message list → v3 prompt
 # ---------------------------------------------------------------------------
 
 
@@ -154,7 +201,7 @@ async def _build_request_body(
 
 
 # ---------------------------------------------------------------------------
-# SSE response parsing — v3 stream parts → public Event
+# Streaming response parsing — v3 stream parts → public Event
 # ---------------------------------------------------------------------------
 
 
@@ -280,11 +327,6 @@ def _parse_stream_part(
             return []
 
 
-# ---------------------------------------------------------------------------
-# Public adapter function
-# ---------------------------------------------------------------------------
-
-
 async def stream(
     client: client_.Client,
     model: model_.Model,
@@ -294,38 +336,22 @@ async def stream(
     output_type: type[pydantic.BaseModel] | None = None,
     **kwargs: Any,
 ) -> AsyncGenerator[events_.Event]:
-    """Stream an LLM response through the AI Gateway v3 protocol.
-
-    Yields :class:`~ai.types.events.Event` objects as the response streams in.
-    Pure delta emitter — the :class:`~ai.models.Stream` wrapper aggregates
-    parts into the final :class:`~ai.types.Message`.
-    """
+    """Stream an LLM response through the AI Gateway v3 protocol."""
     body = await _build_request_body(
         messages, tools=tools, output_type=output_type, **kwargs
     )
-    headers = _common.request_headers(
-        client, model, model_type="language", streaming=True
-    )
-    url = f"{client.base_url.rstrip('/')}/language-model"
+    gateway = sdk.GatewayClient(client, model)
 
     try:
-        async with client.http.stream(
-            "POST",
-            url,
-            json=body,
-            headers=headers,
+        async with gateway.stream(
+            "language-model",
+            body,
+            model_type="language",
+            streaming=True,
         ) as response:
-            if response.status_code >= 400:
-                await response.aread()
-                raise errors.create_gateway_error(
-                    response_body=response.text,
-                    status_code=response.status_code,
-                    api_key_provided=bool(client.api_key),
-                )
-
             yield events_.StreamStart()
             streamed_tool_ids: set[str] = set()
-            async for data in _common.parse_sse_lines(response):
+            async for data in gateway.iter_sse(response):
                 for event in _parse_stream_part(data, streamed_tool_ids):
                     yield event
     except errors.GatewayError:
@@ -337,3 +363,120 @@ async def stream(
             message=f"Unexpected error during streaming: {exc}",
             cause=exc,
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Media generation
+# ---------------------------------------------------------------------------
+
+
+async def _generate_image(
+    client: client_.Client,
+    model: model_.Model,
+    messages: list[messages_.Message],
+    params: ImageParams,
+) -> messages_.Message:
+    """Hit ``/image-model`` and return a Message with FileParts."""
+    prompt = _extract_prompt(messages)
+    input_files = _extract_input_files(messages)
+
+    body: dict[str, Any] = {
+        "prompt": prompt,
+        **params.model_dump(by_alias=True, exclude_none=True),
+    }
+    if input_files:
+        body["files"] = [_file_part_to_wire(f) for f in input_files]
+
+    gateway = sdk.GatewayClient(client, model)
+    response = await gateway.post_json("image-model", body, model_type="image")
+
+    data = response.json()
+    raw_images: list[str] = data.get("images", [])
+    usage_data = data.get("usage")
+    usage = None
+    if usage_data:
+        usage = messages_.Usage(
+            input_tokens=usage_data.get("inputTokens") or 0,
+            output_tokens=usage_data.get("outputTokens") or 0,
+        )
+
+    parts: list[messages_.Part] = []
+    for img_b64 in raw_images:
+        media_type = media.detect_image_media_type(img_b64) or "image/png"
+        parts.append(messages_.FilePart(data=img_b64, media_type=media_type))
+
+    return messages_.Message(role="assistant", parts=parts, usage=usage)
+
+
+async def _generate_video(
+    client: client_.Client,
+    model: model_.Model,
+    messages: list[messages_.Message],
+    params: VideoParams,
+) -> messages_.Message:
+    """Hit ``/video-model`` (SSE) and return a Message with FileParts."""
+    prompt = _extract_prompt(messages)
+    input_files = _extract_input_files(messages)
+
+    body: dict[str, Any] = {
+        "prompt": prompt,
+        **params.model_dump(by_alias=True, exclude_none=True),
+    }
+    if input_files:
+        body["image"] = _file_part_to_wire(input_files[0])
+
+    gateway = sdk.GatewayClient(client, model)
+
+    async with gateway.stream(
+        "video-model",
+        body,
+        model_type="video",
+        accept="text/event-stream",
+        timeout=httpx.Timeout(timeout=600.0, connect=10.0),
+    ) as response:
+        event_data: dict[str, Any] = {}
+        async for parsed in gateway.iter_sse(response):
+            event_data = parsed
+            break
+
+    if not event_data:
+        raise errors.GatewayResponseError(
+            "SSE stream ended without any data events",
+        )
+
+    if event_data.get("type") == "error":
+        raise errors.GatewayInvalidRequestError(
+            message=event_data.get("message", "unknown error"),
+            status_code=event_data.get("statusCode", 400),
+        )
+
+    raw_videos: list[dict[str, Any]] = event_data.get("videos", [])
+    parts: list[messages_.Part] = []
+    for video_data in raw_videos:
+        vtype = video_data.get("type", "base64")
+        media_type = video_data.get("mediaType", "video/mp4")
+
+        if vtype == "url":
+            downloaded_bytes, content_type = await files.download(video_data["url"])
+            if content_type:
+                media_type = content_type
+            parts.append(
+                messages_.FilePart(data=downloaded_bytes, media_type=media_type)
+            )
+        else:
+            raw_data = video_data.get("data", "")
+            parts.append(messages_.FilePart(data=raw_data, media_type=media_type))
+
+    return messages_.Message(role="assistant", parts=parts)
+
+
+async def generate(
+    client: client_.Client,
+    model: model_.Model,
+    messages: list[messages_.Message],
+    params: GenerateParams,
+) -> messages_.Message:
+    """Generate media through the AI Gateway."""
+    if isinstance(params, VideoParams):
+        return await _generate_video(client, model, messages, params)
+    return await _generate_image(client, model, messages, params)
