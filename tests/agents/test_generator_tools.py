@@ -15,7 +15,6 @@ from ai.types import messages as messages_
 
 from ..conftest import (
     MOCK_MODEL,
-    collect_messages,
     emit_events_for_messages,
     mock_llm,
     text_msg,
@@ -28,13 +27,11 @@ from ..conftest import (
 
 
 @ai.tool  # type: ignore[arg-type]
-async def progress_tool(query: str) -> AsyncGenerator[ai.Message]:
+async def progress_tool(query: str) -> AsyncGenerator[events_.Event | ai.Message]:
     """Tool that streams progress, then returns a final answer."""
-    yield ai.Message(
-        role="assistant",
-        parts=[messages_.TextPart(text="Working...")],
-        source_label="progress",
-    )
+    yield events_.TextStart(block_id="progress")
+    yield events_.TextDelta(block_id="progress", chunk="Working...")
+    yield events_.TextEnd(block_id="progress")
     yield ai.Message(
         role="assistant",
         parts=[messages_.TextPart(text=f"Answer for {query}")],
@@ -42,7 +39,7 @@ async def progress_tool(query: str) -> AsyncGenerator[ai.Message]:
 
 
 async def test_generator_tool_streams_and_returns_result() -> None:
-    """Generator tool yields intermediate messages visible to consumer;
+    """Generator tool yields streaming events visible to consumer;
     final text becomes the tool result fed back to the LLM."""
     my_agent = ai.agent(tools=[progress_tool])
 
@@ -52,24 +49,27 @@ async def test_generator_tool_streams_and_returns_result() -> None:
     reply = [text_msg("Done!", id="msg-2")]
     llm = mock_llm([call, reply])
 
-    collected = await collect_messages(
-        my_agent.run(MOCK_MODEL, [ai.user_message("Go")])
-    )
+    all_events: list[agent_events_.AgentEvent] = []
+    async for event in my_agent.run(MOCK_MODEL, [ai.user_message("Go")]):
+        all_events.append(event)
 
     assert llm.call_count == 2
 
-    # Intermediate progress message was forwarded to consumer.
-    progress = [m for m in collected if m.source_label == "progress"]
-    assert len(progress) == 1
-    assert progress[0].text == "Working..."
+    # Intermediate progress events were forwarded to consumer.
+    progress_deltas = [
+        e
+        for e in all_events
+        if isinstance(e, events_.TextDelta) and e.block_id == "progress"
+    ]
+    assert len(progress_deltas) == 1
+    assert progress_deltas[0].chunk == "Working..."
 
     # Tool result was fed back to LLM.
-    tool_results = [m for m in collected if m.role == "tool"]
+    tool_results = [
+        e for e in all_events if isinstance(e, agent_events_.ToolCallResult)
+    ]
     assert len(tool_results) >= 1
-    assert tool_results[0].tool_results[0].result == "Answer for test"
-
-    # Final response arrived.
-    assert any(m.text == "Done!" for m in collected)
+    assert tool_results[0].results[0].result == "Answer for test"
 
 
 # ---------------------------------------------------------------------------
@@ -127,12 +127,12 @@ async def research_tool(topic: str) -> AsyncGenerator[agent_events_.AgentEvent]:
 
 
 async def test_yield_from_nested_agent() -> None:
-    """yield_from forwards inner messages to the consumer but does NOT
+    """yield_from forwards inner events to the consumer but does NOT
     add them to the outer agent's history (context.messages).
 
-    The critical contract from agent.py:292: yield_from streams messages
-    through the runtime queue without going through _collect_messages,
-    so the parent agent's context.messages stays clean.
+    The critical contract: yield_from streams events through the runtime
+    queue without going through _collect_messages, so the parent agent's
+    context.messages stays clean.
     """
     outer = ai.agent(tools=[research_tool])
 
@@ -149,15 +149,24 @@ async def test_yield_from_nested_agent() -> None:
     adapter = _CapturingAdapter([outer_call, inner_reply, outer_reply])
     models.register_stream("mock", adapter.stream)
 
-    collected = await collect_messages(
-        outer.run(MOCK_MODEL, [ai.user_message("Tell me about Mars")])
-    )
+    all_events: list[agent_events_.AgentEvent] = []
+    async for event in outer.run(MOCK_MODEL, [ai.user_message("Tell me about Mars")]):
+        all_events.append(event)
 
     assert adapter.call_count == 3
 
-    # Inner messages were forwarded to the consumer with label="inner".
-    inner_msgs = [m for m in collected if m.source_label == "inner"]
-    assert len(inner_msgs) > 0
+    # Inner text events were forwarded to the consumer.
+    inner_text = [
+        e
+        for e in all_events
+        if isinstance(e, events_.TextDelta) and e.chunk == "Mars has two moons."
+    ]
+    assert len(inner_text) > 0
+
+    tool_results = [
+        e for e in all_events if isinstance(e, agent_events_.ToolCallResult)
+    ]
+    assert tool_results[0].results[0].result == "Mars has two moons."
 
     # The outer LLM's second call (index 2) must NOT contain any inner
     # agent messages.  It should only see: the original user message,

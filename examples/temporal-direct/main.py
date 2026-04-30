@@ -136,8 +136,8 @@ async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.Event]:
             retry_policy=temporalio.common.RetryPolicy(maximum_attempts=3),
         )
         msg = ai.Message.model_validate(result.message)
-        yield ai.MessageStart(message=msg)
-        yield ai.MessageEnd(message=msg)
+        yield ai.StreamEnd(message=msg)
+        yield msg
 
         # 2. No tool calls → done
         if not msg.tool_calls:
@@ -154,15 +154,13 @@ async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.Event]:
                 args=list(kwargs.values()),
                 start_to_close_timeout=datetime.timedelta(minutes=2),
             )
-            return ai.tool_result(
+            return ai.tool_result_part(
                 tc.tool_call_id, tool_name=tc.tool_name, result=result
             )
 
         tasks = [asyncio.ensure_future(run_tool(tc)) for tc in msg.tool_calls]
         parts = await asyncio.gather(*tasks)
-        tool_msg = ai.tool_message(*parts)
-        yield ai.MessageStart(message=tool_msg)
-        yield ai.MessageEnd(message=tool_msg)
+        yield ai.tool_result(*parts)
 
 
 # ── Workflow ─────────────────────────────────────────────────────
@@ -182,7 +180,7 @@ class WeatherWorkflow:
 
         final_text = ""
         async for event in weather_agent.run(model, messages):
-            if isinstance(event, ai.MessageEnd) and event.message.text:
+            if isinstance(event, ai.TerminalEvent):
                 final_text = event.message.text
         return final_text
 

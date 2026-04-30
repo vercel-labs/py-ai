@@ -9,6 +9,12 @@ from . import usage as usage_
 # serialization border in the case of durable execution
 
 
+# Placeholder so BaseEvent.message is typed as Message (not Message | None).
+# Stream.__anext__ stamps the real in-progress message before yielding,
+# so consumers never see this value.
+_DUMMY_MESSAGE = messages.Message(id="<unset>", role="assistant", parts=[])
+
+
 class BaseEvent(pydantic.BaseModel):
     """Common fields stamped onto every event by the streaming wrapper.
 
@@ -18,7 +24,7 @@ class BaseEvent(pydantic.BaseModel):
     usage value reported by the provider (latest-wins across the stream).
     """
 
-    message: messages.Message | None = None
+    message: messages.Message = _DUMMY_MESSAGE
     usage: usage_.Usage | None = None
 
     model_config = pydantic.ConfigDict(frozen=True)

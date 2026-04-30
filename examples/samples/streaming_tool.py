@@ -15,22 +15,17 @@ import ai
 async def talk_to_mothership(question: str) -> AsyncGenerator[ai.Event]:
     """Ask the mothership a question. Streams progress back to the caller."""
     for step in ["Connecting...", "Transmitting...", "Awaiting response..."]:
-        msg = ai.Message(
-            role="assistant",
-            parts=[ai.TextPart(text=step)],
-            source_label="tool_progress",
-        )
-        yield ai.MessageStart(message=msg)
-        yield ai.MessageEnd(message=msg)
+        yield ai.TextStart(block_id=f"progress-{step}")
+        yield ai.TextDelta(block_id=f"progress-{step}", chunk=step)
+        yield ai.TextEnd(block_id=f"progress-{step}")
         await asyncio.sleep(0.3)
 
     # The final yielded message's text is returned as the tool result.
-    msg = ai.Message(
+    final = ai.Message(
         role="assistant",
         parts=[ai.TextPart(text="The mothership says: Soon.")],
     )
-    yield ai.MessageStart(message=msg)
-    yield ai.MessageEnd(message=msg)
+    yield final
 
 
 async def main() -> None:
@@ -45,12 +40,10 @@ async def main() -> None:
 
     async for event in my_agent.run(model, messages):
         if isinstance(event, ai.TextDelta):
-            print(event.chunk, end="", flush=True)
-        elif (
-            isinstance(event, ai.MessageEnd)
-            and event.message.source_label == "tool_progress"
-        ):
-            print(f"  [{event.message.text}]")
+            if event.block_id.startswith("progress-"):
+                print(f"  [{event.chunk}]")
+            else:
+                print(event.chunk, end="", flush=True)
     print()
 
 

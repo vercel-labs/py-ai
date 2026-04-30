@@ -13,6 +13,7 @@
    - UNLESS it's `typing` — then `from typing import Foo` (there are too many of them).
    - if the module name shadows a local variable in the same file, add a trailing underscore to the import: `from ..types import messages as messages_`. do not add trailing underscores preemptively — only when there is an actual collision.
 4. tests directory structure mirrors `src`
+5. to run examples that have their own `pyproject.toml`: `uv run --frozen --with-editable ~/src/py-ai/`
 
 ## design principles
 

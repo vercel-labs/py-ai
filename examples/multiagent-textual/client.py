@@ -112,7 +112,7 @@ class MultiAgentApp(textual.app.App):
         self._hook_queue: asyncio.Queue[ai.HookPart] = asyncio.Queue()
         self._current_hook: ai.HookPart | None = None
         self._ws: websockets.ClientConnection | None = None
-        self._event_adapter = pydantic.TypeAdapter(ai.Event)
+        self._event_adapter = pydantic.TypeAdapter(ai.AgentEvent)
         self._current_label = "unknown"
 
     def compose(self) -> textual.app.ComposeResult:
@@ -150,7 +150,10 @@ class MultiAgentApp(textual.app.App):
                         self._on_run_complete()
                         break
 
-                    event = self._event_adapter.validate_python(data)
+                    try:
+                        event = self._event_adapter.validate_python(data)
+                    except pydantic.ValidationError:
+                        continue
                     self._handle_event(event)
 
         except (ConnectionRefusedError, OSError) as exc:
@@ -158,54 +161,47 @@ class MultiAgentApp(textual.app.App):
 
     # ------------------------------------------------------------------
     # Event routing
+    #
+    # TODO: streaming events (TextDelta, etc.) don't carry a source
+    # label, so _current_label is only updated when a ToolCallResult
+    # or HookEvent arrives.  With concurrent sub-agents, streaming
+    # text can route to the wrong panel.  The hooks in this demo
+    # serialize the flow enough that it works in practice, but a
+    # proper fix needs labels on streaming events.
     # ------------------------------------------------------------------
 
-    def _handle_event(self, event: ai.Event) -> None:
-        if isinstance(event, ai.MessageStart) and event.message is not None:
-            self._current_label = event.message.source_label or "unknown"
-            panel = self._get_panel(self._current_label)
-            if panel is not None and panel.status == "idle":
-                panel.status = "streaming..."
+    def _handle_event(self, event: ai.AgentEvent) -> None:
+        if isinstance(event, ai.ToolCallResult):
+            label = event.message.source_label or self._current_label
+            self._current_label = label
+            panel = self._get_panel(label)
+            if panel is not None:
+                for part in event.message.parts:
+                    match part:
+                        case ai.ToolCallPart(tool_name=name, tool_args=args):
+                            panel.append_line(f"> {name}({args})")
+                        case ai.ToolResultPart(tool_name=name, result=result):
+                            panel.append_line(f"< {name} = {result}")
+            return
+
+        if isinstance(event, ai.HookEvent):
+            if event.hook.status == "pending":
+                self._on_hook_pending(event.hook)
+            elif event.hook.status == "resolved":
+                self._on_hook_resolved(event.hook)
             return
 
         if isinstance(event, ai.TextDelta):
             panel = self._get_panel(self._current_label)
             if panel is not None:
                 panel.append_text(event.chunk)
-            return
+                if panel.status == "idle":
+                    panel.status = "streaming..."
 
-        if isinstance(event, ai.ReasoningDelta | ai.ToolDelta):
+        elif isinstance(event, ai.ReasoningDelta | ai.ToolDelta):
             panel = self._get_panel(self._current_label)
             if panel is not None:
                 panel.append_text(event.chunk, style="dim")
-            return
-
-        if not isinstance(event, ai.MessageEnd):
-            return
-
-        msg = event.message
-        label = msg.source_label or self._current_label
-
-        hook_parts = [p for p in msg.parts if isinstance(p, ai.HookPart)]
-        if hook_parts:
-            hook_part = hook_parts[0]
-            if hook_part.status == "pending":
-                self._on_hook_pending(hook_part)
-                return
-            if hook_part.status == "resolved":
-                self._on_hook_resolved(hook_part)
-                return
-
-        panel = self._get_panel(label)
-        if panel is None:
-            return
-
-        for part in msg.parts:
-            match part:
-                case ai.ToolCallPart(tool_name=name, tool_args=args):
-                    panel.append_line(f"> {name}({args})")
-                case ai.ToolResultPart(tool_name=name, result=result):
-                    panel.append_line(f"< {name} = {result}")
 
     # ------------------------------------------------------------------
     # Hook lifecycle

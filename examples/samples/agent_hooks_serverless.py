@@ -43,6 +43,8 @@ async def main() -> None:
             )
             async for event in s:
                 yield event
+            if s.message is not None:
+                yield s.message
 
             tool_calls = context.resolve(s.tool_calls)
             if not tool_calls:
@@ -73,9 +75,7 @@ async def main() -> None:
                         )
                     )
 
-            tool_msg = ai.tool_message(*results)
-            yield ai.MessageStart(message=tool_msg)
-            yield ai.MessageEnd(message=tool_msg)
+            yield ai.tool_result(*results)
 
     messages = [
         ai.system_message("Delete files when asked. Always use the delete_file tool."),
@@ -89,15 +89,13 @@ async def main() -> None:
     async for event in my_agent.run(model, messages):
         if isinstance(event, ai.TextDelta):
             print(event.chunk, end="", flush=True)
-        elif isinstance(event, ai.MessageEnd) and event.message.role == "internal":
-            hook_parts = [p for p in event.message.parts if isinstance(p, ai.HookPart)]
-            hook_part = hook_parts[0] if hook_parts else None
-            if hook_part is not None and hook_part.status == "pending":
-                pending_hook_labels.append(hook_part.hook_id)
-                print(
-                    f"  Hook pending: {hook_part.hook_id}"
-                    f" (metadata={hook_part.metadata})"
-                )
+        elif isinstance(event, ai.HookEvent) and event.hook.status == "pending":
+            hook_part = event.hook
+            pending_hook_labels.append(hook_part.hook_id)
+            print(
+                f"  Hook pending: {hook_part.hook_id}"
+                f" (metadata={hook_part.metadata})"
+            )
 
     print("\n  Run interrupted; approval will be pre-registered for re-entry.\n")
 
@@ -109,11 +107,8 @@ async def main() -> None:
     async for event in my_agent.run(model, messages):
         if isinstance(event, ai.TextDelta):
             print(event.chunk, end="", flush=True)
-        elif isinstance(event, ai.MessageEnd) and event.message.role == "internal":
-            hook_parts = [p for p in event.message.parts if isinstance(p, ai.HookPart)]
-            hook_part = hook_parts[0] if hook_parts else None
-            if hook_part is not None:
-                print(f"  Hook {hook_part.status}: {hook_part.hook_id}")
+        elif isinstance(event, ai.HookEvent):
+            print(f"  Hook {event.hook.status}: {event.hook.hook_id}")
     print()
 
 

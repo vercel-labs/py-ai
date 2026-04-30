@@ -32,6 +32,10 @@ async def main() -> None:
             async for event in s:
                 yield event
 
+            # Yield the assistant message for silent history collection.
+            if s.message is not None:
+                yield s.message
+
             tool_calls = context.resolve(s.tool_calls)
             if not tool_calls:
                 return
@@ -46,10 +50,7 @@ async def main() -> None:
             async with asyncio.TaskGroup() as tg:
                 tasks = [tg.create_task(tc()) for tc in tool_calls]
 
-            # Yield one merged tool-result message — history auto-collects it.
-            tool_msg = ai.tool_message(*(t.result() for t in tasks))
-            yield ai.MessageStart(message=tool_msg)
-            yield ai.MessageEnd(message=tool_msg)
+            yield ai.tool_result(*(t.result() for t in tasks))
 
     async for event in my_agent.run(
         model,

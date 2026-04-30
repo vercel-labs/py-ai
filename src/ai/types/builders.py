@@ -7,7 +7,7 @@ constructing Part lists. Each ``*_message`` function returns a single
 
 from __future__ import annotations
 
-from typing import Any, overload
+from typing import Any
 
 from .messages import (
     FilePart,
@@ -111,24 +111,6 @@ def _tool_results_from_messages(messages: list[Message]) -> list[ToolResultPart]
     return parts
 
 
-@overload
-def tool_message(*messages: Message | list[Message]) -> Message: ...
-
-
-@overload
-def tool_message(*parts: ToolResultPart) -> Message: ...
-
-
-@overload
-def tool_message(
-    *,
-    tool_call_id: str,
-    result: Any = None,
-    tool_name: str = "",
-    is_error: bool = False,
-) -> Message: ...
-
-
 def tool_message(
     *items: Message | ToolResultPart | list[Message],
     tool_call_id: str | None = None,
@@ -138,7 +120,7 @@ def tool_message(
 ) -> Message:
     """Create or merge a tool-result message.
 
-    >>> part = ai.tool_result("tc-1", result=72, tool_name="weather")
+    >>> part = ai.tool_result_part("tc-1", result=72, tool_name="weather")
     >>> ai.tool_message(part)
     >>> ai.tool_message(tool_call_id="tc-1", result=72, tool_name="weather")
     """
@@ -156,7 +138,7 @@ def tool_message(
         return Message(
             role="tool",
             parts=[
-                tool_result(
+                tool_result_part(
                     tool_call_id,
                     result=result,
                     tool_name=tool_name,
@@ -204,7 +186,7 @@ def tool_message(
     return Message(role="tool", parts=tool_parts)
 
 
-def tool_result(
+def tool_result_part(
     tool_call_id: str,
     *,
     result: Any = None,
@@ -213,7 +195,7 @@ def tool_result(
 ) -> ToolResultPart:
     """Create a :class:`ToolResultPart`.
 
-    >>> ai.tool_result("tc-1", result={"temp": 72}, tool_name="weather")
+    >>> ai.tool_result_part("tc-1", result={"temp": 72}, tool_name="weather")
     """
     return ToolResultPart(
         tool_call_id=tool_call_id,

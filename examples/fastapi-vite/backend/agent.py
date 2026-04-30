@@ -37,6 +37,8 @@ async def graph(context: ai.Context) -> AsyncGenerator[ai.Event]:
         s = ai.models.stream(context.model, context.messages, tools=context.tools)
         async for event in s:
             yield event
+        if s.message is not None:
+            yield s.message
 
         tool_calls = context.resolve(s.tool_calls)
         if not tool_calls:
@@ -45,9 +47,7 @@ async def graph(context: ai.Context) -> AsyncGenerator[ai.Event]:
         results = await asyncio.gather(
             *(_execute_with_approval(tc) for tc in tool_calls)
         )
-        tool_msg = ai.tool_message(*results)
-        yield ai.MessageStart(message=tool_msg)
-        yield ai.MessageEnd(message=tool_msg)
+        yield ai.tool_result(*results)
 
 
 async def _execute_with_approval(tc: ai.ToolCall) -> ai.Message:

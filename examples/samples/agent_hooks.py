@@ -3,7 +3,7 @@
 Demonstrates the function-based hook API:
   - await hook("label", payload=Model) to suspend inside the loop
   - resolve_hook("label", data) to unblock from outside
-  - Hook messages arrive as MessageEnd events with role="internal"
+  - Hook signals arrive as HookEvent events
 """
 
 import asyncio
@@ -38,6 +38,8 @@ async def main() -> None:
             )
             async for event in s:
                 yield event
+            if s.message is not None:
+                yield s.message
 
             tool_calls = context.resolve(s.tool_calls)
             if not tool_calls:
@@ -66,9 +68,7 @@ async def main() -> None:
                 else:
                     results.append(await tc())
 
-            tool_msg = ai.tool_message(*results)
-            yield ai.MessageStart(message=tool_msg)
-            yield ai.MessageEnd(message=tool_msg)
+            yield ai.tool_result(*results)
 
     messages = [
         ai.system_message(
@@ -82,19 +82,17 @@ async def main() -> None:
             print(event.chunk, end="", flush=True)
             continue
 
-        # Hook signals arrive as internal MessageEnd events.
-        if isinstance(event, ai.MessageEnd) and event.message.role == "internal":
-            hook_parts = [p for p in event.message.parts if isinstance(p, ai.HookPart)]
-            hook_part = hook_parts[0] if hook_parts else None
-            if hook_part is not None and hook_part.status == "pending":
-                answer = input(f"Approve {hook_part.hook_id}? [y/n] ")
-                ai.resolve_hook(
-                    hook_part.hook_id,
-                    Approval(
-                        granted=answer.strip().lower() in ("y", "yes"),
-                        reason="operator decision",
-                    ),
-                )
+        # Hook signals arrive as HookEvent events.
+        if isinstance(event, ai.HookEvent) and event.hook.status == "pending":
+            hook_part = event.hook
+            answer = input(f"Approve {hook_part.hook_id}? [y/n] ")
+            ai.resolve_hook(
+                hook_part.hook_id,
+                Approval(
+                    granted=answer.strip().lower() in ("y", "yes"),
+                    reason="operator decision",
+                ),
+            )
     print()
 
 

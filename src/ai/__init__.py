@@ -2,16 +2,21 @@ from . import middleware, models
 from .agents import (
     TOOL_APPROVAL_HOOK_TYPE,
     Agent,
+    AgentEvent,
     Context,
+    HookEvent,
+    TerminalEvent,
     Tool,
     ToolApproval,
     ToolCall,
+    ToolCallResult,
     agent,
     cancel_hook,
     hook,
     mcp,
     resolve_hook,
     tool,
+    tool_result,
     yield_from,
 )
 from .middleware import AgentRunContext, Middleware
@@ -71,7 +76,7 @@ from .types.builders import (
     system_message,
     thinking,
     tool_message,
-    tool_result,
+    tool_result_part,
     user_message,
 )
 
@@ -110,6 +115,7 @@ __all__ = [
     "system_message",
     "tool_message",
     "tool_result",
+    "tool_result_part",
     "file_part",
     "thinking",
     # Models (from models/)
@@ -134,11 +140,13 @@ __all__ = [
     "ai_gateway",
     # Agents — primary API
     "Agent",
+    "AgentEvent",
     "agent",
     "Context",
     # Agents — tools
     "Tool",
     "ToolCall",
+    "ToolCallResult",
     "tool",
     # Agents — composition
     "yield_from",
@@ -146,6 +154,8 @@ __all__ = [
     "hook",
     "resolve_hook",
     "cancel_hook",
+    "HookEvent",
+    "TerminalEvent",
     "ToolApproval",
     "TOOL_APPROVAL_HOOK_TYPE",
     # Middleware

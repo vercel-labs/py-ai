@@ -125,11 +125,39 @@ async def llm_call_activity(params: LLMParams) -> LLMResult:
     return LLMResult(message=s.message.model_dump())
 
 
+async def _replay_as_stream(msg: ai.Message) -> AsyncGenerator[ai.Event]:
+    """Replay a complete message as streaming events for ``ai.Stream``.
+
+    TODO: This exists because wrap_model must return a Stream, and Stream
+    aggregates from streaming deltas. A complete message has to be
+    decomposed into synthetic events so Stream can rebuild it. The
+    middleware contract should support returning a complete Message
+    directly.
+    """
+    yield ai.StreamStart()
+    for i, part in enumerate(msg.parts):
+        if isinstance(part, ai.TextPart) and part.text:
+            bid = f"text-{i}"
+            yield ai.TextStart(block_id=bid)
+            yield ai.TextDelta(block_id=bid, chunk=part.text)
+            yield ai.TextEnd(block_id=bid)
+        elif isinstance(part, ai.ToolCallPart):
+            yield ai.ToolStart(
+                tool_call_id=part.tool_call_id, tool_name=part.tool_name
+            )
+            if part.tool_args:
+                yield ai.ToolDelta(
+                    tool_call_id=part.tool_call_id, chunk=part.tool_args
+                )
+            yield ai.ToolEnd(tool_call_id=part.tool_call_id)
+    yield ai.StreamEnd()
+
+
 # ── Middleware ───────────────────────────────────────────────────
 #
 # Intercepts wrap_model and wrap_tool to replace real I/O with
 # Temporal activities. The default agent loop runs unchanged —
-# it just sees a StreamResult from wrap_model and a Message from
+# it just sees a Stream from wrap_model and a Message from
 # wrap_tool, same as without middleware.
 
 
@@ -143,8 +171,12 @@ class TemporalMiddleware(ai.Middleware):
         self,
         call: ai.middleware.ModelContext,
         next: Any,
-    ) -> ai.StreamResultLike:
-        """LLM call → Temporal activity."""
+    ) -> Any:
+        """LLM call → Temporal activity.
+
+        Returns an ``ai.Stream`` that replays the complete message as
+        streaming events so the default loop can iterate it normally.
+        """
         result = await temporalio.workflow.execute_activity(
             llm_call_activity,
             LLMParams(
@@ -155,12 +187,7 @@ class TemporalMiddleware(ai.Middleware):
             retry_policy=temporalio.common.RetryPolicy(maximum_attempts=3),
         )
         msg = ai.Message.model_validate(result.message)
-
-        async def _single() -> AsyncGenerator[ai.Event]:
-            yield ai.MessageStart(message=msg)
-            yield ai.MessageEnd(message=msg)
-
-        return ai.StreamResult.from_generator(_single())
+        return ai.Stream(_replay_as_stream(msg))
 
     async def wrap_tool(
         self,
@@ -218,7 +245,7 @@ class WeatherWorkflow:
 
         final_text = ""
         async for event in weather_agent.run(model, messages, middleware=[mw]):
-            if isinstance(event, ai.MessageEnd) and event.message.text:
+            if isinstance(event, ai.TerminalEvent):
                 final_text = event.message.text
         return final_text
 
