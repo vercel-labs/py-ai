@@ -4,22 +4,14 @@ Message/tool conversion and streaming via the official ``openai`` SDK.
 The SDK client is constructed from :class:`Client` params on each call.
 """
 
-from __future__ import annotations
-
 from collections.abc import AsyncGenerator, Sequence
 from typing import Any
 
 import openai
 import pydantic
 
-from ...types import events as events_
-from ...types import media
-from ...types import messages as messages_
-from ...types import proto as proto_
-from ...types import usage as usage_
-from ..core import client as client_
-from ..core import model as model_
-from ..core.helpers import files
+from ... import types
+from .. import core
 
 # ---------------------------------------------------------------------------
 # Message / tool conversion — internal types → OpenAI wire format
@@ -27,7 +19,7 @@ from ..core.helpers import files
 
 
 def _tools_to_openai(
-    tools: Sequence[proto_.ToolLike],
+    tools: Sequence[types.ToolLike],
 ) -> list[dict[str, Any]]:
     """Convert internal Tool objects to OpenAI tool schema format."""
     return [
@@ -44,7 +36,7 @@ def _tools_to_openai(
 
 
 async def _file_part_to_openai(
-    part: messages_.FilePart,
+    part: types.FilePart,
 ) -> dict[str, Any]:
     """Convert a :class:`FilePart` to an OpenAI content-array element.
 
@@ -59,25 +51,25 @@ async def _file_part_to_openai(
 
     if mt.startswith("image/"):
         media_type = "image/jpeg" if mt == "image/*" else mt
-        url = media.data_to_data_url(data, media_type)
+        url = types.media.data_to_data_url(data, media_type)
         return {"type": "image_url", "image_url": {"url": url}}
 
     if mt.startswith("audio/"):
-        if isinstance(data, str) and media.is_downloadable_url(data):
-            downloaded, _ = await files.download(data)
+        if isinstance(data, str) and types.media.is_downloadable_url(data):
+            downloaded, _ = await core.helpers.files.download(data)
             data = downloaded
         fmt = mt.split("/", 1)[1] if "/" in mt else mt
-        b64 = media.data_to_base64(data)
+        b64 = types.media.data_to_base64(data)
         return {
             "type": "input_audio",
             "input_audio": {"data": b64, "format": fmt},
         }
 
     if mt == "application/pdf":
-        if isinstance(data, str) and media.is_downloadable_url(data):
-            downloaded, _ = await files.download(data)
+        if isinstance(data, str) and types.media.is_downloadable_url(data):
+            downloaded, _ = await core.helpers.files.download(data)
             data = downloaded
-        data_url = media.data_to_data_url(data, mt)
+        data_url = types.media.data_to_data_url(data, mt)
         filename = part.filename or "document.pdf"
         return {
             "type": "file",
@@ -87,7 +79,7 @@ async def _file_part_to_openai(
     if mt.startswith("text/"):
         if isinstance(data, bytes):
             text_content = data.decode("utf-8")
-        elif media.is_url(data):
+        elif types.media.is_url(data):
             text_content = data
         else:
             import base64 as _b64
@@ -99,7 +91,7 @@ async def _file_part_to_openai(
 
 
 async def _messages_to_openai(
-    messages: list[messages_.Message],
+    messages: list[types.Message],
 ) -> list[dict[str, Any]]:
     """Convert internal messages to OpenAI API format.
 
@@ -116,11 +108,11 @@ async def _messages_to_openai(
 
                 for part in msg.parts:
                     match part:
-                        case messages_.ReasoningPart(text=text):
+                        case types.ReasoningPart(text=text):
                             reasoning += text
-                        case messages_.TextPart(text=text):
+                        case types.TextPart(text=text):
                             content += text
-                        case messages_.ToolCallPart():
+                        case types.ToolCallPart():
                             tool_calls.append(
                                 {
                                     "id": part.tool_call_id,
@@ -143,7 +135,7 @@ async def _messages_to_openai(
 
             case "tool":
                 for part in msg.parts:
-                    if isinstance(part, messages_.ToolResultPart):
+                    if isinstance(part, types.ToolResultPart):
                         result.append(
                             {
                                 "role": "tool",
@@ -156,24 +148,24 @@ async def _messages_to_openai(
 
             case "system":
                 content_text = "".join(
-                    p.text for p in msg.parts if isinstance(p, messages_.TextPart)
+                    p.text for p in msg.parts if isinstance(p, types.TextPart)
                 )
                 result.append({"role": "system", "content": content_text})
 
             case "user":
-                has_files = any(isinstance(p, messages_.FilePart) for p in msg.parts)
+                has_files = any(isinstance(p, types.FilePart) for p in msg.parts)
                 if not has_files:
                     text = "".join(
-                        p.text for p in msg.parts if isinstance(p, messages_.TextPart)
+                        p.text for p in msg.parts if isinstance(p, types.TextPart)
                     )
                     result.append({"role": "user", "content": text})
                 else:
                     parts: list[dict[str, Any]] = []
                     for p in msg.parts:
                         match p:
-                            case messages_.TextPart(text=text):
+                            case types.TextPart(text=text):
                                 parts.append({"type": "text", "text": text})
-                            case messages_.FilePart():
+                            case types.FilePart():
                                 parts.append(await _file_part_to_openai(p))
                     result.append({"role": "user", "content": parts})
     return result
@@ -184,7 +176,7 @@ async def _messages_to_openai(
 # ---------------------------------------------------------------------------
 
 
-def _make_client(client: client_.Client) -> openai.AsyncOpenAI:
+def _make_client(client: core.client.Client) -> openai.AsyncOpenAI:
     """Construct an ``AsyncOpenAI`` from our generic ``Client``."""
     return openai.AsyncOpenAI(
         base_url=client.base_url,
@@ -198,17 +190,17 @@ def _make_client(client: client_.Client) -> openai.AsyncOpenAI:
 
 
 async def stream(
-    client: client_.Client,
-    model: model_.Model,
-    messages: list[messages_.Message],
+    client: core.client.Client,
+    model: core.model.Model,
+    messages: list[types.Message],
     *,
-    tools: Sequence[proto_.ToolLike] | None = None,
+    tools: Sequence[types.ToolLike] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
     thinking: bool = False,
     budget_tokens: int | None = None,
     reasoning_effort: str | None = None,
     **kwargs: Any,
-) -> AsyncGenerator[events_.Event]:
+) -> AsyncGenerator[types.Event]:
     """Stream an LLM response via the OpenAI chat completions API.
 
     Yields :class:`~ai.types.events.Event` objects as the response streams in.
@@ -264,9 +256,9 @@ async def stream(
         text_started = False
         reasoning_started = False
         tc_state: dict[int, dict[str, Any]] = {}
-        usage: usage_.Usage | None = None
+        usage: types.Usage | None = None
 
-        yield events_.StreamStart()
+        yield types.events.StreamStart()
 
         async for chunk in sdk_stream:
             if chunk.usage is not None:
@@ -279,7 +271,7 @@ async def stream(
                 pd = getattr(chunk.usage, "prompt_tokens_details", None)
                 if pd:
                     cache_read = getattr(pd, "cached_tokens", None)
-                usage = usage_.Usage(
+                usage = types.Usage(
                     input_tokens=chunk.usage.prompt_tokens or 0,
                     output_tokens=chunk.usage.completion_tokens or 0,
                     reasoning_tokens=reasoning_tokens,
@@ -303,20 +295,20 @@ async def stream(
             if reasoning_value:
                 if not reasoning_started:
                     reasoning_started = True
-                    yield events_.ReasoningStart(block_id="reasoning")
-                yield events_.ReasoningDelta(
+                    yield types.events.ReasoningStart(block_id="reasoning")
+                yield types.events.ReasoningDelta(
                     chunk=reasoning_value, block_id="reasoning"
                 )
 
             if delta.content:
                 if reasoning_started:
-                    yield events_.ReasoningEnd(block_id="reasoning")
+                    yield types.events.ReasoningEnd(block_id="reasoning")
                     reasoning_started = False
 
                 if not text_started:
                     text_started = True
-                    yield events_.TextStart(block_id="text")
-                yield events_.TextDelta(chunk=delta.content, block_id="text")
+                    yield types.events.TextStart(block_id="text")
+                yield types.events.TextDelta(chunk=delta.content, block_id="text")
 
             if delta.tool_calls:
                 for tc in delta.tool_calls:
@@ -338,28 +330,28 @@ async def stream(
 
                             if not tc_state[idx]["started"] and tid:
                                 tc_state[idx]["started"] = True
-                                yield events_.ToolStart(
+                                yield types.events.ToolStart(
                                     tool_call_id=tid, tool_name=tname
                                 )
 
                             if tid:
-                                yield events_.ToolDelta(
+                                yield types.events.ToolDelta(
                                     chunk=tc.function.arguments,
                                     tool_call_id=tid,
                                 )
 
             if choice.finish_reason is not None:
                 if reasoning_started:
-                    yield events_.ReasoningEnd(block_id="reasoning")
+                    yield types.events.ReasoningEnd(block_id="reasoning")
                     reasoning_started = False
                 if text_started:
-                    yield events_.TextEnd(block_id="text")
+                    yield types.events.TextEnd(block_id="text")
                     text_started = False
                 for tc in tc_state.values():
                     if tc["started"] and tc["id"]:
-                        yield events_.ToolEnd(tool_call_id=tc["id"])
+                        yield types.events.ToolEnd(tool_call_id=tc["id"])
                         tc["started"] = False
 
-        yield events_.StreamEnd(usage=usage)
+        yield types.events.StreamEnd(usage=usage)
     finally:
         await sdk_client.close()

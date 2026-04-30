@@ -9,10 +9,7 @@ so that :class:`~ai.models.core.client.Client` stays provider-agnostic.
 This endpoint is free — no tokens or credits are consumed.
 """
 
-from __future__ import annotations
-
-from ..core import client as client_
-from ..core import model as model_
+from .. import core
 
 _ANTHROPIC_VERSION = "2023-06-01"
 
@@ -20,7 +17,7 @@ _ANTHROPIC_VERSION = "2023-06-01"
 _FAIL_STATUSES = frozenset({401, 403, 404})
 
 
-async def check(client: client_.Client, model: model_.Model) -> bool:
+async def check(client: core.client.Client, model: core.model.Model) -> bool:
     """Return ``True`` if *client* can reach Anthropic and *model* exists."""
     if not client.api_key:
         return False

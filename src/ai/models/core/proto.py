@@ -14,9 +14,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import pydantic
 
-from ...types import events as events_
-from ...types import messages as messages_
-from ...types import proto as types_proto_
+from ... import types
 
 if TYPE_CHECKING:
     from .client import Client
@@ -98,12 +96,12 @@ class StreamFn(Protocol):
         self,
         client: Client,
         model: Model,
-        messages: list[messages_.Message],
+        messages: list[types.Message],
         *,
-        tools: Sequence[types_proto_.ToolLike] | None = None,
+        tools: Sequence[types.ToolLike] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         **kwargs: Any,
-    ) -> AsyncGenerator[events_.Event]: ...
+    ) -> AsyncGenerator[types.Event]: ...
 
 
 @runtime_checkable
@@ -119,9 +117,9 @@ class GenerateFn(Protocol):
         self,
         client: Client,
         model: Model,
-        messages: list[messages_.Message],
+        messages: list[types.Message],
         params: Any,
-    ) -> messages_.Message: ...
+    ) -> types.Message: ...
 
 
 @runtime_checkable

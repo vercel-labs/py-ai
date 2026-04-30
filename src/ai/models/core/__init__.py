@@ -1,5 +1,6 @@
 """Core types for models."""
 
+from . import helpers
 from .adapters import register_generate, register_stream
 from .api import (
     Executor,
@@ -38,4 +39,5 @@ __all__ = [
     "register_generate",
     "register_stream",
     "stream",
+    "helpers",
 ]
