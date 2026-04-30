@@ -11,8 +11,6 @@ are imported lazily on first use to keep import-time lightweight.
     to ``model.provider.check()``.
 """
 
-from __future__ import annotations
-
 from . import proto
 
 # ---------------------------------------------------------------------------

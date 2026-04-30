@@ -11,8 +11,6 @@ The adapter module is loaded lazily to avoid pulling in the ``openai``
 SDK at import time.
 """
 
-from __future__ import annotations
-
 from .provider import openai
 
 __all__ = ["openai"]

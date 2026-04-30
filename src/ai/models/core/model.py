@@ -1,7 +1,5 @@
 """Model metadata types."""
 
-from __future__ import annotations
-
 import dataclasses
 
 from .client import Client

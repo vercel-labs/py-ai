@@ -12,8 +12,6 @@ not pull in ``httpx`` and other I/O libraries at import time.  This matters
 for sandboxed runtimes (e.g. Temporal workflow workers).
 """
 
-from __future__ import annotations
-
 from . import errors
 from .provider import ai_gateway
 

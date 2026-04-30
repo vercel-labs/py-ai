@@ -480,7 +480,7 @@ async def test_stream_calls_prepare_messages() -> None:
     msgs = [ai.user_message("hi")]
 
     with patch(
-        "ai.models.core.api.integrity_.prepare_messages", wraps=lambda m: m
+        "ai.models.core.api.integrity.prepare_messages", wraps=lambda m: m
     ) as spy:
         s = models.stream(MOCK_MODEL, msgs)
         async for _ in s:
@@ -538,7 +538,7 @@ async def test_generate_calls_prepare_messages() -> None:
     msgs = [ai.user_message("A cat")]
 
     with patch(
-        "ai.models.core.api.integrity_.prepare_messages", wraps=lambda m: m
+        "ai.models.core.api.integrity.prepare_messages", wraps=lambda m: m
     ) as spy:
         await models.generate(MOCK_MODEL, msgs, models.ImageParams(n=1))
         spy.assert_called_once_with(msgs)

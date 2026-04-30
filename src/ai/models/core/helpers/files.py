@@ -4,8 +4,6 @@ Pure media utilities (detection, encoding, inference) live in
 :mod:`ai.types.media`.
 """
 
-from __future__ import annotations
-
 import httpx
 
 DEFAULT_MAX_BYTES = 100 * 1024 * 1024  # 100 MiB (matches TS SDK)

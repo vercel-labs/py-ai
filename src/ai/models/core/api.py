@@ -5,7 +5,7 @@ from typing import Any, Protocol, Self, runtime_checkable
 import pydantic
 
 from ... import types
-from ...types import integrity as integrity_
+from ...types import integrity
 from . import adapters, params
 from . import client as client_
 from . import model as model_
@@ -171,7 +171,7 @@ def stream(
     executor: StreamExecutor = _default_executor,
 ) -> Stream:
     """Stream an LLM response."""
-    messages = integrity_.prepare_messages(messages)
+    messages = integrity.prepare_messages(messages)
     request = StreamRequest(model, messages, tools, output_type)
     return Stream(executor._do_stream(request))
 
@@ -184,7 +184,7 @@ async def generate(
     executor: GenerateExecutor = _default_executor,
 ) -> types.Message:
     """Generate a non-streaming response (images, video, etc.)."""
-    messages = integrity_.prepare_messages(messages)
+    messages = integrity.prepare_messages(messages)
     request = GenerateRequest(model, messages, params)
     return await executor._do_generate(request)
 
