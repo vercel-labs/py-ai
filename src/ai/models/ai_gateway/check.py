@@ -1,6 +1,6 @@
 """AI Gateway connection check.
 
-Verifies that the client's credentials are valid and that the model 
+Verifies that the client's credentials are valid and that the model
 exists in the gateway's catalogue.
 
 * Auth is validated via ``GET {origin}/v1/credits`` which requires a
