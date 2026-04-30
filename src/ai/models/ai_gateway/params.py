@@ -1,0 +1,70 @@
+from typing import Annotated, Any, ClassVar, Literal
+
+import pydantic
+
+_PARAMS_CONFIG = pydantic.ConfigDict(frozen=True, populate_by_name=True)
+
+type GatewaySort = Literal["cost", "ttft", "tps"]
+type GatewayCaching = Literal["auto"]
+type GatewayCredential = dict[str, Any]
+type GatewayByok = dict[str, list[GatewayCredential]]
+type GatewayTimeoutMs = Annotated[int, pydantic.Field(ge=1000)]
+
+
+class GatewayProviderTimeouts(pydantic.BaseModel):
+    """Per-provider BYOK timeouts in milliseconds."""
+
+    model_config = _PARAMS_CONFIG
+
+    # Per-provider BYOK startup timeouts in milliseconds.
+    byok: dict[str, GatewayTimeoutMs] | None = None
+
+
+class GatewayParams(pydantic.BaseModel):
+    """AI Gateway routing and request options for language-model streams."""
+
+    model_config = _PARAMS_CONFIG
+
+    provider: ClassVar[str] = "ai-gateway-v3"
+
+    # Restricts routing to this allowlist of provider slugs.
+    only: list[str] | None = None
+    # Tries provider slugs in this explicit fallback order.
+    order: list[str] | None = None
+    # Sorts candidate providers by cost or performance before routing.
+    sort: GatewaySort | None = None
+    # Tries these model slugs as request-scoped model fallbacks.
+    models: list[str] | None = None
+    # Request-scoped provider credentials overriding cached BYOK.
+    byok: GatewayByok | None = None
+    # Enables automatic prompt caching when supported.
+    caching: GatewayCaching | None = None
+    # Filters system providers to those with zero data retention.
+    zero_data_retention: bool | None = pydantic.Field(
+        default=None,
+        alias="zeroDataRetention",
+    )
+    # Filters system providers to those that do not train on prompts.
+    disallow_prompt_training: bool | None = pydantic.Field(
+        default=None,
+        alias="disallowPromptTraining",
+    )
+    # Filters system providers to HIPAA-compliant gateway providers.
+    hipaa_compliant: bool | None = pydantic.Field(
+        default=None,
+        alias="hipaaCompliant",
+    )
+    # Usage-reporting tags for attribution and filtering.
+    tags: list[str] | None = None
+    # End-user identifier for spend tracking and attribution.
+    user: str | None = None
+    # Entity id against which quota is tracked and enforced.
+    quota_entity_id: str | None = pydantic.Field(
+        default=None,
+        alias="quotaEntityId",
+    )
+    # Per-provider BYOK startup timeouts before trying fallbacks.
+    provider_timeouts: GatewayProviderTimeouts | None = pydantic.Field(
+        default=None,
+        alias="providerTimeouts",
+    )
