@@ -14,6 +14,13 @@ import pydantic
 from ... import types
 from .. import core
 from . import errors, sdk
+from .params import (
+    GATEWAY_STREAM_PARAMS_TYPES,
+    GatewayAnthropicParams,
+    GatewayOpenAIChatParams,
+    GatewayOpenAIResponsesParams,
+    GatewayParams,
+)
 
 # ---------------------------------------------------------------------------
 # Shared request helpers
@@ -165,6 +172,7 @@ async def _build_request_body(
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Build the ``LanguageModelV3CallOptions`` request body."""
+    stream_params = _normalize_gateway_params(kwargs.get("params"))
     body: dict[str, Any] = {
         "prompt": await _messages_to_prompt(messages),
     }
@@ -184,9 +192,114 @@ async def _build_request_body(
             "schema": output_type.model_json_schema(),
             "name": output_type.__name__,
         }
-    if kwargs.get("provider_options"):
-        body["providerOptions"] = kwargs["provider_options"]
+    provider_options = _merge_provider_options(
+        kwargs.get("provider_options"),
+        _provider_options_from_params(stream_params),
+    )
+    if provider_options:
+        body["providerOptions"] = provider_options
+    extra_body = _gateway_body_from_params(stream_params)
+    if extra_body:
+        body.update(extra_body)
     return body
+
+
+def _provider_options_from_params(
+    stream_params: Sequence[pydantic.BaseModel],
+) -> dict[str, Any] | None:
+    """Build Gateway providerOptions from typed params and provider raw body."""
+    provider_options: dict[str, Any] = {}
+    for param in stream_params:
+        key = _gateway_provider_options_key(param)
+        payload = _provider_options_payload(param)
+        if not payload:
+            continue
+        if key in provider_options:
+            raise ValueError(f"duplicate provider params for {key!r}")
+        provider_options[key] = payload
+    return provider_options or None
+
+
+def _normalize_gateway_params(value: Any) -> list[pydantic.BaseModel]:
+    """Accept one params object or a sequence and enforce Gateway param types."""
+    if value is None:
+        return []
+    if isinstance(value, pydantic.BaseModel):
+        raw_items: list[Any] = [value]
+    else:
+        raw_items = list(value)
+
+    result: list[pydantic.BaseModel] = []
+    for item in raw_items:
+        if not isinstance(item, GATEWAY_STREAM_PARAMS_TYPES):
+            raise TypeError(
+                "ai-gateway streams accept GatewayParams, GatewayOpenAIChatParams, "
+                "GatewayOpenAIResponsesParams, or GatewayAnthropicParams"
+            )
+        result.append(item)
+    return result
+
+
+def _gateway_provider_options_key(param: pydantic.BaseModel) -> str:
+    """Return the providerOptions bucket name for one Gateway param wrapper."""
+    if isinstance(param, GatewayParams):
+        return "gateway"
+    if isinstance(param, GatewayOpenAIChatParams | GatewayOpenAIResponsesParams):
+        return "openai"
+    if isinstance(param, GatewayAnthropicParams):
+        return "anthropic"
+    raise TypeError(f"unsupported ai-gateway params type {type(param).__name__}")
+
+
+def _provider_options_payload(param: pydantic.BaseModel) -> dict[str, Any]:
+    """Dump typed providerOptions and merge forwarded provider raw body fields."""
+    payload = param.model_dump(by_alias=True, exclude_none=True)
+    if not isinstance(param, GatewayParams):
+        extra_body = getattr(param, "extra_body", None)
+        if extra_body:
+            payload.update(extra_body)
+    return payload
+
+
+def _gateway_body_from_params(
+    stream_params: Sequence[pydantic.BaseModel],
+) -> dict[str, Any] | None:
+    """Collect raw top-level Gateway body fields from GatewayParams only."""
+    extra_body: dict[str, Any] = {}
+    for param in stream_params:
+        if isinstance(param, GatewayParams) and param.extra_body:
+            extra_body.update(param.extra_body)
+    return extra_body or None
+
+
+def _extra_headers_from_params(
+    stream_params: Sequence[pydantic.BaseModel],
+) -> dict[str, str] | None:
+    """Collect raw per-request HTTP headers from any Gateway params object."""
+    headers: dict[str, str] = {}
+    for param in stream_params:
+        extra_headers = getattr(param, "extra_headers", None)
+        if extra_headers:
+            headers.update(extra_headers)
+    return headers or None
+
+
+def _merge_provider_options(
+    existing: dict[str, Any] | None,
+    generated: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Combine legacy provider_options with typed params without overwriting."""
+    if not existing:
+        return generated
+    if not generated:
+        return dict(existing)
+
+    result = dict(existing)
+    for key, value in generated.items():
+        if key in result:
+            raise ValueError(f"duplicate provider params for {key!r}")
+        result[key] = value
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +438,7 @@ def _parse_stream_part(
 
 async def stream(
     client: core.client.Client,
-    model: core.model.Model,
+    model: core.model.Model[Any],
     messages: list[types.Message],
     *,
     tools: Sequence[types.proto.ToolLike] | None = None,
@@ -333,9 +446,14 @@ async def stream(
     **kwargs: Any,
 ) -> AsyncGenerator[types.events.Event]:
     """Stream an LLM response through the AI Gateway v3 protocol."""
+    stream_params = _normalize_gateway_params(kwargs.get("params"))
     body = await _build_request_body(
-        messages, tools=tools, output_type=output_type, **kwargs
+        messages,
+        tools=tools,
+        output_type=output_type,
+        **{**kwargs, "params": stream_params},
     )
+    extra_headers = _extra_headers_from_params(stream_params)
     gateway = sdk.GatewayClient(client, model)
 
     try:
@@ -344,6 +462,7 @@ async def stream(
             body,
             model_type="language",
             streaming=True,
+            headers=extra_headers,
         ) as response:
             yield types.events.StreamStart()
             streamed_tool_ids: set[str] = set()
@@ -368,7 +487,7 @@ async def stream(
 
 async def _generate_image(
     client: core.client.Client,
-    model: core.model.Model,
+    model: core.model.Model[Any],
     messages: list[types.Message],
     params: core.ImageParams,
 ) -> types.Message:
@@ -406,7 +525,7 @@ async def _generate_image(
 
 async def _generate_video(
     client: core.client.Client,
-    model: core.model.Model,
+    model: core.model.Model[Any],
     messages: list[types.Message],
     params: core.VideoParams,
 ) -> types.Message:
@@ -468,7 +587,7 @@ async def _generate_video(
 
 async def generate(
     client: core.client.Client,
-    model: core.model.Model,
+    model: core.model.Model[Any],
     messages: list[types.Message],
     params: core.GenerateParams,
 ) -> types.Message:

@@ -11,9 +11,10 @@ The adapter module is loaded lazily to avoid pulling in the ``anthropic``
 SDK at import time.
 """
 
+from .params import AnthropicParams
 from .provider import anthropic
 
-__all__ = ["anthropic"]
+__all__ = ["AnthropicParams", "anthropic"]
 
 
 def __getattr__(name: str) -> object:

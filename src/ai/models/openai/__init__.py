@@ -11,9 +11,10 @@ The adapter module is loaded lazily to avoid pulling in the ``openai``
 SDK at import time.
 """
 
+from .params import OpenAIChatParams, OpenAIResponsesParams
 from .provider import openai
 
-__all__ = ["openai"]
+__all__ = ["OpenAIChatParams", "OpenAIResponsesParams", "openai"]
 
 
 def __getattr__(name: str) -> object:

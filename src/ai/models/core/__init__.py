@@ -15,7 +15,7 @@ from .api import (
 )
 from .client import Client
 from .model import Model
-from .params import GenerateParams, ImageParams, VideoParams
+from .params import GenerateParams, ImageParams, StreamParams, VideoParams
 from .proto import CheckConnFn, GenerateFn, Provider, StreamFn
 
 __all__ = [
@@ -32,6 +32,7 @@ __all__ = [
     "Stream",
     "StreamExecutor",
     "StreamFn",
+    "StreamParams",
     "StreamRequest",
     "VideoParams",
     "check_connection",

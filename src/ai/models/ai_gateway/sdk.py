@@ -20,7 +20,7 @@ class GatewayClient:
     def __init__(
         self,
         client: core.client.Client,
-        model: core.model.Model | None = None,
+        model: core.model.Model[Any] | None = None,
     ) -> None:
         self._client = client
         self._model = model
@@ -119,21 +119,25 @@ class GatewayClient:
         model_type: ModelType,
         streaming: bool = False,
         accept: str | None = None,
+        headers: dict[str, str] | None = None,
         timeout: httpx.Timeout | float | None = None,
     ) -> AsyncIterator[httpx.Response]:
         kwargs: dict[str, Any] = {}
         if timeout is not None:
             kwargs["timeout"] = timeout
+        request_headers = self.model_headers(
+            model_type,
+            streaming=streaming,
+            accept=accept,
+        )
+        if headers:
+            request_headers.update(headers)
 
         async with self._client.http.stream(
             "POST",
             self.url(path),
             json=body,
-            headers=self.model_headers(
-                model_type,
-                streaming=streaming,
-                accept=accept,
-            ),
+            headers=request_headers,
             **kwargs,
         ) as response:
             await self.raise_for_error(response)
