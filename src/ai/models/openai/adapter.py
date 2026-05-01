@@ -135,6 +135,16 @@ async def _messages_to_openai(
                                     },
                                 }
                             )
+                        case (
+                            types.BuiltinToolCallPart() | types.BuiltinToolReturnPart()
+                        ):
+                            raise NotImplementedError(
+                                "OpenAI chat-completions adapter does not "
+                                "support BuiltinToolCallPart or "
+                                "BuiltinToolReturnPart in the message history. "
+                                "Route via the AI Gateway provider until a "
+                                "native Responses adapter ships."
+                            )
 
                 entry: dict[str, Any] = {"role": "assistant"}
                 if content:

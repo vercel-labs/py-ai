@@ -9,7 +9,6 @@ import pytest
 import ai
 from ai import models
 from ai.models.openai import openai
-from ai.models.openai import params as openai_params
 from ai.types import events as events_
 from ai.types import messages as messages_
 
@@ -138,15 +137,13 @@ async def test_stream_forwards_output_type_and_request_params() -> None:
     assert received_params == [params]
 
 
-def test_openai_responses_params_raise_until_responses_api_exists() -> None:
-    with pytest.raises(TypeError, match="OpenAIChatParams"):
+def test_normalize_params_rejects_non_pydantic_value() -> None:
+    """``stream(...)`` rejects raw dicts (and anything not a BaseModel)."""
+    with pytest.raises(TypeError, match="pydantic BaseModel"):
         models.stream(
             openai("gpt-5.4"),
             [ai.user_message("Hi")],
-            params=cast(
-                Any,
-                openai_params.OpenAIResponsesParams(previous_response_id="resp_123"),
-            ),
+            params=cast(Any, {"reasoning_effort": "high"}),
         )
 
 

@@ -1,10 +1,16 @@
+"""Anthropic ``check`` tests.
+
+The status-code handling is shared with OpenAI and exhaustively tested
+in ``tests/models/openai/test_check.py``. This file only confirms the
+provider-specific 200 path so we know URL routing is wired up.
+"""
+
 from __future__ import annotations
 
 import json
 from typing import Any
 
 import httpx
-import pytest
 
 from ai.models.anthropic import anthropic, check
 from ai.models.core import client as client_
@@ -32,9 +38,3 @@ def _client_with_mock(
 async def test_200_returns_true() -> None:
     client = _client_with_mock(200, {"id": "claude-opus-4-6", "type": "model"})
     assert await check.check(client, _MODEL) is True
-
-
-async def test_shared_status_logic_smoke() -> None:
-    assert await check.check(_client_with_mock(401), _MODEL) is False
-    with pytest.raises(httpx.HTTPStatusError):
-        await check.check(_client_with_mock(500), _MODEL)
