@@ -20,7 +20,7 @@ async def main() -> None:
     #   image_data = pathlib.Path("my_photo.png").read_bytes()
     #   input_image = ai.file_part(image_data, media_type="image/png")
     input_image = ai.FilePart(
-        data="https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/1200px-Cat03.jpg",
+        data="https://picsum.photos/id/237/400/300.jpg",
         media_type="image/jpeg",
     )
 

@@ -13,8 +13,8 @@ import asyncio
 import json
 from typing import Any
 
-import rich.text
 import pydantic
+import rich.text
 import textual
 import textual.app
 import textual.containers
@@ -113,7 +113,9 @@ class MultiAgentApp(textual.app.App[None]):
         self._hook_queue: asyncio.Queue[ai.HookPart[Any]] = asyncio.Queue()
         self._current_hook: ai.HookPart[Any] | None = None
         self._ws: websockets.ClientConnection | None = None
-        self._event_adapter: pydantic.TypeAdapter[ai.AgentEvent] = pydantic.TypeAdapter(ai.AgentEvent)
+        self._event_adapter: pydantic.TypeAdapter[ai.AgentEvent] = pydantic.TypeAdapter(
+            ai.AgentEvent
+        )
         self._current_label = "unknown"
 
     def compose(self) -> textual.app.ComposeResult:

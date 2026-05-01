@@ -142,13 +142,9 @@ async def _replay_as_stream(msg: ai.Message) -> AsyncGenerator[ai.Event]:
             yield ai.TextDelta(block_id=bid, chunk=part.text)
             yield ai.TextEnd(block_id=bid)
         elif isinstance(part, ai.ToolCallPart):
-            yield ai.ToolStart(
-                tool_call_id=part.tool_call_id, tool_name=part.tool_name
-            )
+            yield ai.ToolStart(tool_call_id=part.tool_call_id, tool_name=part.tool_name)
             if part.tool_args:
-                yield ai.ToolDelta(
-                    tool_call_id=part.tool_call_id, chunk=part.tool_args
-                )
+                yield ai.ToolDelta(tool_call_id=part.tool_call_id, chunk=part.tool_args)
             yield ai.ToolEnd(tool_call_id=part.tool_call_id, tool_call=part)
     yield ai.StreamEnd()
 
