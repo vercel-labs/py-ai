@@ -24,6 +24,7 @@ import pytest
 import ai
 from ai import models
 from ai.models.ai_gateway import adapter, ai_gateway, errors
+from ai.models.ai_gateway import params as params_
 from ai.models.core import model as model_
 from ai.types import events, messages
 
@@ -39,7 +40,7 @@ _TEST_MODEL = ai_gateway("test-provider/test-model")
 async def _collect(
     client: Any,
     msgs: list[messages.Message],
-    model: model_.Model = _TEST_MODEL,
+    model: model_.Model[params_.GatewayStreamParams] = _TEST_MODEL,
     **kwargs: Any,
 ) -> list[events.Event]:
     """Drain ``stream()`` and return all yielded events."""
@@ -52,7 +53,7 @@ async def _collect(
 async def _final(
     client: Any,
     msgs: list[messages.Message],
-    model: model_.Model = _TEST_MODEL,
+    model: model_.Model[params_.GatewayStreamParams] = _TEST_MODEL,
     **kwargs: Any,
 ) -> messages.Message:
     """Drain the adapter's event stream and return the aggregated message."""
@@ -243,24 +244,74 @@ class TestRequest:
             }
         ]
 
-    async def test_provider_options_in_body(self) -> None:
+    async def test_gateway_merges_forwarded_provider_params(self) -> None:
         captured_body: dict[str, Any] = {}
+        captured_headers: dict[str, str] = {}
 
         def handler(req: httpx.Request) -> httpx.Response:
             captured_body.update(json.loads(req.content))
+            captured_headers.update(dict(req.headers))
             return httpx.Response(
                 200,
                 text=sse({"type": "finish", "finishReason": "stop", "usage": {}}),
             )
 
-        opts = {"gateway": {"order": ["bedrock", "openai"]}}
-        await _collect(
-            mock_client(httpx.MockTransport(handler)),
+        client = mock_client(httpx.MockTransport(handler))
+        model = ai_gateway("anthropic/claude-sonnet-4", client=client)
+        request_params: list[params_.GatewayStreamParams] = [
+            params_.GatewayParams(
+                order=["bedrock", "anthropic"],
+                zero_data_retention=True,
+                extra_body={"futureGatewayField": True},
+                extra_headers={"x-gateway-feature": "enabled"},
+            ),
+            params_.GatewayAnthropicParams(
+                speed="fast",
+                extra_body={"futureAnthropicField": True},
+                extra_headers={"x-forwarded-provider-feature": "enabled"},
+            ),
+        ]
+        stream = models.stream(
+            model,
             [user_msg("Hi")],
-            provider_options=opts,
+            params=request_params,
+        )
+        async for _ in stream:
+            pass
+
+        assert captured_body["providerOptions"] == {
+            "gateway": {
+                "order": ["bedrock", "anthropic"],
+                "zeroDataRetention": True,
+            },
+            "anthropic": {
+                "speed": "fast",
+                "futureAnthropicField": True,
+            },
+        }
+        assert captured_body["futureGatewayField"] is True
+        assert captured_headers["x-gateway-feature"] == "enabled"
+        assert captured_headers["x-forwarded-provider-feature"] == "enabled"
+
+    async def test_gateway_rejects_duplicate_provider_param_keys(self) -> None:
+        def handler(req: httpx.Request) -> httpx.Response:
+            raise AssertionError("request should not be sent")
+
+        client = mock_client(httpx.MockTransport(handler))
+        model = ai_gateway("openai/gpt-5.4", client=client)
+        request_params: list[params_.GatewayStreamParams] = [
+            params_.GatewayOpenAIChatParams(service_tier="auto"),
+            params_.GatewayOpenAIResponsesParams(previous_response_id="resp_123"),
+        ]
+        stream = models.stream(
+            model,
+            [user_msg("Hi")],
+            params=request_params,
         )
 
-        assert captured_body["providerOptions"] == opts
+        with pytest.raises(ValueError, match="duplicate provider params for 'openai'"):
+            async for _ in stream:
+                pass
 
     async def test_real_tool_in_request_body(self) -> None:
         """A real ``@tool``-decorated function must appear correctly

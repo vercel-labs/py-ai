@@ -89,7 +89,7 @@ class _CapturingAdapter:
     async def stream(
         self,
         client: models.Client,
-        model: models.Model,
+        model: models.Model[pydantic.BaseModel],
         messages: list[messages_.Message],
         *,
         tools: Sequence[ai.ToolLike] | None = None,
