@@ -58,7 +58,6 @@ class _OpenAI:
         self,
         model_id: str,
         *,
-        base_url: str | None = None,
         client: core.client.Client | None = None,
     ) -> core.model.Model[OpenAIChatParams]:
         return core.model.Model[OpenAIChatParams](

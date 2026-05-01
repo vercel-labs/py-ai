@@ -59,7 +59,6 @@ class _AIGateway:
         self,
         model_id: str,
         *,
-        base_url: str | None = None,
         client: core.client.Client | None = None,
     ) -> core.model.Model[GatewayStreamParams]:
         return core.model.Model[GatewayStreamParams](

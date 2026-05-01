@@ -59,7 +59,6 @@ class _Anthropic:
         self,
         model_id: str,
         *,
-        base_url: str | None = None,
         client: core.client.Client | None = None,
     ) -> core.model.Model[AnthropicParams]:
         return core.model.Model[AnthropicParams](

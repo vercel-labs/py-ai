@@ -163,12 +163,10 @@ class OpenAIResponsesParams(_OpenAISharedParams):
     # Controls automatic response-input truncation behavior.
     truncation: OpenAIResponsesTruncation | None = None
     # Server-side context compaction settings.
-    context_management: list[OpenAIResponsesContextManagement] | None = (
-        pydantic.Field(
-            default=None,
-            validation_alias="contextManagement",
-            serialization_alias="contextManagement",
-        )
+    context_management: list[OpenAIResponsesContextManagement] | None = pydantic.Field(
+        default=None,
+        validation_alias="contextManagement",
+        serialization_alias="contextManagement",
     )
     # Requests a reasoning summary for supported reasoning models.
     reasoning_summary: OpenAIReasoningSummary | None = pydantic.Field(
