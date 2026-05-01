@@ -25,7 +25,7 @@ chat_agent = ai.agent(tools=TOOLS)
 
 
 @chat_agent.loop
-async def graph(context: ai.Context) -> AsyncGenerator[ai.Event]:
+async def graph(context: ai.Context) -> AsyncGenerator[ai.StreamItem]:
     """Agent graph with human-in-the-loop tool approval.
 
     Loops: stream LLM -> request approval -> execute tools -> repeat.
@@ -50,7 +50,7 @@ async def graph(context: ai.Context) -> AsyncGenerator[ai.Event]:
         yield ai.tool_result(*results)
 
 
-async def _execute_with_approval(tc: ai.ToolCall) -> ai.Message:
+async def _execute_with_approval(tc: ai.ToolCall) -> ai.ToolCallResult:
     """Execute a tool call only after the user grants approval.
 
     Creates a ToolApproval hook that suspends execution until the
@@ -66,7 +66,7 @@ async def _execute_with_approval(tc: ai.ToolCall) -> ai.Message:
     if approval.granted:
         return await tc()
 
-    return ai.tool_message(
+    return ai.tool_result(
         tool_call_id=tc.id,
         tool_name=tc.name,
         result="Tool call was denied by the user.",

@@ -31,11 +31,11 @@ async def main() -> None:
     my_agent = ai.agent(tools=[contact_mothership])
 
     @my_agent.loop
-    async def with_approval(context: ai.Context) -> AsyncGenerator[ai.Event]:
+    async def with_approval(
+        context: ai.Context,
+    ) -> AsyncGenerator[ai.StreamItem]:
         while True:
-            s = ai.models.stream(
-                context.model, context.messages, tools=context.tools
-            )
+            s = ai.models.stream(context.model, context.messages, tools=context.tools)
             async for event in s:
                 yield event
             if s.message is not None:
@@ -45,7 +45,7 @@ async def main() -> None:
             if not tool_calls:
                 return
 
-            results = []
+            results: list[ai.ToolCallResult] = []
             for tc in tool_calls:
                 if tc.name == "contact_mothership":
                     # Suspends until resolved from outside the loop.
@@ -58,7 +58,7 @@ async def main() -> None:
                         results.append(await tc())
                     else:
                         results.append(
-                            ai.tool_message(
+                            ai.tool_result(
                                 tool_call_id=tc.id,
                                 tool_name=tc.name,
                                 result=f"Rejected: {approval.reason}",

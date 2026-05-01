@@ -149,7 +149,7 @@ async def _replay_as_stream(msg: ai.Message) -> AsyncGenerator[ai.Event]:
                 yield ai.ToolDelta(
                     tool_call_id=part.tool_call_id, chunk=part.tool_args
                 )
-            yield ai.ToolEnd(tool_call_id=part.tool_call_id)
+            yield ai.ToolEnd(tool_call_id=part.tool_call_id, tool_call=part)
     yield ai.StreamEnd()
 
 
@@ -193,7 +193,7 @@ class TemporalMiddleware(ai.Middleware):
         self,
         call: ai.middleware.ToolContext,
         next: Any,
-    ) -> ai.Message:
+    ) -> ai.ToolCallResult:
         """Tool execution → Temporal activity."""
         result = await temporalio.workflow.execute_activity(
             tool_dispatch_activity,
@@ -203,13 +203,11 @@ class TemporalMiddleware(ai.Middleware):
             ),
             start_to_close_timeout=datetime.timedelta(minutes=2),
         )
-        return ai.tool_message(
-            ai.ToolResultPart(
-                tool_call_id=call.tool_call_id,
-                tool_name=call.tool_name,
-                result=result.result,
-                is_error=result.is_error,
-            )
+        return ai.tool_result(
+            tool_call_id=call.tool_call_id,
+            tool_name=call.tool_name,
+            result=result.result,
+            is_error=result.is_error,
         )
 
 

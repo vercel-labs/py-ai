@@ -31,14 +31,7 @@ class CustomAgent(ai.Agent):
                 ai.ToolRunner(stream) as tr,
             ):
                 async for event in ai.util.merge(stream, tr.events()):
-                    if isinstance(event, ai.Message):
-                        # FIXME: swallow event for now, since
-                        # otherwise it gets batched up. We need to
-                        # turn this into a ToolResult and get rid of
-                        # auto-batching.
-                        pass
-                    else:
-                        yield event
+                    yield event
 
                     if isinstance(event, ai.ToolEnd):
                         call = event.tool_call
@@ -63,9 +56,8 @@ async def main() -> None:
         model,
         [ai.user_message("Compare the weather and population of New York and Tokyo.")],
     ):
-        if isinstance(event, ai.StreamEnd):
-            if event.message.role == "assistant":
-                print("====", event.message.text, flush=True)
+        if isinstance(event, ai.StreamEnd) and event.message.role == "assistant":
+            print("====", event.message.text, flush=True)
 
     print()
 

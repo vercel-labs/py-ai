@@ -140,8 +140,8 @@ class ToolCall:
             self._kwargs = self._tool.parse_args(self._part.tool_args)
         return dict(self._kwargs)
 
-    async def __call__(self, **overrides: Any) -> types.Message:
-        """Execute the tool and return a single tool-result message."""
+    async def __call__(self, **overrides: Any) -> events_.ToolCallResult:
+        """Execute the tool and return a :class:`ToolCallResult`."""
         # Best-effort parse so middleware sees usable kwargs when possible.
         # If parsing fails, middleware still gets the raw tool_call_id /
         # tool_name and can replace kwargs before _real() executes.
@@ -163,11 +163,11 @@ class ToolCall:
 
         tool = self._tool
 
-        async def _real(call: middleware_.ToolContext) -> types.Message:
+        async def _real(call: middleware_.ToolContext) -> events_.ToolCallResult:
             try:
                 result = await tool.execute_kwargs(call.kwargs)
             except Exception as exc:
-                return builders.tool_message(
+                return tool_result(
                     types.ToolResultPart(
                         tool_call_id=call.tool_call_id,
                         tool_name=call.tool_name,
@@ -175,7 +175,7 @@ class ToolCall:
                         is_error=True,
                     )
                 )
-            return builders.tool_message(
+            return tool_result(
                 types.ToolResultPart(
                     tool_call_id=call.tool_call_id,
                     tool_name=call.tool_name,
@@ -200,10 +200,10 @@ class ToolRunner:
         self._sched_waiter: asyncio.Future[None] = (
             asyncio.get_running_loop().create_future()
         )
-        self._active: set[asyncio.Future[types.Message] | asyncio.Future[None]] = {
-            self._finish_future
-        }
-        self._tool_results: list[types.Message] = []
+        self._active: set[
+            asyncio.Future[events_.ToolCallResult] | asyncio.Future[None]
+        ] = {self._finish_future}
+        self._tool_results: list[events_.ToolCallResult] = []
         self._tg_base = asyncio.TaskGroup()
 
     async def __aenter__(self) -> Self:
@@ -213,7 +213,7 @@ class ToolRunner:
     async def __aexit__(self, *args: Any) -> None:
         await self._tg_base.__aexit__(*args)
 
-    def events(self) -> AsyncGenerator[types.Event | types.Message]:
+    def events(self) -> AsyncGenerator[events_.ToolCallResult]:
         return self._iterate()
 
     def schedule(self, tc: ToolCall) -> None:
@@ -222,10 +222,10 @@ class ToolRunner:
 
     def get_tool_message(self) -> types.Message | None:
         if self._tool_results:
-            return builders.tool_message(*self._tool_results)
+            return builders.tool_message(*[t.message for t in self._tool_results])
         return None
 
-    async def _iterate(self) -> AsyncGenerator[types.Event | types.Message]:
+    async def _iterate(self) -> AsyncGenerator[events_.ToolCallResult]:
         while self._active:
             done, _ = await asyncio.wait(
                 [*self._active, self._sched_waiter],
@@ -294,16 +294,42 @@ class LoopFn(Protocol):
 
 
 def tool_result(
-    *items: types.Message | types.ToolResultPart | list[types.Message],
+    *items: types.Message
+    | types.ToolResultPart
+    | events_.ToolCallResult
+    | list[types.Message],
+    tool_call_id: str | None = None,
+    result: Any = None,
+    tool_name: str = "",
+    is_error: bool = False,
 ) -> events_.ToolCallResult:
-    """Create a :class:`ToolCallResult` from tool messages or parts.
+    """Create a :class:`ToolCallResult` from tool messages, parts, or kwargs.
 
-    Wraps :func:`ai.tool_message` and returns a ``ToolCallResult``
-    event ready to yield from a custom loop::
+    Accepts ``ToolCallResult`` items (extracts their ``.message``),
+    plain ``Message`` objects, ``ToolResultPart`` instances, or keyword
+    arguments matching :func:`ai.tool_message`::
 
         yield ai.tool_result(*(t.result() for t in tasks))
+        ai.tool_result(tool_call_id="tc-1", result="denied", is_error=True)
     """
-    msg = builders.tool_message(*items)
+    if tool_call_id is not None:
+        msg = builders.tool_message(
+            tool_call_id=tool_call_id,
+            result=result,
+            tool_name=tool_name,
+            is_error=is_error,
+        )
+        return events_.ToolCallResult(message=msg, results=msg.tool_results)
+
+    unwrapped: list[types.Message | types.ToolResultPart] = []
+    for item in items:
+        if isinstance(item, events_.ToolCallResult):
+            unwrapped.append(item.message)
+        elif isinstance(item, list):
+            unwrapped.extend(item)
+        else:
+            unwrapped.append(item)
+    msg = builders.tool_message(*unwrapped)
     return events_.ToolCallResult(message=msg, results=msg.tool_results)
 
 
@@ -316,6 +342,7 @@ def _upsert_message(messages: list[types.Message], message: types.Message) -> No
     messages.append(message)
 
 
+# TODO: Stop doing this?
 async def _collect_messages(
     source: AsyncIterable[StreamItem],
     messages: list[types.Message],
@@ -323,7 +350,6 @@ async def _collect_messages(
     """Intercept yielded items and maintain the *messages* history list.
 
     * Bare ``Message`` — silently collected (not forwarded to consumer).
-    * ``ToolCallResult`` — collected *and* forwarded.
     * Any other ``AgentEvent`` — forwarded as-is.
 
     This runs on the **producer** side (same coroutine as the loop function),
@@ -333,9 +359,6 @@ async def _collect_messages(
     async for item in source:
         if isinstance(item, types.Message):
             _upsert_message(messages, item)
-        elif isinstance(item, events_.ToolCallResult):
-            _upsert_message(messages, item.message)
-            yield item
         else:
             yield item
 
@@ -394,7 +417,7 @@ class Agent:
     async def default_loop(
         self, context: Context
     ) -> AsyncGenerator[events_.AgentEvent]:
-        """Stream, execute tools with logging, repeat."""
+        """Stream, execute tools, repeat."""
         while context.keep_running():
             async with (
                 models.stream(
@@ -403,14 +426,7 @@ class Agent:
                 ToolRunner(stream) as tr,
             ):
                 async for event in util.merge(stream, tr.events()):
-                    if isinstance(event, types.Message):
-                        # FIXME: swallow event for now, since
-                        # otherwise it gets batched up. We need to
-                        # turn this into a ToolResult and get rid of
-                        # auto-batching.
-                        pass
-                    else:
-                        yield event
+                    yield event
 
                     if isinstance(event, types.ToolEnd):
                         tool = context.resolve(event.tool_call)

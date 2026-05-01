@@ -2,6 +2,7 @@ from . import mcp, ui
 from .agent import (
     Agent,
     Context,
+    StreamItem,
     Tool,
     ToolCall,
     ToolRunner,
@@ -22,6 +23,7 @@ from .hooks import (
 __all__ = [
     "Agent",
     "AgentEvent",
+    "StreamItem",
     "Context",
     "HookEvent",
     "Tool",

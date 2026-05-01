@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Any
 
 import rich.text
 import pydantic
@@ -91,7 +92,7 @@ class AgentPanel(textual.containers.VerticalScroll):
 # ---------------------------------------------------------------------------
 
 
-class MultiAgentApp(textual.app.App):
+class MultiAgentApp(textual.app.App[None]):
     """Textual app for the multi-agent hooks demo."""
 
     CSS = """
@@ -109,10 +110,10 @@ class MultiAgentApp(textual.app.App):
 
     def __init__(self) -> None:
         super().__init__()
-        self._hook_queue: asyncio.Queue[ai.HookPart] = asyncio.Queue()
-        self._current_hook: ai.HookPart | None = None
+        self._hook_queue: asyncio.Queue[ai.HookPart[Any]] = asyncio.Queue()
+        self._current_hook: ai.HookPart[Any] | None = None
         self._ws: websockets.ClientConnection | None = None
-        self._event_adapter = pydantic.TypeAdapter(ai.AgentEvent)
+        self._event_adapter: pydantic.TypeAdapter[ai.AgentEvent] = pydantic.TypeAdapter(ai.AgentEvent)
         self._current_label = "unknown"
 
     def compose(self) -> textual.app.ComposeResult:
@@ -207,7 +208,7 @@ class MultiAgentApp(textual.app.App):
     # Hook lifecycle
     # ------------------------------------------------------------------
 
-    def _on_hook_pending(self, hook_part: ai.HookPart) -> None:
+    def _on_hook_pending(self, hook_part: ai.HookPart[Any]) -> None:
         branch = hook_part.metadata.get("branch", "unknown")
         tool = hook_part.metadata.get("tool", "?")
 
@@ -219,7 +220,7 @@ class MultiAgentApp(textual.app.App):
         self._hook_queue.put_nowait(hook_part)
         self._maybe_activate_next_hook()
 
-    def _on_hook_resolved(self, hook_part: ai.HookPart) -> None:
+    def _on_hook_resolved(self, hook_part: ai.HookPart[Any]) -> None:
         branch = hook_part.metadata.get("branch", "unknown")
         granted = hook_part.resolution and hook_part.resolution.get("granted")
         tag = "approved" if granted else "denied"

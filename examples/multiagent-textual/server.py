@@ -78,7 +78,7 @@ def _gated_agent(
     gated = ai.agent(tools=tools)
 
     @gated.loop
-    async def gated_loop(context: ai.Context) -> AsyncGenerator[ai.Event]:
+    async def gated_loop(context: ai.Context) -> AsyncGenerator[ai.StreamItem]:
         while True:
             s = ai.stream(context.model, context.messages, tools=context.tools)
             async for event in s:
@@ -90,7 +90,7 @@ def _gated_agent(
             if not tool_calls:
                 break
 
-            results: list[ai.Message] = []
+            results: list[ai.ToolCallResult] = []
             for tc in tool_calls:
                 if tc.name == approval_tool:
                     approval = await ai.hook(
@@ -102,7 +102,7 @@ def _gated_agent(
                         results.append(await tc())
                     else:
                         results.append(
-                            ai.tool_message(
+                            ai.tool_result(
                                 tool_call_id=tc.id,
                                 tool_name=tc.name,
                                 result=f"Denied: {approval.reason}",
@@ -138,7 +138,7 @@ orchestrator = ai.agent()
 
 
 @orchestrator.loop
-async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.Event]:
+async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.AgentEvent]:
     """Run two gated agents in parallel, then summarise their results."""
     query = context.messages[-1].text
 

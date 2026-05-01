@@ -44,6 +44,7 @@ type StreamResultLike = Any
 
 if TYPE_CHECKING:
     from .agents.agent import Tool
+    from .agents.events import ToolCallResult
     from .models.core.model import Model
 
 
@@ -191,11 +192,11 @@ class Middleware:
     async def wrap_tool(
         self,
         call: ToolContext,
-        next: Callable[[ToolContext], Awaitable[_Message]],
-    ) -> _Message:
+        next: Callable[[ToolContext], Awaitable[ToolCallResult]],
+    ) -> ToolCallResult:
         """Wrap a tool execution.
 
-        ``next(call)`` returns the tool-result ``Message``.
+        ``next(call)`` returns a :class:`ToolCallResult`.
         """
         return await next(call)
 
@@ -298,8 +299,8 @@ def _build_generate_chain(
 
 
 def _build_tool_chain(
-    real: Callable[[ToolContext], Awaitable[_Message]],
-) -> Callable[[ToolContext], Awaitable[_Message]]:
+    real: Callable[[ToolContext], Awaitable[ToolCallResult]],
+) -> Callable[[ToolContext], Awaitable[ToolCallResult]]:
     mw = get()
     if not mw:
         return real
@@ -308,9 +309,9 @@ def _build_tool_chain(
     for m in reversed(mw):
 
         def _make(
-            m: Middleware, nxt: Callable[[ToolContext], Awaitable[_Message]]
-        ) -> Callable[[ToolContext], Awaitable[_Message]]:
-            async def _wrapped(call: ToolContext) -> _Message:
+            m: Middleware, nxt: Callable[[ToolContext], Awaitable[ToolCallResult]]
+        ) -> Callable[[ToolContext], Awaitable[ToolCallResult]]:
+            async def _wrapped(call: ToolContext) -> ToolCallResult:
                 return await m.wrap_tool(call, nxt)
 
             return _wrapped
