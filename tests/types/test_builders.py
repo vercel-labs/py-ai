@@ -38,11 +38,11 @@ def test_file_part_from_bytes_unknown_raises() -> None:
 def test_tool_message_merges_tool_messages() -> None:
     m1 = messages.Message(
         role="tool",
-        parts=[builders.tool_result("tc-1", result=1, tool_name="a")],
+        parts=[builders.tool_result_part("tc-1", result=1, tool_name="a")],
     )
     m2 = messages.Message(
         role="tool",
-        parts=[builders.tool_result("tc-2", result=2, tool_name="b")],
+        parts=[builders.tool_result_part("tc-2", result=2, tool_name="b")],
     )
 
     merged = builders.tool_message(m1, m2)

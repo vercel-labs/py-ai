@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import contextvars
 from collections.abc import AsyncGenerator, AsyncIterable, Awaitable
+from typing import Any
 
-from .. import types
+from ..types import messages as messages_
 from . import events as events_
 from . import hooks as hooks_
 from .mcp import client as mcp_client
@@ -29,9 +30,9 @@ class Runtime:
     async def put_event(self, event: events_.AgentEvent) -> None:
         await self._event_queue.put(event)
 
-    async def put_message(self, message: types.Message) -> None:
-        await self.put_event(events_.MessageStart(message=message))
-        await self.put_event(events_.MessageEnd(message=message))
+    async def put_hook(self, hook_part: messages_.HookPart[Any]) -> None:
+        msg = messages_.Message(role="internal", parts=[hook_part])
+        await self.put_event(events_.HookEvent(message=msg, hook=hook_part))
 
     async def signal_done(self) -> None:
         await self._event_queue.put(self._SENTINEL)

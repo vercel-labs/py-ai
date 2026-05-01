@@ -87,10 +87,9 @@ async def test_wrap_hook_is_called() -> None:
     async for event in my_agent.run(
         MOCK_MODEL, [ai.user_message("go")], middleware=[Spy()]
     ):
-        if not isinstance(event, agent_events_.MessageEnd):
+        if not isinstance(event, agent_events_.HookEvent):
             continue
-        msg = event.message
-        if any(isinstance(p, ai.HookPart) and p.status == "pending" for p in msg.parts):
+        if event.hook.status == "pending":
             ai.resolve_hook("test_hook", {"approved": True, "reason": "ok"})
 
     assert len(hook_calls) == 1

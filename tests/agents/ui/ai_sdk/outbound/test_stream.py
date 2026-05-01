@@ -21,43 +21,18 @@ async def _collect(
     return [part async for part in to_stream(_gen(stream_events))]
 
 
-def _assistant_start(
-    msg_id: str = "m1",
-    *,
-    turn_id: str | None = "t1",
-    source_label: str | None = None,
-) -> agent_events_.MessageStart:
-    return agent_events_.MessageStart(
-        message=messages_.Message(
-            id=msg_id,
-            role="assistant",
-            turn_id=turn_id,
-            source_label=source_label,
-            parts=[],
-        )
-    )
-
-
 async def test_event_driven_text_streaming() -> None:
+    """Streaming text events lazily open a UI message."""
     text_id = "txt1"
-    final = messages_.Message(
-        id="m1",
-        role="assistant",
-        turn_id="t1",
-        parts=[messages_.TextPart(id=text_id, text="hi")],
-    )
     out = await _collect(
         [
-            _assistant_start("m1"),
             events_.TextStart(block_id=text_id),
             events_.TextDelta(block_id=text_id, chunk="hi"),
             events_.TextEnd(block_id=text_id),
-            agent_events_.MessageEnd(message=final),
         ]
     )
 
     assert isinstance(out[0], protocol.StartPart)
-    assert out[0].message_id == "m1"
     assert isinstance(out[1], protocol.StartStepPart)
     assert isinstance(out[2], protocol.TextStartPart) and out[2].id == text_id
     assert isinstance(out[3], protocol.TextDeltaPart) and out[3].delta == "hi"
@@ -66,93 +41,9 @@ async def test_event_driven_text_streaming() -> None:
     assert isinstance(out[6], protocol.FinishPart)
 
 
-async def test_static_text_message_emits_text_parts() -> None:
-    msg = messages_.Message(
-        id="m1",
-        role="assistant",
-        parts=[messages_.TextPart(id="txt1", text="hello")],
-    )
-    out = await _collect(
-        [agent_events_.MessageStart(message=msg), agent_events_.MessageEnd(message=msg)]
-    )
-    assert any(isinstance(part, protocol.TextDeltaPart) for part in out)
-
-
-async def test_turn_id_change_emits_step_boundary() -> None:
-    msg1 = messages_.Message(
-        id="m1",
-        role="assistant",
-        turn_id="t1",
-        parts=[messages_.TextPart(text="hello")],
-    )
-    msg2 = messages_.Message(
-        id="m2",
-        role="assistant",
-        turn_id="t2",
-        parts=[messages_.TextPart(text="world")],
-    )
-    out = await _collect(
-        [
-            agent_events_.MessageStart(message=msg1),
-            agent_events_.MessageEnd(message=msg1),
-            agent_events_.MessageStart(message=msg2),
-            agent_events_.MessageEnd(message=msg2),
-        ]
-    )
-    has_mid_step_boundary = any(
-        isinstance(out[i], protocol.FinishStepPart)
-        and i + 1 < len(out)
-        and isinstance(out[i + 1], protocol.StartStepPart)
-        for i in range(1, len(out) - 1)
-    )
-    assert has_mid_step_boundary
-
-
-async def test_agent_change_emits_message_boundary() -> None:
-    msg1 = messages_.Message(
-        id="m1",
-        role="assistant",
-        source_label="a1",
-        parts=[messages_.TextPart(text="from a")],
-    )
-    msg2 = messages_.Message(
-        id="m2",
-        role="assistant",
-        source_label="a2",
-        parts=[messages_.TextPart(text="from b")],
-    )
-    out = await _collect(
-        [
-            agent_events_.MessageStart(message=msg1),
-            agent_events_.MessageEnd(message=msg1),
-            agent_events_.MessageStart(message=msg2),
-            agent_events_.MessageEnd(message=msg2),
-        ]
-    )
-    has_mid_msg_boundary = any(
-        isinstance(out[i], protocol.FinishPart)
-        and i + 1 < len(out)
-        and isinstance(out[i + 1], protocol.StartPart)
-        for i in range(1, len(out) - 1)
-    )
-    assert has_mid_msg_boundary
-
-
 async def test_tool_call_and_result_emit_terminal_parts() -> None:
-    tool_call = messages_.Message(
-        id="m1",
-        role="assistant",
-        turn_id="t1",
-        parts=[
-            messages_.ToolCallPart(
-                id="tc1",
-                tool_call_id="tc1",
-                tool_name="search",
-                tool_args='{"q":"x"}',
-            )
-        ],
-    )
-    tool_result = messages_.Message(
+    """ToolCallResult emits tool input and output parts."""
+    tool_result_msg = messages_.Message(
         role="tool",
         parts=[
             messages_.ToolResultPart(
@@ -164,10 +55,53 @@ async def test_tool_call_and_result_emit_terminal_parts() -> None:
     )
     out = await _collect(
         [
-            agent_events_.MessageStart(message=tool_call),
-            agent_events_.MessageEnd(message=tool_call),
-            agent_events_.MessageStart(message=tool_result),
-            agent_events_.MessageEnd(message=tool_result),
+            # Streaming tool input events from the model
+            events_.ToolStart(tool_call_id="tc1", tool_name="search"),
+            events_.ToolDelta(tool_call_id="tc1", chunk='{"q":"x"}'),
+            events_.ToolEnd(
+                tool_call_id="tc1",
+                tool_call=messages_.ToolCallPart(
+                    tool_call_id="tc1",
+                    tool_name="search",
+                    tool_args='{"q":"x"}',
+                ),
+            ),
+            # Tool execution result
+            agent_events_.ToolCallResult(
+                message=tool_result_msg,
+                results=tool_result_msg.tool_results,
+            ),
+        ]
+    )
+    types = [type(part).__name__ for part in out]
+    assert "ToolInputStartPart" in types
+    assert "ToolOutputAvailablePart" in types
+
+
+async def test_tool_result_without_streaming_emits_input_start() -> None:
+    """ToolCallResult for a non-streamed tool emits input + output parts."""
+    tool_result_msg = messages_.Message(
+        role="tool",
+        parts=[
+            messages_.ToolCallPart(
+                id="tc1",
+                tool_call_id="tc1",
+                tool_name="search",
+                tool_args='{"q":"x"}',
+            ),
+            messages_.ToolResultPart(
+                tool_call_id="tc1",
+                tool_name="search",
+                result={"hits": 1},
+            ),
+        ],
+    )
+    out = await _collect(
+        [
+            agent_events_.ToolCallResult(
+                message=tool_result_msg,
+                results=tool_result_msg.tool_results,
+            ),
         ]
     )
     types = [type(part).__name__ for part in out]
@@ -177,35 +111,38 @@ async def test_tool_call_and_result_emit_terminal_parts() -> None:
 
 
 async def test_approval_request_hook_emits_approval_part() -> None:
-    tool_call = messages_.Message(
-        id="m1",
-        role="assistant",
-        turn_id="t1",
-        parts=[
-            messages_.ToolCallPart(
-                id="tc1",
-                tool_call_id="tc1",
-                tool_name="delete",
-                tool_args="{}",
-            )
-        ],
-    )
-    hook = messages_.Message(
-        role="internal",
-        parts=[
-            messages_.HookPart(
-                hook_id="approve_tc1",
-                hook_type="ToolApproval",
-                status="pending",
-            )
-        ],
-    )
+    """HookEvent with pending status emits a ToolApprovalRequestPart."""
     out = await _collect(
         [
-            agent_events_.MessageStart(message=tool_call),
-            agent_events_.MessageEnd(message=tool_call),
-            agent_events_.MessageStart(message=hook),
-            agent_events_.MessageEnd(message=hook),
+            # Streaming tool events first
+            events_.ToolStart(tool_call_id="tc1", tool_name="delete"),
+            events_.ToolDelta(tool_call_id="tc1", chunk="{}"),
+            events_.ToolEnd(
+                tool_call_id="tc1",
+                tool_call=messages_.ToolCallPart(
+                    tool_call_id="tc1",
+                    tool_name="delete",
+                    tool_args="{}",
+                ),
+            ),
+            # Hook requesting approval
+            agent_events_.HookEvent(
+                message=messages_.Message(
+                    role="internal",
+                    parts=[
+                        messages_.HookPart(
+                            hook_id="approve_tc1",
+                            hook_type="ToolApproval",
+                            status="pending",
+                        )
+                    ],
+                ),
+                hook=messages_.HookPart(
+                    hook_id="approve_tc1",
+                    hook_type="ToolApproval",
+                    status="pending",
+                ),
+            ),
         ]
     )
     approval_parts = [p for p in out if isinstance(p, protocol.ToolApprovalRequestPart)]
@@ -214,20 +151,51 @@ async def test_approval_request_hook_emits_approval_part() -> None:
     assert approval_parts[0].approval_id == "approve_tc1"
 
 
-async def test_dedup_on_reemitted_message_id() -> None:
-    msg = messages_.Message(
-        id="m1",
-        role="assistant",
-        turn_id="t1",
-        parts=[messages_.TextPart(id="txt1", text="hi")],
+async def test_agent_change_emits_message_boundary() -> None:
+    """ToolCallResult from a different agent triggers a new StartPart."""
+    tool_result_a = messages_.Message(
+        role="tool",
+        source_label="a1",
+        parts=[
+            messages_.ToolResultPart(
+                tool_call_id="tc1",
+                tool_name="foo",
+                result="ok",
+            )
+        ],
     )
-    stream_events: list[agent_events_.AgentEvent] = [
-        agent_events_.MessageStart(message=msg),
-        events_.TextStart(block_id="txt1"),
-        events_.TextDelta(block_id="txt1", chunk="hi"),
-        events_.TextEnd(block_id="txt1"),
-        agent_events_.MessageEnd(message=msg),
-    ]
-    out = await _collect([*stream_events, *stream_events])
-    text_deltas = [part for part in out if isinstance(part, protocol.TextDeltaPart)]
-    assert len(text_deltas) == 1
+    tool_result_b = messages_.Message(
+        role="tool",
+        source_label="a2",
+        parts=[
+            messages_.ToolResultPart(
+                tool_call_id="tc2",
+                tool_name="bar",
+                result="ok",
+            )
+        ],
+    )
+    out = await _collect(
+        [
+            # Agent a1 does text + tool
+            events_.TextStart(block_id="t1"),
+            events_.TextDelta(block_id="t1", chunk="from a"),
+            events_.TextEnd(block_id="t1"),
+            agent_events_.ToolCallResult(
+                message=tool_result_a,
+                results=tool_result_a.tool_results,
+            ),
+            # Agent a2 does text + tool — should trigger new StartPart
+            agent_events_.ToolCallResult(
+                message=tool_result_b,
+                results=tool_result_b.tool_results,
+            ),
+        ]
+    )
+    has_mid_msg_boundary = any(
+        isinstance(out[i], protocol.FinishPart)
+        and i + 1 < len(out)
+        and isinstance(out[i + 1], protocol.StartPart)
+        for i in range(1, len(out) - 1)
+    )
+    assert has_mid_msg_boundary

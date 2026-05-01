@@ -16,6 +16,10 @@ from ..types import builders
 from . import events as events_
 from . import runtime
 
+# What loop functions yield: AgentEvents pass through to the consumer,
+# bare Messages are silently collected into history.
+StreamItem = events_.AgentEvent | types.Message
+
 
 class Tool[**P, R]:
     """Wraps async function, introspects schema, attaches a validator"""
@@ -200,52 +204,55 @@ class Context(pydantic.BaseModel):
         ]
 
 
-StreamItem = events_.AgentEvent | types.Message
-
-
 class LoopFn(Protocol):
     def __call__(self, context: Context) -> AsyncGenerator[StreamItem]: ...
 
 
-async def _message_events(
-    message: types.Message,
-) -> AsyncGenerator[events_.AgentEvent]:
-    yield events_.MessageStart(message=message)
-    yield events_.MessageEnd(message=message)
+def tool_result(
+    *items: types.Message | types.ToolResultPart | list[types.Message],
+) -> events_.ToolCallResult:
+    """Create a :class:`ToolCallResult` from tool messages or parts.
+
+    Wraps :func:`ai.tool_message` and returns a ``ToolCallResult``
+    event ready to yield from a custom loop::
+
+        yield ai.tool_result(*(t.result() for t in tasks))
+    """
+    msg = builders.tool_message(*items)
+    return events_.ToolCallResult(message=msg, results=msg.tool_results)
 
 
-async def _coerce_events(
-    source: AsyncIterable[StreamItem],
-) -> AsyncGenerator[events_.AgentEvent]:
-    async for item in source:
-        if isinstance(item, types.Message):
-            async for event in _message_events(item):
-                yield event
-        else:
-            yield item
+def _upsert_message(messages: list[types.Message], message: types.Message) -> None:
+    """Insert or replace *message* in the history list."""
+    for i, existing in enumerate(messages):
+        if existing.id == message.id:
+            messages[i] = message
+            return
+    messages.append(message)
 
 
 async def _collect_messages(
     source: AsyncIterable[StreamItem],
     messages: list[types.Message],
 ) -> AsyncGenerator[events_.AgentEvent]:
-    """Intercept yielded events and collect MessageEnd messages into *messages*.
+    """Intercept yielded items and maintain the *messages* history list.
+
+    * Bare ``Message`` — silently collected (not forwarded to consumer).
+    * ``ToolCallResult`` — collected *and* forwarded.
+    * Any other ``AgentEvent`` — forwarded as-is.
 
     This runs on the **producer** side (same coroutine as the loop function),
     so ``messages`` is always up-to-date by the time the loop reads it for
-    the next model call — avoiding the race that would occur if collection
-    happened on the consumer side of the runtime queue.
+    the next model call.
     """
-    async for event in _coerce_events(source):
-        if isinstance(event, events_.MessageEnd):
-            message = event.message
-            for i, existing in enumerate(messages):
-                if existing.id == message.id:
-                    messages[i] = message
-                    break
-            else:
-                messages.append(message)
-        yield event
+    async for item in source:
+        if isinstance(item, types.Message):
+            _upsert_message(messages, item)
+        elif isinstance(item, events_.ToolCallResult):
+            _upsert_message(messages, item.message)
+            yield item
+        else:
+            yield item
 
 
 async def yield_from(source: AsyncIterable[StreamItem]) -> str:
@@ -267,9 +274,12 @@ async def yield_from(source: AsyncIterable[StreamItem]) -> str:
     """
     rt = runtime.get_runtime()
     last: types.Message | None = None
-    async for item in _coerce_events(source):
+    async for item in source:
+        if isinstance(item, types.Message):
+            last = item
+            continue
         await rt.put_event(item)
-        if isinstance(item, events_.MessageEnd):
+        if isinstance(item, events_.TerminalEvent):
             last = item.message
     return last.text if last else ""
 
@@ -296,9 +306,7 @@ class Agent:
         self._loop_fn = fn
         return fn
 
-    async def default_loop(
-        self, context: Context
-    ) -> AsyncGenerator[events_.AgentEvent]:
+    async def default_loop(self, context: Context) -> AsyncGenerator[StreamItem]:
         while True:
             stream = models.stream(
                 context.model,
@@ -308,13 +316,9 @@ class Agent:
             async for stream_event in stream:
                 yield stream_event
 
-            # Bridge: emit MessageStart/MessageEnd around the assistant message
-            # the model stream just produced, so _collect_messages and downstream
-            # consumers (AI-SDK outbound, label stamping) see the same boundary
-            # events they did under the previous adapter contract.
+            # Yield the assistant message for silent history collection.
             if stream.message is not None and stream.message.parts:
-                async for boundary in _message_events(stream.message):
-                    yield boundary
+                yield stream.message
 
             tool_calls = context.resolve(stream.tool_calls)
             if not tool_calls:
@@ -324,12 +328,7 @@ class Agent:
             async with asyncio.TaskGroup() as tg:
                 tasks = [tg.create_task(tc()) for tc in tool_calls]
 
-            # Yield one merged tool-result message — history auto-collects it.
-            # Left un-stamped: the tool result is the input of the *next* turn,
-            # so the next stream() call will stamp it with that turn's id.
-            tool_msg = builders.tool_message(*(t.result() for t in tasks))
-            async for boundary in _message_events(tool_msg):
-                yield boundary
+            yield tool_result(*(t.result() for t in tasks))
 
     async def run(
         self,
@@ -370,22 +369,14 @@ class Agent:
             )
             source = _collect_messages(loop_fn(context), context.messages)
             async for event in runtime.run(source):
-                if call.label is not None:
-                    event_message: types.Message | None = None
-                    if isinstance(event, events_.MessageEnd) or (
-                        isinstance(event, events_.MessageStart)
-                        and event.message is not None
-                    ):
-                        event_message = event.message
-
-                    if event_message is not None:
-                        event = event.model_copy(
-                            update={
-                                "message": event_message.model_copy(
-                                    update={"source_label": call.label}
-                                )
-                            }
-                        )
+                if call.label is not None and isinstance(event, events_.ToolCallResult):
+                    event = event.model_copy(
+                        update={
+                            "message": event.message.model_copy(
+                                update={"source_label": call.label}
+                            )
+                        }
+                    )
                 yield event
 
         # Activate middleware for this run (and everything it calls).

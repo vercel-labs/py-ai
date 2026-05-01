@@ -121,7 +121,7 @@ class AgentRunContext:
 
 # Event/message aliases for brevity in signatures.  ``_Event`` is intentionally
 # typed as ``Any`` so the agent-run chain accepts the wider ``AgentEvent``
-# union (which includes ``MessageStart``/``MessageEnd``) without a circular
+# union (which includes ``ToolCallResult``/``HookEvent``) without a circular
 # import from ``ai.agents``.
 _Event = Any
 _Message = messages_.Message

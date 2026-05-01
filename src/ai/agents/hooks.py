@@ -122,18 +122,13 @@ async def _hook_impl(call: middleware_.HookContext) -> pydantic.BaseModel:
     _live_hooks[label] = (future, hook_metadata, rt)
     rt.track_hook_label(label)
 
-    # Emit pending signal message.
-    await rt.put_message(
-        messages_.Message(
-            role="internal",
-            parts=[
-                messages_.HookPart(
-                    hook_id=label,
-                    hook_type=payload.__name__,
-                    status="pending",
-                    metadata=hook_metadata,
-                )
-            ],
+    # Emit pending signal.
+    await rt.put_hook(
+        messages_.HookPart(
+            hook_id=label,
+            hook_type=payload.__name__,
+            status="pending",
+            metadata=hook_metadata,
         )
     )
 
@@ -150,19 +145,14 @@ async def _hook_impl(call: middleware_.HookContext) -> pydantic.BaseModel:
     # Clean up live registry.
     _live_hooks.pop(label, None)
 
-    # Emit resolved internal message.
-    await rt.put_message(
-        messages_.Message(
-            role="internal",
-            parts=[
-                messages_.HookPart(
-                    hook_id=label,
-                    hook_type=payload.__name__,
-                    status="resolved",
-                    metadata=hook_metadata,
-                    resolution=resolution,
-                )
-            ],
+    # Emit resolved signal.
+    await rt.put_hook(
+        messages_.HookPart(
+            hook_id=label,
+            hook_type=payload.__name__,
+            status="resolved",
+            metadata=hook_metadata,
+            resolution=resolution,
         )
     )
 
@@ -229,18 +219,13 @@ async def cancel_hook(label: str, *, reason: str | None = None) -> None:
     future, hook_metadata, rt = _live_hooks.pop(label)
     future.cancel(reason)
 
-    # Emit cancelled internal message.
-    await rt.put_message(
-        messages_.Message(
-            role="internal",
-            parts=[
-                messages_.HookPart(
-                    hook_id=label,
-                    hook_type="",  # not available at cancel site
-                    status="cancelled",
-                    metadata=hook_metadata,
-                )
-            ],
+    # Emit cancelled signal.
+    await rt.put_hook(
+        messages_.HookPart(
+            hook_id=label,
+            hook_type="",  # not available at cancel site
+            status="cancelled",
+            metadata=hook_metadata,
         )
     )
 

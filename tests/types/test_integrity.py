@@ -444,8 +444,8 @@ def test_duplicate_tool_results_within_same_message_raises() -> None:
         messages.Message(
             role="tool",
             parts=[
-                builders.tool_result("tc-1", result="first"),
-                builders.tool_result("tc-1", result="second"),
+                builders.tool_result_part("tc-1", result="first"),
+                builders.tool_result_part("tc-1", result="second"),
             ],
         ),
     ]

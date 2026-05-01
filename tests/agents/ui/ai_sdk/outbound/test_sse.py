@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator
 from ai.agents import events as agent_events_
 from ai.agents.ui.ai_sdk import protocol, to_sse
 from ai.agents.ui.ai_sdk.outbound.sse import format_sse, serialize_part
-from ai.types import messages as messages_
+from ai.types import events as events_
 
 
 def test_serialize_part_camelcases_keys() -> None:
@@ -37,24 +37,19 @@ async def _gen(
 
 
 async def test_to_sse_emits_data_prefixed_lines() -> None:
-    msg = messages_.Message(
-        id="m1",
-        role="assistant",
-        turn_id="t1",
-        parts=[messages_.TextPart(text="hi")],
-    )
     lines = [
         line
         async for line in to_sse(
             _gen(
                 [
-                    agent_events_.MessageStart(message=msg),
-                    agent_events_.MessageEnd(message=msg),
+                    events_.TextStart(block_id="t1"),
+                    events_.TextDelta(block_id="t1", chunk="hi"),
+                    events_.TextEnd(block_id="t1"),
                 ]
             )
         )
     ]
     assert all(line.startswith("data: ") for line in lines)
-    # first line is the start part
+    # first line is the start part (lazy open)
     first = json.loads(lines[0].removeprefix("data: ").rstrip())
     assert first["type"] == "start"

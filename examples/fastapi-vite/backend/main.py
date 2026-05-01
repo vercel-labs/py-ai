@@ -35,21 +35,21 @@ async def health() -> dict[str, str]:
 class ChatRequest(pydantic.BaseModel):
     """Request body for the chat endpoint."""
 
-    messages: list[ai.ai_sdk_ui.UIMessage]
+    messages: list[ai.agents.ui.ai_sdk.UIMessage]
     session_id: str | None = None
 
 
 @app.post("/chat")
 async def chat(request: ChatRequest) -> fastapi.responses.StreamingResponse:
     """Handle chat requests and stream responses."""
-    messages = ai.ai_sdk_ui.to_messages(request.messages)
+    messages = ai.agents.ui.ai_sdk.to_messages(request.messages)
     result = agent_.chat_agent.run(agent_.MODEL, messages)
 
     async def stream_response() -> AsyncGenerator[str]:
-        async for chunk in ai.ai_sdk_ui.to_sse(result):
+        async for chunk in ai.agents.ui.ai_sdk.to_sse(result):
             yield chunk
 
     return fastapi.responses.StreamingResponse(
         stream_response(),
-        headers=ai.ai_sdk_ui.UI_MESSAGE_STREAM_HEADERS,
+        headers=ai.agents.ui.ai_sdk.UI_MESSAGE_STREAM_HEADERS,
     )

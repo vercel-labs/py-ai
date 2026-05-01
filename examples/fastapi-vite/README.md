@@ -16,7 +16,7 @@ to suspend execution whenever the LLM wants to call a tool. The flow is:
 
 1. LLM emits a tool call
 2. Backend calls `await ai.hook(...)` with `payload=ai.ToolApproval`
-3. The runtime emits a `MessageEnd` event containing an internal `HookPart`
+3. The runtime emits a `HookEvent` containing the `HookPart`
 4. The frontend renders Approve / Reject buttons via the
    `<Confirmation>` component (from AI Elements)
 5. When the user clicks a button, `addToolApprovalResponse()` patches

@@ -78,7 +78,7 @@ ai.yield_from(...)              forward nested agent / streaming tool output
 
 ```
 ai.system_message  ai.user_message  ai.assistant_message  ai.tool_message
-ai.tool_result     ai.file_part     ai.thinking
+ai.tool_result     ai.tool_result_part  ai.file_part  ai.thinking
 ```
 
 ### Middleware
@@ -109,15 +109,15 @@ async def custom(context: ai.Context):
         s = ai.stream(context.model, context.messages, tools=context.tools)
         async for event in s:
             yield event
+        if s.message is not None:
+            yield s.message
 
         tool_calls = context.resolve(s.tool_calls)
         if not tool_calls:
             return
 
         results = [await tc() for tc in tool_calls]
-        tool_msg = ai.tool_message(*results)
-        yield ai.MessageStart(message=tool_msg)
-        yield ai.MessageEnd(message=tool_msg)
+        yield ai.tool_result(*results)
 ```
 
 ## Examples

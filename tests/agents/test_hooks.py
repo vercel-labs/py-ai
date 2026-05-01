@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator
+from typing import Any
 
 import pydantic
 import pytest
@@ -38,11 +39,10 @@ async def test_resolve_live_future() -> None:
     mock_llm([[text_msg("OK")]])
 
     async for event in my_agent.run(MOCK_MODEL, [ai.user_message("go")]):
-        if not isinstance(event, agent_events_.MessageEnd):
+        if not isinstance(event, agent_events_.HookEvent):
             continue
-        msg = event.message
-        # When we see the pending hook message, resolve it.
-        if any(isinstance(p, ai.HookPart) and p.status == "pending" for p in msg.parts):
+        # When we see the pending hook, resolve it.
+        if event.hook.status == "pending":
             ai.resolve_hook("confirm_1", {"approved": True, "reason": "looks good"})
 
     assert resolved_value is not None
@@ -71,10 +71,9 @@ async def test_cancel_live_hook() -> None:
     mock_llm([[text_msg("OK")]])
 
     async for event in my_agent.run(MOCK_MODEL, [ai.user_message("go")]):
-        if not isinstance(event, agent_events_.MessageEnd):
+        if not isinstance(event, agent_events_.HookEvent):
             continue
-        msg = event.message
-        if any(isinstance(p, ai.HookPart) and p.status == "pending" for p in msg.parts):
+        if event.hook.status == "pending":
             await ai.cancel_hook("cancel_me", reason="denied")
 
     assert was_cancelled
@@ -143,22 +142,17 @@ async def test_resolved_hook_emits_message() -> None:
 
     mock_llm([[text_msg("OK")]])
 
-    msgs: list[ai.Message] = []
+    hooks: list[ai.HookPart[Any]] = []
     async for event in my_agent.run(MOCK_MODEL, [ai.user_message("go")]):
-        if not isinstance(event, agent_events_.MessageEnd):
+        if not isinstance(event, agent_events_.HookEvent):
             continue
-        msg = event.message
-        msgs.append(msg)
-        if any(isinstance(p, ai.HookPart) and p.status == "pending" for p in msg.parts):
+        hooks.append(event.hook)
+        if event.hook.status == "pending":
             ai.resolve_hook("emit_test", {"approved": False})
 
-    hook_msgs = [
-        m
-        for m in msgs
-        if any(isinstance(p, ai.HookPart) and p.status == "resolved" for p in m.parts)
-    ]
-    assert len(hook_msgs) == 1
-    assert hook_msgs[0].parts[0].resolution == {"approved": False}  # type: ignore[union-attr]
+    resolved = [h for h in hooks if h.status == "resolved"]
+    assert len(resolved) == 1
+    assert resolved[0].resolution == {"approved": False}
 
 
 # -- Hook metadata surfaces in pending message -----------------------------
@@ -179,11 +173,10 @@ async def test_hook_metadata_in_pending() -> None:
         )
 
     mock_llm([[text_msg("OK")]])
-    msgs: list[ai.Message] = []
+    hooks: list[ai.HookPart[Any]] = []
     async for event in my_agent.run(MOCK_MODEL, [ai.user_message("go")]):
-        if isinstance(event, agent_events_.MessageEnd):
-            msgs.append(event.message)
+        if isinstance(event, agent_events_.HookEvent):
+            hooks.append(event.hook)
 
-    hook_msgs = [m for m in msgs if any(isinstance(p, ai.HookPart) for p in m.parts)]
-    assert len(hook_msgs) >= 1
-    assert hook_msgs[0].parts[0].metadata == {"tool": "rm -rf", "path": "/"}  # type: ignore[union-attr]
+    assert len(hooks) >= 1
+    assert hooks[0].metadata == {"tool": "rm -rf", "path": "/"}

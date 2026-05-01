@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator, AsyncIterable
 
-from ....events import AgentEvent, MessageEnd, MessageStart
+from ....events import AgentEvent, HookEvent, ToolCallResult
 from .. import protocol
 from ._state import _StreamState
 
@@ -14,18 +14,18 @@ async def to_stream(
 ) -> AsyncGenerator[protocol.UIMessageStreamPart]:
     """Walk ``events`` once, emitting AI SDK UI stream parts.
 
-    Streaming text/reasoning/tool-input deltas come from public events.
-    Terminal tool results, approvals, and files come from
-    ``MessageEnd.message``.
+    Streaming text/reasoning/tool-input deltas come from model events.
+    Tool results come from ``ToolCallResult``.  Hook signals come from
+    ``HookEvent``.
     """
     state = _StreamState()
 
     async for event in events:
-        if isinstance(event, MessageStart):
-            for part in state.on_message_start(event.message):
+        if isinstance(event, ToolCallResult):
+            for part in state.on_tool_result(event):
                 yield part
-        elif isinstance(event, MessageEnd):
-            for part in state.on_terminal(event.message):
+        elif isinstance(event, HookEvent):
+            for part in state.on_hook(event):
                 yield part
         else:
             for part in state.on_event(event):
