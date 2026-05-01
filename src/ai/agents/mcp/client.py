@@ -5,7 +5,7 @@ import contextlib
 import contextvars
 import dataclasses
 import json
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -38,6 +38,20 @@ _pool: contextvars.ContextVar[dict[str, _Connection] | None] = contextvars.Conte
 )
 
 _pool_lock = asyncio.Lock()
+
+
+@contextlib.asynccontextmanager
+async def ensure_connection_pool() -> AsyncIterator[dict[str, _Connection]]:
+    pool = orig_pool = _pool.get()
+    if pool is None:
+        pool = {}
+        _pool.set(pool)
+    try:
+        yield pool
+    finally:
+        if orig_pool is None:
+            await close_connections()
+        _pool.set(orig_pool)
 
 
 async def _get_or_create_connection(
@@ -213,8 +227,9 @@ async def get_http_tools(
         http_client = _httpx.AsyncClient(headers=headers) if headers else None
         return _mcp_http.streamable_http_client(url=url, http_client=http_client)
 
-    client = await _get_or_create_connection(connection_key, transport_factory)
-    result = await client.list_tools()
+    async with ensure_connection_pool():
+        client = await _get_or_create_connection(connection_key, transport_factory)
+        result = await client.list_tools()
 
     return [
         _mcp_tool_to_native(mcp_tool, connection_key, transport_factory, tool_prefix)
@@ -264,9 +279,8 @@ async def close_connections() -> None:
         if not pool:
             return
 
-        async with asyncio.TaskGroup() as tg:
-            for conn in pool.values():
-                tg.create_task(_close_connection_safely(conn))
+        for conn in pool.values():
+            await _close_connection_safely(conn)
 
         pool.clear()
 

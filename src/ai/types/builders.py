@@ -7,7 +7,10 @@ constructing Part lists. Each ``*_message`` function returns a single
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..agents import events as events_
 
 from .messages import (
     FilePart,
@@ -112,7 +115,7 @@ def _tool_results_from_messages(messages: list[Message]) -> list[ToolResultPart]
 
 
 def tool_message(
-    *items: Message | ToolResultPart | list[Message],
+    *items: Message | ToolResultPart | events_.ToolCallResult | list[Message],
     tool_call_id: str | None = None,
     result: Any = None,
     tool_name: str = "",
@@ -165,10 +168,14 @@ def tool_message(
         elif isinstance(item, ToolResultPart):
             saw_result_part = True
             result_parts.append(item)
+        elif hasattr(item, "message") and isinstance(item.message, Message):
+            # ToolCallResult — can't isinstance-check due to circular import
+            saw_message = True
+            flattened_messages.append(item.message)
         else:
             raise TypeError(
                 "tool_message() only accepts tool messages, lists of tool "
-                "messages, or ToolResultPart values"
+                "messages, ToolResultPart, or ToolCallResult values"
             )
 
     if saw_message and saw_result_part:

@@ -41,6 +41,9 @@ TEXT_SAMPLES = [
     Sample("middleware_simple.py"),
     Sample("multimodal_input.py"),
     Sample("check_connection.py"),
+    Sample("agent_hooks.py", stdin="y\n"),
+    Sample("agent_hooks_serverless.py"),
+    Sample("mcp_tools.py"),
 ]
 
 IMAGE_SAMPLES = [
@@ -53,16 +56,7 @@ VIDEO_SAMPLES = [
     Sample("video_generation.py"),
 ]
 
-# Broken!
-HOOKS_SAMPLES = [
-    Sample("agent_hooks.py", stdin="y\n"),
-    Sample("agent_hooks_serverless.py"),
-]
-
-# Broken!
-MCP_SAMPLES = [
-    Sample("mcp_tools.py"),
-]
+BROKEN_SAMPLES = []
 
 
 def _sample_cmd(sample: Sample) -> list[str]:
@@ -116,15 +110,14 @@ def main() -> None:
     parser.add_argument("--text", action="store_true", help="include text samples")
     parser.add_argument("--image", action="store_true", help="include image samples")
     parser.add_argument("--video", action="store_true", help="include video samples")
-    parser.add_argument("--hooks", action="store_true", help="include hook samples")
-    parser.add_argument("--mcp", action="store_true", help="include MCP samples")
+    parser.add_argument("--broken", action="store_true", help="include broken samples")
     parser.add_argument("--all", action="store_true", help="run all samples")
     parser.add_argument(
         "--parallel", action="store_true", help="run samples in parallel"
     )
     args = parser.parse_args()
 
-    has_category = args.text or args.image or args.video or args.hooks or args.mcp
+    has_category = args.text or args.image or args.video or args.broken
 
     samples: list[Sample] = []
     if args.text or args.all or not has_category:
@@ -133,10 +126,8 @@ def main() -> None:
         samples.extend(IMAGE_SAMPLES)
     if args.video or args.all:
         samples.extend(VIDEO_SAMPLES)
-    if args.hooks or args.all:
-        samples.extend(HOOKS_SAMPLES)
-    if args.mcp or args.all:
-        samples.extend(MCP_SAMPLES)
+    if args.broken or args.all:
+        samples.extend(BROKEN_SAMPLES)
 
     results: list[tuple[str, bool]] = []
 
