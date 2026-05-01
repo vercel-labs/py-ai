@@ -4,6 +4,7 @@ Defines the callable :data:`openai` provider, which satisfies the
 :class:`~ai.models.core.proto.Provider` protocol."""
 
 import os
+from types import ModuleType
 from typing import Any
 
 from .. import core
@@ -38,6 +39,19 @@ class _OpenAI:
     @property
     def params_type(self) -> type[OpenAIChatParams]:
         return OpenAIChatParams
+
+    @property
+    def tools(self) -> ModuleType:
+        """The provider's built-in tool factories.
+
+        Convenience accessor: ``openai.tools.web_search(...)``. The
+        chat-completions adapter currently raises if a built-in tool is
+        passed; route via the AI Gateway provider until a Responses
+        adapter ships.
+        """
+        from . import tools as tools_module
+
+        return tools_module
 
     def client(self) -> core.client.Client:
         """Create a :class:`Client` from env-var credentials."""
