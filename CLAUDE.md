@@ -4,8 +4,8 @@
 
 1. use `uv` to manage the project; `uv add` and `uv remove` to manage dependencies, `uv run` to run
 2. after making changes run format, lint, and typecheck like ci:
-    - uv run ruff format --check src tests
-    - uv run ruff check src tests
+    - uv run ruff format --check src tests examples
+    - uv run ruff check src tests examples
     - uv run mypy src tests
     - uv run pyright src tests
 3. imports:

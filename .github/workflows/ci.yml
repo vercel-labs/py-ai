@@ -18,9 +18,11 @@ jobs:
 
       - run: uv sync
 
-      - run: uv run ruff format --check src tests
-      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests examples
+      - run: uv run ruff check src tests examples
       - run: uv run mypy src tests
       - run: uv run pyright src tests
 
       - run: uv run pytest
+
+      - run: uv run examples/check-examples.py

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "--fix" ]]; then
+    fmt_args=()
+    check_args=(--fix)
+else
+    fmt_args=(--check)
+    check_args=()
+fi
+
+echo "=== ruff format ==="
+uv run ruff format "${fmt_args[@]}" src tests examples
+
+echo "=== ruff check ==="
+uv run ruff check "${check_args[@]}" src tests examples
+
+echo "=== mypy ==="
+uv run mypy src tests
+
+echo "=== pyright ==="
+uv run pyright src tests
+
+echo "=== pytest ==="
+uv run pytest
