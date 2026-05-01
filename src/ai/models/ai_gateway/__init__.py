@@ -12,7 +12,7 @@ not pull in ``httpx`` and other I/O libraries at import time.  This matters
 for sandboxed runtimes (e.g. Temporal workflow workers).
 """
 
-from . import errors
+from . import errors, tools
 from .params import (
     GatewayAnthropicParams,
     GatewayOpenAIChatParams,
@@ -30,6 +30,7 @@ __all__ = [
     "GatewayStreamParams",
     "ai_gateway",
     "errors",
+    "tools",
 ]
 
 
