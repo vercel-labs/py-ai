@@ -13,6 +13,10 @@ within that run — including nested model calls, tool calls, and hooks.
 
 import asyncio
 import time
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from typing import Any
+
+import pydantic
 
 import ai
 
@@ -20,7 +24,11 @@ import ai
 class PrintMiddleware(ai.Middleware):
     """Logs every execution surface to stdout."""
 
-    async def wrap_agent_run(self, call, next):
+    async def wrap_agent_run(
+        self,
+        call: ai.middleware.AgentRunContext,
+        next: Callable[[ai.middleware.AgentRunContext], AsyncGenerator[Any]],
+    ) -> AsyncGenerator[Any]:
         label = call.label or "(default)"
         print(f">>> [run] agent starting  label={label}  tools={len(call.tools)}")
         t0 = time.perf_counter()
@@ -31,7 +39,11 @@ class PrintMiddleware(ai.Middleware):
         elapsed = time.perf_counter() - t0
         print(f"<<< [run] agent finished  label={label}  {elapsed:.2f}s")
 
-    async def wrap_model(self, call, next):
+    async def wrap_model(
+        self,
+        call: ai.middleware.ModelContext,
+        next: Callable[[ai.middleware.ModelContext], Awaitable[Any]],
+    ) -> Any:
         print(f"\n>>> [model] calling {call.model.id}")
         print(f"    messages: {len(call.messages)}")
         if call.tools:
@@ -39,12 +51,14 @@ class PrintMiddleware(ai.Middleware):
 
         result = await next(call)
 
-        # The result is a StreamResult — async-iterable of Event objects.
-        # We return it as-is; the consumer iterates it normally.
         print("<<< [model] stream started")
         return result
 
-    async def wrap_generate(self, call, next):
+    async def wrap_generate(
+        self,
+        call: ai.middleware.GenerateContext,
+        next: Callable[[ai.middleware.GenerateContext], Awaitable[ai.Message]],
+    ) -> ai.Message:
         print(f"\n>>> [generate] calling {call.model.id}")
         print(f"    messages: {len(call.messages)}")
 
@@ -53,20 +67,27 @@ class PrintMiddleware(ai.Middleware):
         print("<<< [generate] done")
         return result
 
-    async def wrap_tool(self, call, next):
+    async def wrap_tool(
+        self,
+        call: ai.middleware.ToolContext,
+        next: Callable[[ai.middleware.ToolContext], Awaitable[ai.ToolCallResult]],
+    ) -> ai.ToolCallResult:
         print(f"\n>>> [tool] {call.tool_name}({call.kwargs})")
 
         result = await next(call)
 
-        # result is a tool-result Message.
-        tr = result.tool_results[0] if result.tool_results else None
+        tr = result.results[0] if result.results else None
         if tr and not tr.is_error:
             print(f"<<< [tool] {call.tool_name} -> {tr.result}")
         elif tr:
             print(f"<<< [tool] {call.tool_name} ERROR: {tr.result}")
         return result
 
-    async def wrap_hook(self, call, next):
+    async def wrap_hook(
+        self,
+        call: ai.middleware.HookContext,
+        next: Callable[[ai.middleware.HookContext], Awaitable[pydantic.BaseModel]],
+    ) -> pydantic.BaseModel:
         print(f"\n>>> [hook] {call.label}  payload={call.payload.__name__}")
 
         result = await next(call)

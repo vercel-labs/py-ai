@@ -88,12 +88,12 @@ async def test_tool_call_returns_tool_message() -> None:
 
     assert tc.fn is double.fn
     assert tc.kwargs == {"x": 5}
-    assert result.role == "tool"
-    assert len(result.tool_results) == 1
-    assert result.tool_results[0].tool_call_id == "tc-1"
-    assert result.tool_results[0].tool_name == "double"
-    assert result.tool_results[0].result == 10
-    assert not result.tool_results[0].is_error
+    assert result.message.role == "tool"
+    assert len(result.results) == 1
+    assert result.results[0].tool_call_id == "tc-1"
+    assert result.results[0].tool_name == "double"
+    assert result.results[0].result == 10
+    assert not result.results[0].is_error
 
 
 async def test_tool_call_catches_errors() -> None:
@@ -110,8 +110,8 @@ async def test_tool_call_catches_errors() -> None:
     tc = ai.ToolCall(part=part, tool=fail)
     result = await tc()
 
-    assert result.tool_results[0].is_error
-    assert "boom" in str(result.tool_results[0].result)
+    assert result.results[0].is_error
+    assert "boom" in str(result.results[0].result)
 
 
 async def test_tool_call_allows_kwarg_overrides() -> None:
@@ -129,7 +129,7 @@ async def test_tool_call_allows_kwarg_overrides() -> None:
 
     result = await tc(x=7)
 
-    assert result.tool_results[0].result == 14
+    assert result.results[0].result == 14
 
 
 async def test_tool_call_override_validation_failure() -> None:
@@ -164,7 +164,7 @@ async def test_tool_call_malformed_args_become_error_message() -> None:
 
     result = await tc()
 
-    assert result.tool_results[0].is_error
+    assert result.results[0].is_error
 
 
 # -- Helpers ---------------------------------------------------------------

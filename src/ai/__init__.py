@@ -1,15 +1,17 @@
-from . import middleware, models
+from . import middleware, models, util
 from .agents import (
     TOOL_APPROVAL_HOOK_TYPE,
     Agent,
     AgentEvent,
     Context,
     HookEvent,
+    StreamItem,
     TerminalEvent,
     Tool,
     ToolApproval,
     ToolCall,
     ToolCallResult,
+    ToolRunner,
     agent,
     cancel_hook,
     hook,
@@ -141,12 +143,14 @@ __all__ = [
     # Agents — primary API
     "Agent",
     "AgentEvent",
+    "StreamItem",
     "agent",
     "Context",
     # Agents — tools
     "Tool",
     "ToolCall",
     "ToolCallResult",
+    "ToolRunner",
     "tool",
     # Agents — composition
     "yield_from",
@@ -164,4 +168,5 @@ __all__ = [
     "middleware",
     # Submodules
     "mcp",
+    "util",
 ]

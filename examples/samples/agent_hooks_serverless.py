@@ -36,11 +36,11 @@ async def main() -> None:
     my_agent = ai.agent(tools=[delete_file])
 
     @my_agent.loop
-    async def with_confirmation(context: ai.Context) -> AsyncGenerator[ai.Event]:
+    async def with_confirmation(
+        context: ai.Context,
+    ) -> AsyncGenerator[ai.StreamItem]:
         while True:
-            s = ai.models.stream(
-                context.model, context.messages, tools=context.tools
-            )
+            s = ai.models.stream(context.model, context.messages, tools=context.tools)
             async for event in s:
                 yield event
             if s.message is not None:
@@ -50,7 +50,7 @@ async def main() -> None:
             if not tool_calls:
                 return
 
-            results = []
+            results: list[ai.ToolCallResult] = []
             for tc in tool_calls:
                 try:
                     confirmation = await ai.hook(
@@ -67,7 +67,7 @@ async def main() -> None:
                     results.append(await tc())
                 else:
                     results.append(
-                        ai.tool_message(
+                        ai.tool_result(
                             tool_call_id=tc.id,
                             tool_name=tc.name,
                             result=f"Rejected: {confirmation.reason}",
@@ -93,8 +93,7 @@ async def main() -> None:
             hook_part = event.hook
             pending_hook_labels.append(hook_part.hook_id)
             print(
-                f"  Hook pending: {hook_part.hook_id}"
-                f" (metadata={hook_part.metadata})"
+                f"  Hook pending: {hook_part.hook_id} (metadata={hook_part.metadata})"
             )
 
     print("\n  Run interrupted; approval will be pre-registered for re-entry.\n")

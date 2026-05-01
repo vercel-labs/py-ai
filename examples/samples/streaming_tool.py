@@ -12,7 +12,7 @@ import ai
 
 
 @ai.tool  # type: ignore[arg-type]  # async generator tools are supported at runtime
-async def talk_to_mothership(question: str) -> AsyncGenerator[ai.Event]:
+async def talk_to_mothership(question: str) -> AsyncGenerator[ai.StreamItem]:
     """Ask the mothership a question. Streams progress back to the caller."""
     for step in ["Connecting...", "Transmitting...", "Awaiting response..."]:
         yield ai.TextStart(block_id=f"progress-{step}")

@@ -21,7 +21,7 @@ async def get_facts(topic: str) -> str:
 # This tool is an async generator — it streams intermediate messages
 # through the runtime sink, then returns the final result.
 @ai.tool  # type: ignore[arg-type]  # async generator tools are supported at runtime
-async def research(topic: str) -> AsyncGenerator[ai.Event]:
+async def research(topic: str) -> AsyncGenerator[ai.AgentEvent]:
     """Research a topic in depth using a sub-agent."""
     researcher = ai.agent(tools=[get_facts])
 

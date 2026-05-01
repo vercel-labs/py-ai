@@ -28,7 +28,7 @@ async def _check(model: ai.Model) -> None:
 
 async def _list_models(name: str, provider: object) -> None:
     try:
-        ids: list[str] = await provider.list()  # type: ignore[union-attr]
+        ids: list[str] = await provider.list()  # type: ignore[attr-defined]
         print(f"  {name}: {len(ids)} models")
         for mid in ids:
             print(f"    - {mid}")

@@ -1,5 +1,16 @@
 from . import mcp, ui
-from .agent import Agent, Context, Tool, ToolCall, agent, tool, tool_result, yield_from
+from .agent import (
+    Agent,
+    Context,
+    StreamItem,
+    Tool,
+    ToolCall,
+    ToolRunner,
+    agent,
+    tool,
+    tool_result,
+    yield_from,
+)
 from .events import AgentEvent, HookEvent, TerminalEvent, ToolCallResult
 from .hooks import (
     TOOL_APPROVAL_HOOK_TYPE,
@@ -12,11 +23,13 @@ from .hooks import (
 __all__ = [
     "Agent",
     "AgentEvent",
+    "StreamItem",
     "Context",
     "HookEvent",
     "Tool",
     "ToolApproval",
     "ToolCall",
+    "ToolRunner",
     "TerminalEvent",
     "ToolCallResult",
     "TOOL_APPROVAL_HOOK_TYPE",

@@ -118,7 +118,7 @@ weather_agent = ai.agent(tools=[get_weather, get_population])
 
 
 @weather_agent.loop
-async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.Event]:
+async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.StreamItem]:
     tool_schemas = [
         {"name": t.name, "description": t.description, "param_schema": t.param_schema}
         for t in context.tools
