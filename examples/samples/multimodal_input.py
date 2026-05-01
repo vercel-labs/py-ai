@@ -7,8 +7,7 @@ import ai
 
 model = ai.ai_gateway("anthropic/claude-sonnet-4")
 
-# Load a local image file (replace with your own path).
-image_path = pathlib.Path("sample_image.jpg")
+image_path = pathlib.Path(__file__).parent / "sample_image.jpg"
 image_data = image_path.read_bytes()
 
 messages = [
