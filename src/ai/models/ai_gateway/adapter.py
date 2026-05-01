@@ -14,15 +14,12 @@ import pydantic
 from ... import types
 from ...types import tools as tools_
 from .. import core
+from ..anthropic.params import AnthropicParams
+from ..anthropic.tools import _AnthropicBuiltin
+from ..openai.params import OpenAIChatParams, OpenAIResponsesParams
+from ..openai.tools import _OpenAIBuiltin
 from . import errors, sdk
-from . import tools as gateway_tools
-from .params import (
-    GATEWAY_STREAM_PARAMS_TYPES,
-    GatewayAnthropicParams,
-    GatewayOpenAIChatParams,
-    GatewayOpenAIResponsesParams,
-    GatewayParams,
-)
+from .params import GATEWAY_STREAM_PARAMS_TYPES, GatewayParams
 
 # ---------------------------------------------------------------------------
 # Shared request helpers
@@ -195,14 +192,23 @@ async def _messages_to_prompt(
 
 def _tool_to_v3(tool: types.ToolLike) -> dict[str, Any]:
     """Convert a tool-like object to the v3 wire format."""
-    if isinstance(tool, gateway_tools._GatewayBuiltin):
-        args = tool.model_dump(mode="json", by_alias=True, exclude_none=True)
-        return {"type": "provider", "id": tool.gateway_id, "args": args}
+    if isinstance(tool, _AnthropicBuiltin):
+        return {
+            "type": "provider",
+            "id": f"anthropic.{tool.wire_type}",
+            "args": tool.model_dump(mode="json", by_alias=True, exclude_none=True),
+        }
+    if isinstance(tool, _OpenAIBuiltin):
+        return {
+            "type": "provider",
+            "id": f"openai.{tool.wire_type}",
+            "args": tool.model_dump(mode="json", by_alias=True, exclude_none=True),
+        }
     if isinstance(tool, tools_.BuiltinTool):
         raise TypeError(
-            f"AI Gateway received a native provider built-in tool "
-            f"({type(tool).__name__}); use ai_gateway.tools.* helpers "
-            f"(e.g. ai_gateway.tools.anthropic_web_search) instead."
+            f"AI Gateway does not support built-in tool "
+            f"{type(tool).__name__}; use anthropic.tools.* or "
+            f"openai.tools.* helpers."
         )
     return {
         "type": "function",
@@ -272,8 +278,8 @@ def _normalize_gateway_params(value: Any) -> list[pydantic.BaseModel]:
     for item in raw_items:
         if not isinstance(item, GATEWAY_STREAM_PARAMS_TYPES):
             raise TypeError(
-                "ai-gateway streams accept GatewayParams, GatewayOpenAIChatParams, "
-                "GatewayOpenAIResponsesParams, or GatewayAnthropicParams"
+                "ai-gateway streams accept GatewayParams, OpenAIChatParams, "
+                "OpenAIResponsesParams, or AnthropicParams"
             )
         result.append(item)
     return result
@@ -283,9 +289,9 @@ def _gateway_provider_options_key(param: pydantic.BaseModel) -> str:
     """Return the providerOptions bucket name for one Gateway param wrapper."""
     if isinstance(param, GatewayParams):
         return "gateway"
-    if isinstance(param, GatewayOpenAIChatParams | GatewayOpenAIResponsesParams):
+    if isinstance(param, OpenAIChatParams | OpenAIResponsesParams):
         return "openai"
-    if isinstance(param, GatewayAnthropicParams):
+    if isinstance(param, AnthropicParams):
         return "anthropic"
     raise TypeError(f"unsupported ai-gateway params type {type(param).__name__}")
 

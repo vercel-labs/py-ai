@@ -25,7 +25,9 @@ import ai
 from ai import models
 from ai.models.ai_gateway import adapter, ai_gateway, errors
 from ai.models.ai_gateway import params as params_
+from ai.models.anthropic import AnthropicParams
 from ai.models.core import model as model_
+from ai.models.openai import OpenAIChatParams, OpenAIResponsesParams
 from ai.types import events, messages
 
 from .conftest import mock_client, sse, user_msg
@@ -340,7 +342,7 @@ class TestRequest:
                 extra_body={"futureGatewayField": True},
                 extra_headers={"x-gateway-feature": "enabled"},
             ),
-            params_.GatewayAnthropicParams(
+            AnthropicParams(
                 speed="fast",
                 extra_body={"futureAnthropicField": True},
                 extra_headers={"x-forwarded-provider-feature": "enabled"},
@@ -375,8 +377,8 @@ class TestRequest:
         client = mock_client(httpx.MockTransport(handler))
         model = ai_gateway("openai/gpt-5.4", client=client)
         request_params: list[params_.GatewayStreamParams] = [
-            params_.GatewayOpenAIChatParams(service_tier="auto"),
-            params_.GatewayOpenAIResponsesParams(previous_response_id="resp_123"),
+            OpenAIChatParams(service_tier="auto"),
+            OpenAIResponsesParams(previous_response_id="resp_123"),
         ]
         stream = models.stream(
             model,

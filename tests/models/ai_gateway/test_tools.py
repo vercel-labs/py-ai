@@ -1,11 +1,9 @@
 """Tests for the AI Gateway built-in tool surface.
 
-The gateway adapter must:
-
-1. Accept ``ai_gateway.tools.*`` instances and serialize them as v3
-   ``provider`` blocks with the registered ``gateway_id``.
-2. Reject native provider built-ins (``anthropic.tools.*``,
-   ``openai.tools.*``) with a clear redirect message.
+The gateway adapter accepts native ``anthropic.tools.*`` and
+``openai.tools.*`` instances and serializes them as v3 ``provider``
+blocks with id ``f"<provider>.<wire_type>"``. Foreign ``BuiltinTool``
+subclasses are rejected with a clear redirect message.
 """
 
 from __future__ import annotations
@@ -16,10 +14,11 @@ from typing import Any
 import httpx
 import pytest
 
-from ai import models
 from ai.models import anthropic, openai
 from ai.models.ai_gateway import adapter, ai_gateway
-from ai.models.ai_gateway import tools as gateway_tools
+from ai.models.anthropic.tools import _AnthropicBuiltin
+from ai.models.openai.tools import _OpenAIBuiltin
+from ai.types import tools as tools_
 
 from .conftest import mock_client, sse, user_msg
 
@@ -46,7 +45,7 @@ class TestGatewayBuiltins:
             client,
             _TEST_MODEL,
             [user_msg("hi")],
-            tools=[gateway_tools.anthropic_web_search(max_uses=3)],
+            tools=[anthropic.tools.web_search(max_uses=3)],
         ):
             pass
 
@@ -67,7 +66,7 @@ class TestGatewayBuiltins:
             _TEST_MODEL,
             [user_msg("hi")],
             tools=[
-                gateway_tools.openai_mcp(
+                openai.tools.mcp(
                     server_label="my-server",
                     server_url="https://mcp.example.com",
                 ),
@@ -86,41 +85,38 @@ class TestGatewayBuiltins:
             }
         ]
 
-    async def test_all_gateway_ids_are_registered(self) -> None:
-        """Every concrete _GatewayBuiltin subclass declares a non-empty id."""
-        seen: set[str] = set()
-        for cls in gateway_tools._GatewayBuiltin.__subclasses__():
-            gateway_id = cls.gateway_id
-            assert gateway_id, f"{cls.__name__} missing gateway_id"
-            assert gateway_id not in seen, f"duplicate gateway_id {gateway_id!r}"
-            seen.add(gateway_id)
+    async def test_native_builtins_have_wire_types(self) -> None:
+        """Every concrete native built-in declares a non-empty wire_type
+        and the gateway-derived id is unique per provider."""
+        for base, prefix in (
+            (_AnthropicBuiltin, "anthropic"),
+            (_OpenAIBuiltin, "openai"),
+        ):
+            seen: set[str] = set()
+            for cls in base.__subclasses__():
+                wire_type = cls.wire_type
+                assert wire_type, f"{cls.__name__} missing wire_type"
+                gateway_id = f"{prefix}.{wire_type}"
+                assert gateway_id not in seen, f"duplicate id {gateway_id!r}"
+                seen.add(gateway_id)
 
-    async def test_native_anthropic_tool_rejected(self) -> None:
+    async def test_foreign_builtin_tool_rejected(self) -> None:
+        """A BuiltinTool subclass not in either provider hierarchy raises."""
+
+        class CustomBuiltin(tools_.BuiltinTool):
+            pass
+
         def handler(req: httpx.Request) -> httpx.Response:
             raise AssertionError("request should not be sent")
 
         client = mock_client(httpx.MockTransport(handler))
-        stream = models.stream(
-            ai_gateway("anthropic/claude-sonnet-4", client=client),
+        stream = adapter.stream(
+            client,
+            _TEST_MODEL,
             [user_msg("hi")],
-            tools=[anthropic.tools.web_search(max_uses=1)],
+            tools=[CustomBuiltin()],
         )
 
-        with pytest.raises(TypeError, match="ai_gateway.tools"):
-            async for _ in stream:
-                pass
-
-    async def test_native_openai_tool_rejected(self) -> None:
-        def handler(req: httpx.Request) -> httpx.Response:
-            raise AssertionError("request should not be sent")
-
-        client = mock_client(httpx.MockTransport(handler))
-        stream = models.stream(
-            ai_gateway("openai/gpt-5.4", client=client),
-            [user_msg("hi")],
-            tools=[openai.tools.web_search()],
-        )
-
-        with pytest.raises(TypeError, match="ai_gateway.tools"):
+        with pytest.raises(TypeError, match="anthropic.tools|openai.tools"):
             async for _ in stream:
                 pass
