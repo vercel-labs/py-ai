@@ -25,7 +25,7 @@ chat_agent = ai.agent(tools=TOOLS)
 
 
 @chat_agent.loop
-async def graph(context: ai.Context) -> AsyncGenerator[ai.StreamItem]:
+async def graph(context: ai.Context) -> AsyncGenerator[ai.AgentEvent]:
     """Agent graph with human-in-the-loop tool approval.
 
     Loops: stream LLM -> request approval -> execute tools -> repeat.
@@ -37,8 +37,7 @@ async def graph(context: ai.Context) -> AsyncGenerator[ai.StreamItem]:
         s = ai.models.stream(context.model, context.messages, tools=context.tools)
         async for event in s:
             yield event
-        if s.message is not None:
-            yield s.message
+        context.add(s.message)
 
         tool_calls = context.resolve(s.tool_calls)
         if not tool_calls:

@@ -46,7 +46,7 @@ async def main() -> None:
     @my_agent.loop
     async def with_confirmation(
         context: ai.Context,
-    ) -> AsyncGenerator[ai.StreamItem]:
+    ) -> AsyncGenerator[ai.AgentEvent]:
         while True:
             # HACK: If there isn't anything to do, it's because we hit
             # a hook and bailed out. Skip running the stream in that
