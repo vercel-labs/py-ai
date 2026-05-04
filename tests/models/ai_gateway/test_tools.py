@@ -1,9 +1,9 @@
 """Tests for the AI Gateway built-in tool surface.
 
-The gateway adapter accepts native ``anthropic.tools.*`` and
-``openai.tools.*`` instances and serializes them as v3 ``provider``
-blocks with id ``f"<provider>.<wire_type>"``. Foreign ``BuiltinTool``
-subclasses are rejected with a clear redirect message.
+The gateway adapter accepts native ``anthropic.tools.*``, ``openai.tools.*``,
+and ``ai_gateway.tools.*`` instances and serializes them as v3 ``provider``
+blocks of the shape ``{type, id, name, args}`` with camelCase ``args`` keys.
+Foreign ``BuiltinTool`` subclasses are rejected with a clear redirect message.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 import pytest
 
+from ai.models import ai_gateway as ai_gateway_pkg
 from ai.models import anthropic, openai
 from ai.models.ai_gateway import adapter, ai_gateway
 from ai.models.anthropic.tools import _AnthropicBuiltin
@@ -53,7 +54,8 @@ class TestGatewayBuiltins:
             {
                 "type": "provider",
                 "id": "anthropic.web_search_20260209",
-                "args": {"max_uses": 3},
+                "name": "web_search",
+                "args": {"maxUses": 3},
             }
         ]
 
@@ -78,9 +80,68 @@ class TestGatewayBuiltins:
             {
                 "type": "provider",
                 "id": "openai.mcp",
+                "name": "mcp",
                 "args": {
-                    "server_label": "my-server",
-                    "server_url": "https://mcp.example.com",
+                    "serverLabel": "my-server",
+                    "serverUrl": "https://mcp.example.com",
+                },
+            }
+        ]
+
+    async def test_gateway_perplexity_search_serializes(self) -> None:
+        captured: dict[str, Any] = {}
+        client = mock_client(httpx.MockTransport(_capture_body_handler(captured)))
+
+        async for _ in adapter.stream(
+            client,
+            _TEST_MODEL,
+            [user_msg("hi")],
+            tools=[
+                ai_gateway_pkg.tools.perplexity_search(
+                    max_results=5,
+                    search_domain_filter=["nature.com"],
+                ),
+            ],
+        ):
+            pass
+
+        assert captured["tools"] == [
+            {
+                "type": "provider",
+                "id": "gateway.perplexity_search",
+                "name": "perplexity_search",
+                "args": {
+                    "maxResults": 5,
+                    "searchDomainFilter": ["nature.com"],
+                },
+            }
+        ]
+
+    async def test_gateway_parallel_search_serializes(self) -> None:
+        captured: dict[str, Any] = {}
+        client = mock_client(httpx.MockTransport(_capture_body_handler(captured)))
+
+        async for _ in adapter.stream(
+            client,
+            _TEST_MODEL,
+            [user_msg("hi")],
+            tools=[
+                ai_gateway_pkg.tools.parallel_search(
+                    mode="agentic",
+                    source_policy={"include_domains": ["wikipedia.org"]},
+                ),
+            ],
+        ):
+            pass
+
+        assert captured["tools"] == [
+            {
+                "type": "provider",
+                "id": "gateway.parallel_search",
+                "name": "parallel_search",
+                "args": {
+                    "mode": "agentic",
+                    "sourcePolicy": {"includeDomains": ["wikipedia.org"]},
                 },
             }
         ]
@@ -117,6 +178,8 @@ class TestGatewayBuiltins:
             tools=[CustomBuiltin()],
         )
 
-        with pytest.raises(TypeError, match="anthropic.tools|openai.tools"):
+        with pytest.raises(
+            TypeError, match="anthropic.tools|openai.tools|ai_gateway.tools"
+        ):
             async for _ in stream:
                 pass

@@ -4,6 +4,7 @@ Defines the callable :data:`ai_gateway` provider, which satisfies the
 :class:`~ai.models.core.proto.Provider` protocol."""
 
 import os
+from types import ModuleType
 from typing import Any
 
 from .. import core
@@ -39,6 +40,18 @@ class _AIGateway:
     @property
     def params_type(self) -> StreamParamsType[GatewayStreamParams]:
         return GATEWAY_STREAM_PARAMS_TYPES
+
+    @property
+    def tools(self) -> ModuleType:
+        """Gateway-native built-in tool factories.
+
+        Convenience accessor: ``ai_gateway.tools.perplexity_search(...)``.
+        These tools are executed server-side by the gateway and work
+        with any gateway-routed model.
+        """
+        from . import tools as tools_module
+
+        return tools_module
 
     def client(self) -> core.client.Client:
         """Create a :class:`Client` from env-var credentials."""

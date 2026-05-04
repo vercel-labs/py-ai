@@ -16,12 +16,20 @@ Usage::
         tools=[anthropic.tools.web_search(max_uses=5)],
     )
 
+    # The gateway also exposes its own provider-executed tools that work
+    # with any gateway-routed model regardless of the underlying provider.
+    s = ai.stream(
+        model,
+        msgs,
+        tools=[ai_gateway.tools.perplexity_search(max_results=5)],
+    )
+
 The heavy ``.adapter`` module is loaded lazily so that ``import ai`` does
 not pull in ``httpx`` and other I/O libraries at import time.  This matters
 for sandboxed runtimes (e.g. Temporal workflow workers).
 """
 
-from . import errors
+from . import errors, tools
 from .params import GatewayParams, GatewayStreamParams
 from .provider import ai_gateway
 
@@ -30,6 +38,7 @@ __all__ = [
     "GatewayStreamParams",
     "ai_gateway",
     "errors",
+    "tools",
 ]
 
 

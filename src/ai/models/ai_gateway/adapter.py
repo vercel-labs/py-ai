@@ -20,6 +20,7 @@ from ..openai.params import OpenAIChatParams, OpenAIResponsesParams
 from ..openai.tools import _OpenAIBuiltin
 from . import errors, sdk
 from .params import GATEWAY_STREAM_PARAMS_TYPES, GatewayParams
+from .tools import _GatewayBuiltin
 
 # ---------------------------------------------------------------------------
 # Shared request helpers
@@ -190,25 +191,57 @@ async def _messages_to_prompt(
     return result
 
 
+def _snake_to_camel(name: str) -> str:
+    """Convert a snake_case identifier to camelCase."""
+    head, *tail = name.split("_")
+    return head + "".join(part[:1].upper() + part[1:] for part in tail)
+
+
+def _camel_keys(value: Any) -> Any:
+    """Recursively convert dict keys from snake_case to camelCase.
+
+    Lists are walked, scalars and strings are returned as-is. The gateway's
+    server-side schemas (mirroring the JS SDK) expect camelCase keys for
+    provider-tool ``args``.
+    """
+    if isinstance(value, dict):
+        return {_snake_to_camel(str(k)): _camel_keys(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_camel_keys(v) for v in value]
+    return value
+
+
 def _tool_to_v3(tool: types.ToolLike) -> dict[str, Any]:
     """Convert a tool-like object to the v3 wire format."""
     if isinstance(tool, _AnthropicBuiltin):
+        args = tool.model_dump(mode="json", exclude_none=True)
         return {
             "type": "provider",
             "id": f"anthropic.{tool.wire_type}",
-            "args": tool.model_dump(mode="json", by_alias=True, exclude_none=True),
+            "name": tool.wire_name,
+            "args": _camel_keys(args),
         }
     if isinstance(tool, _OpenAIBuiltin):
+        args = tool.model_dump(mode="json", exclude_none=True)
         return {
             "type": "provider",
             "id": f"openai.{tool.wire_type}",
-            "args": tool.model_dump(mode="json", by_alias=True, exclude_none=True),
+            "name": tool.wire_type,
+            "args": _camel_keys(args),
+        }
+    if isinstance(tool, _GatewayBuiltin):
+        args = tool.model_dump(mode="json", exclude_none=True)
+        return {
+            "type": "provider",
+            "id": tool.wire_id,
+            "name": tool.wire_name,
+            "args": _camel_keys(args),
         }
     if isinstance(tool, tools_.BuiltinTool):
         raise TypeError(
             f"AI Gateway does not support built-in tool "
-            f"{type(tool).__name__}; use anthropic.tools.* or "
-            f"openai.tools.* helpers."
+            f"{type(tool).__name__}; use anthropic.tools.*, "
+            f"openai.tools.*, or ai_gateway.tools.* helpers."
         )
     return {
         "type": "function",
