@@ -67,19 +67,45 @@ Serialize: `msg.model_dump()`. Restore: `ai.Message.model_validate(data)`.
 
 ## Custom agent loops
 
-Override the default loop when you need approval gates, routing, or batching:
+Override the default loop when you need approval gates, routing, or batching.
+
+The loop yields `AgentEvent`s for the consumer and updates history with `context.add(message)`. Anything not added to `context.messages` won't be visible on the next turn.
+
+**Concurrent form** — fan tools out as the model emits them, mirrors the default loop.
 
 ```python
 my_agent = ai.agent(tools=[get_weather, get_population])
 
 @my_agent.loop
 async def custom(context: ai.Context):
+    while context.keep_running():
+        async with (
+            ai.stream(
+                context.model, context.messages, tools=context.tools
+            ) as s,
+            ai.ToolRunner(s) as tr,
+        ):
+            async for event in ai.util.merge(s, tr.events()):
+                yield event
+                if isinstance(event, ai.ToolEnd):
+                    tr.schedule(context.resolve(event.tool_call))
+
+            context.add(s.message)
+            context.add(tr.get_tool_message())
+```
+
+**Sequential form** — drain the stream, then run tools. Simpler when you need to gate tool calls before executing them:
+
+```python
+@my_agent.loop
+async def custom(context: ai.Context):
     while True:
-        s = await ai.stream(
+        s = ai.stream(
             context.model, context.messages, tools=context.tools
         )
-        async for msg in s:
-            yield msg
+        async for event in s:
+            yield event
+        context.add(s.message)
 
         tool_calls = context.resolve(s.tool_calls)
         if not tool_calls:
@@ -88,10 +114,10 @@ async def custom(context: ai.Context):
         async with asyncio.TaskGroup() as tg:
             tasks = [tg.create_task(tc()) for tc in tool_calls]
 
-        yield ai.tool_message(*(t.result() for t in tasks))
+        context.add(ai.tool_message(*(t.result() for t in tasks)))
 ```
 
-Loop helpers: `context.model`, `context.messages`, `context.tools`, `context.resolve(s.tool_calls)`. `await tc()` executes a tool call and returns a tool-result message.
+Loop helpers: `context.model`, `context.messages`, `context.tools`, `context.resolve(s.tool_calls)`, `context.keep_running()`, `context.add(msg)`. `await tc()` executes a tool call and returns a `ToolCallResult`; pass those (or `Message`s) to `ai.tool_message(...)` to merge into one tool-result message.
 
 ## Multi-agent
 

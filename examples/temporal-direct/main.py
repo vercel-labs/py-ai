@@ -112,13 +112,13 @@ async def llm_call_activity(params: LLMParams) -> LLMResult:
 #
 # The loop replaces ai.models.stream() and tool execution with
 # Temporal activity calls. The structure mirrors the default loop:
-# call LLM → yield message → execute tool calls → repeat.
+# call LLM → add message to context → execute tool calls → repeat.
 
 weather_agent = ai.agent(tools=[get_weather, get_population])
 
 
 @weather_agent.loop
-async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.StreamItem]:
+async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.AgentEvent]:
     tool_schemas = [
         {"name": t.name, "description": t.description, "param_schema": t.param_schema}
         for t in context.tools
@@ -137,7 +137,7 @@ async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.StreamItem]:
         )
         msg = ai.Message.model_validate(result.message)
         yield ai.StreamEnd(message=msg)
-        yield msg
+        context.add(msg)
 
         # 2. No tool calls → done
         if not msg.tool_calls:

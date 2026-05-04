@@ -131,7 +131,7 @@ async def test_yield_from_nested_agent() -> None:
     add them to the outer agent's history (context.messages).
 
     The critical contract: yield_from streams events through the runtime
-    queue without going through _collect_messages, so the parent agent's
+    queue and discards bare Messages, so the parent agent's
     context.messages stays clean.
     """
     outer = ai.agent(tools=[research_tool])

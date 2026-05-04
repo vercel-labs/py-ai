@@ -16,8 +16,10 @@ from ..types import builders
 from . import events as events_
 from . import runtime
 
-# What loop functions yield: AgentEvents pass through to the consumer,
-# bare Messages are silently collected into history.
+# What a streaming-tool generator may yield: AgentEvents pass through
+# to the consumer, and a final bare Message provides the tool's result
+# (its text becomes the return value).  Loop functions yield AgentEvents
+# only — they must call context.add() to update history.
 StreamItem = events_.AgentEvent | types.Message
 
 
@@ -290,7 +292,7 @@ class Context(pydantic.BaseModel):
 
 
 class LoopFn(Protocol):
-    def __call__(self, context: Context) -> AsyncGenerator[StreamItem]: ...
+    def __call__(self, context: Context) -> AsyncGenerator[events_.AgentEvent]: ...
 
 
 def tool_result(
@@ -331,36 +333,6 @@ def tool_result(
             unwrapped.append(item)
     msg = builders.tool_message(*unwrapped)
     return events_.ToolCallResult(message=msg, results=msg.tool_results)
-
-
-def _upsert_message(messages: list[types.Message], message: types.Message) -> None:
-    """Insert or replace *message* in the history list."""
-    for i, existing in enumerate(messages):
-        if existing.id == message.id:
-            messages[i] = message
-            return
-    messages.append(message)
-
-
-# TODO: Stop doing this?
-async def _collect_messages(
-    source: AsyncIterable[StreamItem],
-    messages: list[types.Message],
-) -> AsyncGenerator[events_.AgentEvent]:
-    """Intercept yielded items and maintain the *messages* history list.
-
-    * Bare ``Message`` — silently collected (not forwarded to consumer).
-    * Any other ``AgentEvent`` — forwarded as-is.
-
-    This runs on the **producer** side (same coroutine as the loop function),
-    so ``messages`` is always up-to-date by the time the loop reads it for
-    the next model call.
-    """
-    async for item in source:
-        if isinstance(item, types.Message):
-            _upsert_message(messages, item)
-        else:
-            yield item
 
 
 async def yield_from(source: AsyncIterable[StreamItem]) -> str:
@@ -451,9 +423,10 @@ class Agent:
         Args:
             model: The model to use for LLM calls.
             messages: Initial conversation messages.
-            label: Optional label applied to every yielded message.
+            label: Optional label stamped onto every ``ToolCallResult``
+                emitted by this run (set on its ``message.source_label``).
                 Useful for multi-agent graphs where the consumer needs
-                to route messages by source.
+                to route results by source.
             middleware: Optional list of middleware to apply to this run.
                 First in the list = outermost.  Middleware wraps model
                 calls, tool calls, hooks, and the run itself.
@@ -475,7 +448,7 @@ class Agent:
                 messages=list(call.messages),
                 tools=call.tools,
             )
-            source = _collect_messages(loop_fn(context), context.messages)
+            source = loop_fn(context)
             async for event in runtime.run(source):
                 if call.label is not None and isinstance(event, events_.ToolCallResult):
                     event = event.model_copy(
@@ -499,8 +472,8 @@ class Agent:
             mw_token = middleware_.activate(parent + middleware)
         try:
             chain = middleware_._build_agent_run_chain(_real)
-            async for message in chain(call):
-                yield message
+            async for event in chain(call):
+                yield event
         finally:
             if mw_token is not None:
                 middleware_.deactivate(mw_token)

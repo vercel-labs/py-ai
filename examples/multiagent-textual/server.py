@@ -78,13 +78,12 @@ def _gated_agent(
     gated = ai.agent(tools=tools)
 
     @gated.loop
-    async def gated_loop(context: ai.Context) -> AsyncGenerator[ai.StreamItem]:
+    async def gated_loop(context: ai.Context) -> AsyncGenerator[ai.AgentEvent]:
         while True:
             s = ai.stream(context.model, context.messages, tools=context.tools)
             async for event in s:
                 yield event
-            if s.message is not None:
-                yield s.message
+            context.add(s.message)
 
             tool_calls = context.resolve(s.tool_calls)
             if not tool_calls:
