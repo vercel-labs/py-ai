@@ -52,7 +52,7 @@ if TYPE_CHECKING:
 class ModelContext:
     """Context for a model streaming call."""
 
-    model: Model
+    model: Model[Any]
     messages: list[messages_.Message]
     tools: Sequence[ToolLike] | None
     output_type: type[pydantic.BaseModel] | None
@@ -69,7 +69,7 @@ class ModelContext:
 class GenerateContext:
     """Context for a model generate call (images, video, etc.)."""
 
-    model: Model
+    model: Model[Any]
     messages: list[messages_.Message]
     params: Any
 
@@ -106,7 +106,7 @@ class HookContext:
 class AgentRunContext:
     """Context for an agent run."""
 
-    model: Model
+    model: Model[Any]
     messages: list[messages_.Message]
     tools: list[Tool[..., Any]]
     label: str | None

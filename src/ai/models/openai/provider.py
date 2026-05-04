@@ -4,8 +4,10 @@ Defines the callable :data:`openai` provider, which satisfies the
 :class:`~ai.models.core.proto.Provider` protocol."""
 
 import os
+from typing import Any
 
 from .. import core
+from .params import OpenAIChatParams
 
 _BASE_URL = "https://api.openai.com/v1"
 _API_KEY_ENV = "OPENAI_API_KEY"
@@ -33,6 +35,10 @@ class _OpenAI:
     def name(self) -> str:
         return "openai"
 
+    @property
+    def params_type(self) -> type[OpenAIChatParams]:
+        return OpenAIChatParams
+
     def client(self) -> core.client.Client:
         """Create a :class:`Client` from env-var credentials."""
         return core.client.Client(
@@ -40,7 +46,9 @@ class _OpenAI:
             api_key=os.environ.get(_API_KEY_ENV),
         )
 
-    async def check(self, client: core.client.Client, model: core.model.Model) -> bool:
+    async def check(
+        self, client: core.client.Client, model: core.model.Model[Any]
+    ) -> bool:
         """Delegate to :func:`openai.check.check`."""
         from . import check as check_
 
@@ -50,10 +58,9 @@ class _OpenAI:
         self,
         model_id: str,
         *,
-        base_url: str | None = None,
         client: core.client.Client | None = None,
-    ) -> core.model.Model:
-        return core.model.Model(
+    ) -> core.model.Model[OpenAIChatParams]:
+        return core.model.Model[OpenAIChatParams](
             id=model_id,
             adapter=self.adapter,
             provider=self,

@@ -50,13 +50,19 @@ class MockProvider:
     def api_key_env(self) -> str | None:
         return self._api_key_env
 
+    @property
+    def params_type(self) -> type[pydantic.BaseModel]:
+        return pydantic.BaseModel
+
     def client(self) -> models.Client:
         import os
 
         api_key = os.environ.get(self._api_key_env) if self._api_key_env else None
         return models.Client(base_url=self._base_url, api_key=api_key)
 
-    async def check(self, client: models.Client, model: models.Model) -> bool:
+    async def check(
+        self, client: models.Client, model: models.Model[pydantic.BaseModel]
+    ) -> bool:
         return True
 
     async def list(self, *, client: models.Client | None = None) -> list[str]:
@@ -67,8 +73,8 @@ class MockProvider:
         model_id: str,
         *,
         client: models.Client | None = None,
-    ) -> models.Model:
-        return models.Model(
+    ) -> models.Model[pydantic.BaseModel]:
+        return models.Model[pydantic.BaseModel](
             id=model_id,
             adapter=self._adapter,
             provider=self,
@@ -82,7 +88,7 @@ class MockProvider:
 MOCK_PROVIDER = MockProvider()
 
 # A fixed Model used in tests — adapter="mock" dispatches to the mock adapter.
-MOCK_MODEL = models.Model(
+MOCK_MODEL: models.Model[pydantic.BaseModel] = models.Model[pydantic.BaseModel](
     id="mock-model",
     adapter="mock",
     provider=MOCK_PROVIDER,
@@ -156,7 +162,7 @@ class MockAdapter:
     async def stream(
         self,
         client: models.Client,
-        model: models.Model,
+        model: models.Model[pydantic.BaseModel],
         messages: list[messages_.Message],
         *,
         tools: Sequence[ai.ToolLike] | None = None,
@@ -208,7 +214,7 @@ class MockGenerateAdapter:
     async def generate(
         self,
         client: models.Client,
-        model: models.Model,
+        model: models.Model[pydantic.BaseModel],
         messages: list[messages_.Message],
         params: Any = None,
     ) -> messages_.Message:

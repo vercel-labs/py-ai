@@ -7,6 +7,8 @@ import os
 from typing import Any
 
 from .. import core
+from ..core.params import StreamParamsType
+from .params import GATEWAY_STREAM_PARAMS_TYPES, GatewayStreamParams
 
 _BASE_URL = "https://ai-gateway.vercel.sh/v3/ai"
 _API_KEY_ENV = "AI_GATEWAY_API_KEY"
@@ -34,6 +36,10 @@ class _AIGateway:
     def name(self) -> str:
         return "ai-gateway"
 
+    @property
+    def params_type(self) -> StreamParamsType[GatewayStreamParams]:
+        return GATEWAY_STREAM_PARAMS_TYPES
+
     def client(self) -> core.client.Client:
         """Create a :class:`Client` from env-var credentials."""
         return core.client.Client(
@@ -41,7 +47,9 @@ class _AIGateway:
             api_key=os.environ.get(_API_KEY_ENV),
         )
 
-    async def check(self, client: core.client.Client, model: core.model.Model) -> bool:
+    async def check(
+        self, client: core.client.Client, model: core.model.Model[Any]
+    ) -> bool:
         """Delegate to :func:`ai_gateway.check.check`."""
         from . import check as check_
 
@@ -51,10 +59,9 @@ class _AIGateway:
         self,
         model_id: str,
         *,
-        base_url: str | None = None,
         client: core.client.Client | None = None,
-    ) -> core.model.Model:
-        return core.model.Model(
+    ) -> core.model.Model[GatewayStreamParams]:
+        return core.model.Model[GatewayStreamParams](
             id=model_id,
             adapter=self.adapter,
             provider=self,

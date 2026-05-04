@@ -248,7 +248,7 @@ class ToolRunner:
 class Context(pydantic.BaseModel):
     """Everything that goes into the LLM."""
 
-    model: models.Model
+    model: models.Model[Any]
     messages: list[types.Message]
     tools: list[Tool[..., Any]]
 
@@ -440,7 +440,7 @@ class Agent:
 
     async def run(
         self,
-        model: models.Model,
+        model: models.Model[Any],
         messages: list[types.Message],
         *,
         label: str | None = None,

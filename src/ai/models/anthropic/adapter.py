@@ -15,6 +15,13 @@ from ... import types
 from ...types import events
 from ...types import messages as messages_
 from .. import core
+from .params import (
+    AnthropicContainer,
+    AnthropicCustomSkill,
+    AnthropicDisabledThinking,
+    AnthropicParams,
+    AnthropicProviderSkill,
+)
 
 # ---------------------------------------------------------------------------
 # Message / tool conversion — internal types → Anthropic wire format
@@ -104,6 +111,8 @@ def _file_part_to_anthropic(
 
 async def _messages_to_anthropic(
     messages: list[types.Message],
+    *,
+    send_reasoning: bool = True,
 ) -> tuple[str | None, list[dict[str, Any]]]:
     """Convert internal messages to Anthropic API format.
 
@@ -125,7 +134,7 @@ async def _messages_to_anthropic(
                 for part in msg.parts:
                     match part:
                         case types.ReasoningPart(text=text, signature=signature):
-                            if signature:
+                            if send_reasoning and signature:
                                 content.append(
                                     {
                                         "type": "thinking",
@@ -233,6 +242,59 @@ def _make_client(
     )
 
 
+def _coerce_anthropic_params(value: Any) -> AnthropicParams:
+    if value is None:
+        return AnthropicParams()
+    if isinstance(value, AnthropicParams):
+        return value
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        items = list(value)
+        if len(items) == 1 and isinstance(items[0], AnthropicParams):
+            return items[0]
+    raise TypeError(f"anthropic stream params must be {AnthropicParams.__name__}")
+
+
+def _container_to_wire(container: AnthropicContainer) -> str | dict[str, Any] | None:
+    if not container.skills:
+        return container.id
+
+    result: dict[str, Any] = {}
+    if container.id is not None:
+        result["id"] = container.id
+    result["skills"] = [_skill_to_wire(skill) for skill in container.skills]
+    return result
+
+
+def _skill_to_wire(
+    skill: AnthropicProviderSkill | AnthropicCustomSkill,
+) -> dict[str, Any]:
+    if isinstance(skill, AnthropicProviderSkill):
+        result: dict[str, Any] = {
+            "type": "anthropic",
+            "skill_id": skill.skill_id,
+        }
+    else:
+        result = {
+            "type": "custom",
+            "provider_reference": skill.provider_reference,
+        }
+    if skill.version is not None:
+        result["version"] = skill.version
+    return result
+
+
+def _merge_extra_headers(
+    api_kwargs: dict[str, Any],
+    extra_headers: dict[str, str] | None,
+) -> None:
+    """Attach raw headers while preserving typed headers the adapter generated."""
+    headers = dict(api_kwargs.get("extra_headers") or {})
+    if extra_headers:
+        headers.update(extra_headers)
+    if headers:
+        api_kwargs["extra_headers"] = headers
+
+
 # ---------------------------------------------------------------------------
 # Public adapter function
 # ---------------------------------------------------------------------------
@@ -240,7 +302,7 @@ def _make_client(
 
 async def stream(
     client: core.client.Client,
-    model: core.model.Model,
+    model: core.model.Model[Any],
     messages: list[types.Message],
     *,
     tools: Sequence[types.ToolLike] | None = None,
@@ -261,7 +323,11 @@ async def stream(
     * ``budget_tokens`` — max tokens for thinking (default 10000).
     """
     sdk_client = _make_client(client)
-    system_prompt, anthropic_messages = await _messages_to_anthropic(messages)
+    anthropic_params = _coerce_anthropic_params(kwargs.get("params"))
+    system_prompt, anthropic_messages = await _messages_to_anthropic(
+        messages,
+        send_reasoning=anthropic_params.send_reasoning is not False,
+    )
     anthropic_tools = _tools_to_anthropic(tools) if tools else None
 
     api_kwargs: dict[str, Any] = {
@@ -274,13 +340,69 @@ async def stream(
     if anthropic_tools:
         api_kwargs["tools"] = anthropic_tools
 
-    if thinking:
+    if anthropic_params.thinking is not None:
+        if not isinstance(anthropic_params.thinking, AnthropicDisabledThinking):
+            api_kwargs["thinking"] = anthropic_params.thinking.model_dump(
+                exclude_none=True,
+            )
+    elif thinking:
         api_kwargs["thinking"] = {
             "type": "enabled",
             "budget_tokens": budget_tokens,
         }
 
-    if output_type is not None:
+    output_config: dict[str, Any] = {}
+    if anthropic_params.effort is not None:
+        output_config["effort"] = anthropic_params.effort
+    if anthropic_params.task_budget is not None:
+        output_config["task_budget"] = anthropic_params.task_budget.model_dump(
+            exclude_none=True,
+        )
+    if output_config:
+        api_kwargs["output_config"] = output_config
+
+    if anthropic_params.speed is not None:
+        api_kwargs["speed"] = anthropic_params.speed
+    if anthropic_params.inference_geo is not None:
+        api_kwargs["inference_geo"] = anthropic_params.inference_geo
+    if anthropic_params.metadata is not None:
+        api_kwargs["metadata"] = anthropic_params.metadata.model_dump(
+            exclude_none=True,
+        )
+    if anthropic_params.context_management is not None:
+        api_kwargs["context_management"] = anthropic_params.context_management
+    if anthropic_params.container is not None:
+        container = _container_to_wire(anthropic_params.container)
+        if container is not None:
+            api_kwargs["container"] = container
+    if anthropic_params.service_tier is not None:
+        api_kwargs["service_tier"] = anthropic_params.service_tier
+    if anthropic_params.cache_control is not None:
+        api_kwargs["cache_control"] = anthropic_params.cache_control.model_dump(
+            exclude_none=True,
+        )
+    if anthropic_params.mcp_servers is not None:
+        api_kwargs["mcp_servers"] = [
+            server.model_dump(exclude_none=True)
+            for server in anthropic_params.mcp_servers
+        ]
+    if anthropic_params.disable_parallel_tool_use is not None:
+        api_kwargs["tool_choice"] = {
+            "type": "auto",
+            "disable_parallel_tool_use": anthropic_params.disable_parallel_tool_use,
+        }
+    if anthropic_params.betas:
+        api_kwargs["extra_headers"] = {
+            "anthropic-beta": ",".join(anthropic_params.betas),
+        }
+    _merge_extra_headers(api_kwargs, anthropic_params.extra_headers)
+    if anthropic_params.extra_body:
+        api_kwargs["extra_body"] = dict(anthropic_params.extra_body)
+
+    if (
+        output_type is not None
+        and anthropic_params.structured_output_mode != "json_tool"
+    ):
         api_kwargs["output_format"] = output_type
 
     # Anthropic indexes content blocks by int; map to string block_ids.

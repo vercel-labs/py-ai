@@ -4,8 +4,10 @@ Defines the callable :data:`anthropic` provider, which satisfies the
 :class:`~ai.models.core.proto.Provider` protocol."""
 
 import os
+from typing import Any
 
 from .. import core
+from .params import AnthropicParams
 
 _BASE_URL = "https://api.anthropic.com"
 _API_KEY_ENV = "ANTHROPIC_API_KEY"
@@ -34,6 +36,10 @@ class _Anthropic:
     def name(self) -> str:
         return "anthropic"
 
+    @property
+    def params_type(self) -> type[AnthropicParams]:
+        return AnthropicParams
+
     def client(self) -> core.client.Client:
         """Create a :class:`Client` from env-var credentials."""
         return core.client.Client(
@@ -41,7 +47,9 @@ class _Anthropic:
             api_key=os.environ.get(_API_KEY_ENV),
         )
 
-    async def check(self, client: core.client.Client, model: core.model.Model) -> bool:
+    async def check(
+        self, client: core.client.Client, model: core.model.Model[Any]
+    ) -> bool:
         """Delegate to :func:`anthropic.check.check`."""
         from . import check as check_
 
@@ -51,10 +59,9 @@ class _Anthropic:
         self,
         model_id: str,
         *,
-        base_url: str | None = None,
         client: core.client.Client | None = None,
-    ) -> core.model.Model:
-        return core.model.Model(
+    ) -> core.model.Model[AnthropicParams]:
+        return core.model.Model[AnthropicParams](
             id=model_id,
             adapter=self.adapter,
             provider=self,

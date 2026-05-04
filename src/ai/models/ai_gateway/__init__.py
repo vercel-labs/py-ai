@@ -13,9 +13,21 @@ for sandboxed runtimes (e.g. Temporal workflow workers).
 """
 
 from . import errors
+from .params import (
+    GatewayAnthropicParams,
+    GatewayOpenAIChatParams,
+    GatewayOpenAIResponsesParams,
+    GatewayParams,
+    GatewayStreamParams,
+)
 from .provider import ai_gateway
 
 __all__ = [
+    "GatewayAnthropicParams",
+    "GatewayOpenAIChatParams",
+    "GatewayOpenAIResponsesParams",
+    "GatewayParams",
+    "GatewayStreamParams",
     "ai_gateway",
     "errors",
 ]
