@@ -9,6 +9,9 @@ Flow:
      CancelledError is caught and the run ends.
   2. Second run: resolve_hook() pre-registers the answer, agent.run()
      replays from the same input, and hook finds the resolution immediately.
+
+TODO: The implementation *works* but requires some hacks on the user
+side. We need to come up with cleaner API support.
 """
 
 import asyncio
@@ -24,9 +27,14 @@ class Confirmation(pydantic.BaseModel):
     reason: str = ""
 
 
+FILES_DELETED = set()
+
+
 @ai.tool
 async def delete_file(path: str) -> str:
     """Delete a file at the given path."""
+    print("FILE DELETED:", path)
+    FILES_DELETED.add(path)
     return f"Deleted {path}"
 
 
@@ -40,13 +48,20 @@ async def main() -> None:
         context: ai.Context,
     ) -> AsyncGenerator[ai.StreamItem]:
         while True:
-            s = ai.models.stream(context.model, context.messages, tools=context.tools)
-            async for event in s:
-                yield event
-            if s.message is not None:
-                yield s.message
+            # HACK: If there isn't anything to do, it's because we hit
+            # a hook and bailed out. Skip running the stream in that
+            # case, but process its tool calls (which should have
+            # resolved now).
+            if context.keep_running():
+                s = ai.models.stream(
+                    context.model, context.messages, tools=context.tools
+                )
+                async for event in s:
+                    yield event
 
-            tool_calls = context.resolve(s.tool_calls)
+                context.add(s.message)
+
+            tool_calls = context.resolve(context.messages[-1].tool_calls)
             if not tool_calls:
                 return
 
@@ -75,7 +90,7 @@ async def main() -> None:
                         )
                     )
 
-            yield ai.tool_result(*results)
+            context.add(ai.tool_message(*results))
 
     messages = [
         ai.system_message("Delete files when asked. Always use the delete_file tool."),
@@ -87,6 +102,11 @@ async def main() -> None:
     pending_hook_labels: list[str] = []
 
     async for event in my_agent.run(model, messages):
+        # HACK?: When we get a complete assistant message, add it to
+        # messages so it can get replayed easily.
+        if isinstance(event, ai.StreamEnd):
+            messages.append(event.message)
+
         if isinstance(event, ai.TextDelta):
             print(event.chunk, end="", flush=True)
         elif isinstance(event, ai.HookEvent) and event.hook.status == "pending":
@@ -109,6 +129,10 @@ async def main() -> None:
         elif isinstance(event, ai.HookEvent):
             print(f"  Hook {event.hook.status}: {event.hook.hook_id}")
     print()
+
+    assert {"/tmp/old_logs.txt"} == FILES_DELETED, (
+        f"Wrong files deleted: {FILES_DELETED}"
+    )
 
 
 if __name__ == "__main__":

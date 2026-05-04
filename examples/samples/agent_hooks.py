@@ -33,13 +33,13 @@ async def main() -> None:
     @my_agent.loop
     async def with_approval(
         context: ai.Context,
-    ) -> AsyncGenerator[ai.StreamItem]:
+    ) -> AsyncGenerator[ai.AgentEvent]:
         while True:
             s = ai.models.stream(context.model, context.messages, tools=context.tools)
             async for event in s:
                 yield event
-            if s.message is not None:
-                yield s.message
+
+            context.add(s.message)
 
             tool_calls = context.resolve(s.tool_calls)
             if not tool_calls:
@@ -68,7 +68,7 @@ async def main() -> None:
                 else:
                     results.append(await tc())
 
-            yield ai.tool_result(*results)
+            context.add(ai.tool_message(*results))
 
     messages = [
         ai.system_message(
