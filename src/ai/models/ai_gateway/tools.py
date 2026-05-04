@@ -20,13 +20,9 @@ sent over the wire as ``args`` of a ``provider``-typed tool block.
 
 from __future__ import annotations
 
-from typing import ClassVar, Literal, TypedDict
-
-import pydantic
+from typing import ClassVar, Literal
 
 from ...types import tools as tools_
-
-_PARAMS_CONFIG = pydantic.ConfigDict(frozen=True, populate_by_name=True)
 
 
 class _GatewayBuiltin(tools_.BuiltinTool):
@@ -39,8 +35,6 @@ class _GatewayBuiltin(tools_.BuiltinTool):
 
     wire_id: ClassVar[str] = ""
     wire_name: ClassVar[str] = ""
-
-    model_config = _PARAMS_CONFIG
 
 
 # ---------------------------------------------------------------------------
@@ -93,25 +87,25 @@ def perplexity_search(
 # ---------------------------------------------------------------------------
 
 
-class SourcePolicy(TypedDict, total=False):
+class SourcePolicy(tools_.BuiltinToolConfig):
     """Source policy for controlling which domains to include/exclude."""
 
-    include_domains: list[str]
-    exclude_domains: list[str]
-    after_date: str
+    include_domains: list[str] | None = None
+    exclude_domains: list[str] | None = None
+    after_date: str | None = None
 
 
-class Excerpts(TypedDict, total=False):
+class Excerpts(tools_.BuiltinToolConfig):
     """Excerpt configuration for controlling result length."""
 
-    max_chars_per_result: int
-    max_chars_total: int
+    max_chars_per_result: int | None = None
+    max_chars_total: int | None = None
 
 
-class FetchPolicy(TypedDict, total=False):
+class FetchPolicy(tools_.BuiltinToolConfig):
     """Fetch policy for controlling content freshness."""
 
-    max_age_seconds: int
+    max_age_seconds: int | None = None
 
 
 class ParallelSearch(_GatewayBuiltin):

@@ -191,51 +191,34 @@ async def _messages_to_prompt(
     return result
 
 
-def _snake_to_camel(name: str) -> str:
-    """Convert a snake_case identifier to camelCase."""
-    head, *tail = name.split("_")
-    return head + "".join(part[:1].upper() + part[1:] for part in tail)
-
-
-def _camel_keys(value: Any) -> Any:
-    """Recursively convert dict keys from snake_case to camelCase.
-
-    Lists are walked, scalars and strings are returned as-is. The gateway's
-    server-side schemas (mirroring the JS SDK) expect camelCase keys for
-    provider-tool ``args``.
-    """
-    if isinstance(value, dict):
-        return {_snake_to_camel(str(k)): _camel_keys(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_camel_keys(v) for v in value]
-    return value
-
-
 def _tool_to_v3(tool: types.ToolLike) -> dict[str, Any]:
-    """Convert a tool-like object to the v3 wire format."""
+    """Convert a tool-like object to the v3 wire format.
+
+    Built-in tools use ``model_dump(by_alias=True)`` to emit camelCase keys,
+    which is what the gateway's JS-derived wire schema expects.  The
+    ``alias_generator=to_camel`` on the ``BuiltinTool`` base class handles
+    the conversion, including for nested config models.
+    """
     if isinstance(tool, _AnthropicBuiltin):
-        args = tool.model_dump(mode="json", exclude_none=True)
         return {
             "type": "provider",
             "id": f"anthropic.{tool.wire_type}",
             "name": tool.wire_name,
-            "args": _camel_keys(args),
+            "args": tool.model_dump(mode="json", by_alias=True, exclude_none=True),
         }
     if isinstance(tool, _OpenAIBuiltin):
-        args = tool.model_dump(mode="json", exclude_none=True)
         return {
             "type": "provider",
             "id": f"openai.{tool.wire_type}",
             "name": tool.wire_type,
-            "args": _camel_keys(args),
+            "args": tool.model_dump(mode="json", by_alias=True, exclude_none=True),
         }
     if isinstance(tool, _GatewayBuiltin):
-        args = tool.model_dump(mode="json", exclude_none=True)
         return {
             "type": "provider",
             "id": tool.wire_id,
             "name": tool.wire_name,
-            "args": _camel_keys(args),
+            "args": tool.model_dump(mode="json", by_alias=True, exclude_none=True),
         }
     if isinstance(tool, tools_.BuiltinTool):
         raise TypeError(

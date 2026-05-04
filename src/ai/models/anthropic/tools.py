@@ -21,7 +21,7 @@ on each subclass; adapters read these — users don't.
 
 from __future__ import annotations
 
-from typing import ClassVar, TypedDict
+from typing import ClassVar, Literal
 
 import pydantic
 
@@ -32,29 +32,29 @@ from ...types import tools as tools_
 # ---------------------------------------------------------------------------
 
 
-class UserLocation(TypedDict, total=False):
-    """Approximate user location for geographically relevant search results."""
+class UserLocation(tools_.BuiltinToolConfig):
+    """Approximate user location for geographically relevant search results.
 
-    city: str
-    region: str
-    country: str
-    timezone: str
+    The ``type`` field defaults to ``"approximate"`` which is the only value
+    the Anthropic API currently accepts.  Users can omit it.
+    """
+
+    type: Literal["approximate"] = "approximate"
+    city: str | None = None
+    region: str | None = None
+    country: str | None = None
+    timezone: str | None = None
 
 
-class Citations(pydantic.BaseModel):
+class Citations(tools_.BuiltinToolConfig):
     """Citation configuration for web fetch."""
 
     enabled: bool
-
-    model_config = pydantic.ConfigDict(frozen=True)
 
 
 # ---------------------------------------------------------------------------
 # Tool classes
 # ---------------------------------------------------------------------------
-
-
-_PARAMS_CONFIG = pydantic.ConfigDict(frozen=True, populate_by_name=True)
 
 
 class _AnthropicBuiltin(tools_.BuiltinTool):
@@ -70,8 +70,6 @@ class _AnthropicBuiltin(tools_.BuiltinTool):
     wire_type: ClassVar[str] = ""
     # The wire-level ``name`` of the tool block (e.g. ``"web_search"``).
     wire_name: ClassVar[str] = ""
-
-    model_config = _PARAMS_CONFIG
 
 
 class WebSearch(_AnthropicBuiltin):

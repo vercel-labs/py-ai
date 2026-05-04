@@ -79,6 +79,10 @@ def _builtin_tools_to_anthropic(
 
     Returns ``(wire_tools, beta_headers)``. Beta headers are merged into
     the ``anthropic-beta`` request header by the caller.
+
+    Each tool's pydantic ``model_dump()`` produces the snake_case fields that
+    the Anthropic API expects.  The ``type`` and ``name`` wire fields come
+    from ClassVars on the tool subclass.
     """
     wire: list[dict[str, Any]] = []
     betas: set[str] = set()
@@ -90,53 +94,8 @@ def _builtin_tools_to_anthropic(
         block: dict[str, Any] = {
             "type": tool.wire_type,
             "name": tool.wire_name,
+            **tool.model_dump(mode="json", exclude_none=True),
         }
-        match tool:
-            case anthropic_tools.WebSearch():
-                if tool.max_uses is not None:
-                    block["max_uses"] = tool.max_uses
-                if tool.allowed_domains is not None:
-                    block["allowed_domains"] = list(tool.allowed_domains)
-                if tool.blocked_domains is not None:
-                    block["blocked_domains"] = list(tool.blocked_domains)
-                if tool.user_location is not None:
-                    block["user_location"] = {
-                        "type": "approximate",
-                        **tool.user_location,
-                    }
-            case anthropic_tools.WebFetch():
-                if tool.max_uses is not None:
-                    block["max_uses"] = tool.max_uses
-                if tool.allowed_domains is not None:
-                    block["allowed_domains"] = list(tool.allowed_domains)
-                if tool.blocked_domains is not None:
-                    block["blocked_domains"] = list(tool.blocked_domains)
-                if tool.citations is not None:
-                    block["citations"] = tool.citations.model_dump()
-                if tool.max_content_tokens is not None:
-                    block["max_content_tokens"] = tool.max_content_tokens
-            case anthropic_tools.ComputerUse():
-                block["display_width_px"] = tool.display_width_px
-                block["display_height_px"] = tool.display_height_px
-                if tool.display_number is not None:
-                    block["display_number"] = tool.display_number
-                if tool.enable_zoom is not None:
-                    block["enable_zoom"] = tool.enable_zoom
-            case anthropic_tools.TextEditor():
-                if tool.max_characters is not None:
-                    block["max_characters"] = tool.max_characters
-            case (
-                anthropic_tools.CodeExecution()
-                | anthropic_tools.Bash()
-                | anthropic_tools.Memory()
-            ):
-                pass
-            case _:
-                raise ValueError(
-                    f"AnthropicModel does not support built-in tool "
-                    f"{type(tool).__name__}"
-                )
-
         wire.append(block)
         if tool.beta is not None:
             betas.add(tool.beta)

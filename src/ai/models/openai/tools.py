@@ -15,9 +15,7 @@ use ``ai_gateway("openai/...")`` until a native Responses adapter ships.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, ClassVar, Literal, TypedDict
-
-import pydantic
+from typing import Any, ClassVar, Literal
 
 from ...types import tools as tools_
 
@@ -26,38 +24,39 @@ from ...types import tools as tools_
 # ---------------------------------------------------------------------------
 
 
-class WebSearchUserLocation(TypedDict, total=False):
-    type: Literal["approximate"]
-    city: str
-    region: str
-    country: str
-    timezone: str
+class WebSearchUserLocation(tools_.BuiltinToolConfig):
+    """User-location hint for OpenAI web search.
+
+    The ``type`` field defaults to ``"approximate"`` which is the only value
+    the OpenAI API currently accepts.  Users can omit it.
+    """
+
+    type: Literal["approximate"] = "approximate"
+    city: str | None = None
+    region: str | None = None
+    country: str | None = None
+    timezone: str | None = None
 
 
-class WebSearchFilters(TypedDict, total=False):
-    allowed_domains: list[str]
+class WebSearchFilters(tools_.BuiltinToolConfig):
+    """Filters for OpenAI web search."""
+
+    allowed_domains: list[str] | None = None
 
 
-class FileSearchRanking(pydantic.BaseModel):
+class FileSearchRanking(tools_.BuiltinToolConfig):
     ranker: str | None = None
     score_threshold: float | None = None
 
-    model_config = pydantic.ConfigDict(frozen=True)
 
-
-class CodeInterpreterContainer(pydantic.BaseModel):
+class CodeInterpreterContainer(tools_.BuiltinToolConfig):
     type: Literal["auto"] = "auto"
     file_ids: list[str] | None = None
-
-    model_config = pydantic.ConfigDict(frozen=True)
 
 
 # ---------------------------------------------------------------------------
 # Tool classes
 # ---------------------------------------------------------------------------
-
-
-_PARAMS_CONFIG = pydantic.ConfigDict(frozen=True, populate_by_name=True)
 
 
 class _OpenAIBuiltin(tools_.BuiltinTool):
@@ -70,8 +69,6 @@ class _OpenAIBuiltin(tools_.BuiltinTool):
     # The wire-level ``type`` field passed to the Responses API
     # (e.g. ``"web_search"``, ``"code_interpreter"``).
     wire_type: ClassVar[str] = ""
-
-    model_config = _PARAMS_CONFIG
 
 
 class WebSearch(_OpenAIBuiltin):

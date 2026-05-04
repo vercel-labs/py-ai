@@ -58,7 +58,7 @@ async def test_web_search_full_fields(monkeypatch: pytest.MonkeyPatch) -> None:
             anthropic_tools.web_search(
                 max_uses=3,
                 allowed_domains=["example.com"],
-                user_location={"city": "SF", "country": "US"},
+                user_location=anthropic_tools.UserLocation(city="SF", country="US"),
             )
         ],
     )
