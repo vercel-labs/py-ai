@@ -92,8 +92,8 @@ def _builtin_tools_to_anthropic(
                 f"AnthropicModel does not support built-in tool {type(tool).__name__}"
             )
         block: dict[str, Any] = {
-            "type": tool.wire_type,
-            "name": tool.wire_name,
+            "type": tool.type_,
+            "name": tool.name_,
             **tool.model_dump(mode="json", exclude_none=True),
         }
         wire.append(block)

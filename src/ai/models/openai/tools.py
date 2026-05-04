@@ -66,9 +66,14 @@ class _OpenAIBuiltin(tools_.BuiltinTool):
     adapter (and by the AI-Gateway adapter for routing).
     """
 
-    # The wire-level ``type`` field passed to the Responses API
+    # The ``"type"`` field passed to the Responses API
     # (e.g. ``"web_search"``, ``"code_interpreter"``).
-    wire_type: ClassVar[str] = ""
+    # Trailing underscore avoids shadowing the ``type`` builtin.
+    type_: ClassVar[str] = ""
+
+    @property
+    def name(self) -> str:
+        return self.type_
 
 
 class WebSearch(_OpenAIBuiltin):
@@ -79,7 +84,7 @@ class WebSearch(_OpenAIBuiltin):
     search_context_size: Literal["low", "medium", "high"] | None = None
     user_location: WebSearchUserLocation | None = None
 
-    wire_type: ClassVar[str] = "web_search"
+    type_: ClassVar[str] = "web_search"
 
 
 class WebSearchPreview(_OpenAIBuiltin):
@@ -88,7 +93,7 @@ class WebSearchPreview(_OpenAIBuiltin):
     search_context_size: Literal["low", "medium", "high"] | None = None
     user_location: WebSearchUserLocation | None = None
 
-    wire_type: ClassVar[str] = "web_search_preview"
+    type_: ClassVar[str] = "web_search_preview"
 
 
 class FileSearch(_OpenAIBuiltin):
@@ -99,7 +104,7 @@ class FileSearch(_OpenAIBuiltin):
     ranking: FileSearchRanking | None = None
     filters: dict[str, Any] | None = None
 
-    wire_type: ClassVar[str] = "file_search"
+    type_: ClassVar[str] = "file_search"
 
 
 class CodeInterpreter(_OpenAIBuiltin):
@@ -107,7 +112,7 @@ class CodeInterpreter(_OpenAIBuiltin):
 
     container: CodeInterpreterContainer | str | None = None
 
-    wire_type: ClassVar[str] = "code_interpreter"
+    type_: ClassVar[str] = "code_interpreter"
 
 
 class ImageGeneration(_OpenAIBuiltin):
@@ -123,20 +128,20 @@ class ImageGeneration(_OpenAIBuiltin):
     quality: Literal["low", "medium", "high", "auto"] | None = None
     size: str | None = None
 
-    wire_type: ClassVar[str] = "image_generation"
+    type_: ClassVar[str] = "image_generation"
 
 
 class LocalShell(_OpenAIBuiltin):
-    wire_type: ClassVar[str] = "local_shell"
+    type_: ClassVar[str] = "local_shell"
 
 
 class Shell(_OpenAIBuiltin):
     environment: str | None = None
-    wire_type: ClassVar[str] = "shell"
+    type_: ClassVar[str] = "shell"
 
 
 class ApplyPatch(_OpenAIBuiltin):
-    wire_type: ClassVar[str] = "apply_patch"
+    type_: ClassVar[str] = "apply_patch"
 
 
 class MCP(_OpenAIBuiltin):
@@ -150,7 +155,7 @@ class MCP(_OpenAIBuiltin):
     allowed_tools: list[str] | dict[str, Any] | None = None
     server_description: str | None = None
 
-    wire_type: ClassVar[str] = "mcp"
+    type_: ClassVar[str] = "mcp"
 
 
 class ToolSearch(_OpenAIBuiltin):
@@ -160,7 +165,7 @@ class ToolSearch(_OpenAIBuiltin):
     parameters: dict[str, Any] | None = None
     execution: dict[str, Any] | None = None
 
-    wire_type: ClassVar[str] = "tool_search"
+    type_: ClassVar[str] = "tool_search"
 
 
 # ---------------------------------------------------------------------------

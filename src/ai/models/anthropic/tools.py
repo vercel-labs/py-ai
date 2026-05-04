@@ -15,7 +15,7 @@ Usage::
     s = ai.stream(model, msgs, tools=tools)
 
 We ship the latest stable variants of each tool. Older versions can be
-added on demand. The version is captured in the ``wire_type`` ClassVar
+added on demand. The version is captured in the ``type_`` ClassVar
 on each subclass; adapters read these — users don't.
 """
 
@@ -65,11 +65,16 @@ class _AnthropicBuiltin(tools_.BuiltinTool):
 
     # Anthropic beta feature flag required to enable this tool, if any.
     beta: ClassVar[str | None] = None
-    # The wire-level ``type`` field passed to the API
-    # (e.g. ``"web_search_20260209"``).
-    wire_type: ClassVar[str] = ""
-    # The wire-level ``name`` of the tool block (e.g. ``"web_search"``).
-    wire_name: ClassVar[str] = ""
+    # The ``"type"`` field sent to the API (e.g. ``"web_search_20260209"``).
+    # Trailing underscore avoids shadowing the ``type`` builtin.
+    type_: ClassVar[str] = ""
+    # The ``"name"`` field sent to the API (e.g. ``"web_search"``).
+    # Trailing underscore avoids shadowing the ``name`` property on the base.
+    name_: ClassVar[str] = ""
+
+    @property
+    def name(self) -> str:
+        return self.name_
 
 
 class WebSearch(_AnthropicBuiltin):
@@ -85,8 +90,8 @@ class WebSearch(_AnthropicBuiltin):
     user_location: UserLocation | None = None
 
     beta: ClassVar[str | None] = "code-execution-web-tools-2026-02-09"
-    wire_type: ClassVar[str] = "web_search_20260209"
-    wire_name: ClassVar[str] = "web_search"
+    type_: ClassVar[str] = "web_search_20260209"
+    name_: ClassVar[str] = "web_search"
 
     @pydantic.model_validator(mode="after")
     def _check_domains(self) -> WebSearch:
@@ -108,8 +113,8 @@ class WebFetch(_AnthropicBuiltin):
     max_content_tokens: int | None = None
 
     beta: ClassVar[str | None] = "code-execution-web-tools-2026-02-09"
-    wire_type: ClassVar[str] = "web_fetch_20260209"
-    wire_name: ClassVar[str] = "web_fetch"
+    type_: ClassVar[str] = "web_fetch_20260209"
+    name_: ClassVar[str] = "web_fetch"
 
     @pydantic.model_validator(mode="after")
     def _check_domains(self) -> WebFetch:
@@ -125,8 +130,8 @@ class CodeExecution(_AnthropicBuiltin):
     """Code execution sandbox."""
 
     beta: ClassVar[str | None] = None
-    wire_type: ClassVar[str] = "code_execution_20260120"
-    wire_name: ClassVar[str] = "code_execution"
+    type_: ClassVar[str] = "code_execution_20260120"
+    name_: ClassVar[str] = "code_execution"
 
 
 class ComputerUse(_AnthropicBuiltin):
@@ -138,8 +143,8 @@ class ComputerUse(_AnthropicBuiltin):
     enable_zoom: bool | None = None
 
     beta: ClassVar[str | None] = "computer-use-2025-11-24"
-    wire_type: ClassVar[str] = "computer_20251124"
-    wire_name: ClassVar[str] = "computer"
+    type_: ClassVar[str] = "computer_20251124"
+    name_: ClassVar[str] = "computer"
 
 
 class TextEditor(_AnthropicBuiltin):
@@ -148,24 +153,24 @@ class TextEditor(_AnthropicBuiltin):
     max_characters: int | None = None
 
     beta: ClassVar[str | None] = None
-    wire_type: ClassVar[str] = "text_editor_20250728"
-    wire_name: ClassVar[str] = "str_replace_based_edit_tool"
+    type_: ClassVar[str] = "text_editor_20250728"
+    name_: ClassVar[str] = "str_replace_based_edit_tool"
 
 
 class Bash(_AnthropicBuiltin):
     """Bash shell."""
 
     beta: ClassVar[str | None] = "computer-use-2025-01-24"
-    wire_type: ClassVar[str] = "bash_20250124"
-    wire_name: ClassVar[str] = "bash"
+    type_: ClassVar[str] = "bash_20250124"
+    name_: ClassVar[str] = "bash"
 
 
 class Memory(_AnthropicBuiltin):
     """Persistent memory tool."""
 
     beta: ClassVar[str | None] = "context-management-2025-06-27"
-    wire_type: ClassVar[str] = "memory_20250818"
-    wire_name: ClassVar[str] = "memory"
+    type_: ClassVar[str] = "memory_20250818"
+    name_: ClassVar[str] = "memory"
 
 
 # ---------------------------------------------------------------------------

@@ -38,6 +38,16 @@ class BuiltinTool(pydantic.BaseModel):
         alias_generator=to_camel,
     )
 
+    @property
+    def name(self) -> str:
+        """Tool name.
+
+        Provider-specific subclasses must override this.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} must override the `name` property"
+        )
+
 
 class BuiltinToolConfig(pydantic.BaseModel):
     """Base for nested config models used inside :class:`BuiltinTool` fields.

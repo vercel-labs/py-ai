@@ -202,22 +202,22 @@ def _tool_to_v3(tool: types.ToolLike) -> dict[str, Any]:
     if isinstance(tool, _AnthropicBuiltin):
         return {
             "type": "provider",
-            "id": f"anthropic.{tool.wire_type}",
-            "name": tool.wire_name,
+            "id": f"anthropic.{tool.type_}",
+            "name": tool.name_,
             "args": tool.model_dump(mode="json", by_alias=True, exclude_none=True),
         }
     if isinstance(tool, _OpenAIBuiltin):
         return {
             "type": "provider",
-            "id": f"openai.{tool.wire_type}",
-            "name": tool.wire_type,
+            "id": f"openai.{tool.type_}",
+            "name": tool.type_,
             "args": tool.model_dump(mode="json", by_alias=True, exclude_none=True),
         }
     if isinstance(tool, _GatewayBuiltin):
         return {
             "type": "provider",
-            "id": tool.wire_id,
-            "name": tool.wire_name,
+            "id": tool.id_,
+            "name": tool.name_,
             "args": tool.model_dump(mode="json", by_alias=True, exclude_none=True),
         }
     if isinstance(tool, tools_.BuiltinTool):

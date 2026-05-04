@@ -146,8 +146,8 @@ class TestGatewayBuiltins:
             }
         ]
 
-    async def test_native_builtins_have_wire_types(self) -> None:
-        """Every concrete native built-in declares a non-empty wire_type
+    async def test_native_builtins_have_types(self) -> None:
+        """Every concrete native built-in declares a non-empty type_
         and the gateway-derived id is unique per provider."""
         for base, prefix in (
             (_AnthropicBuiltin, "anthropic"),
@@ -155,9 +155,9 @@ class TestGatewayBuiltins:
         ):
             seen: set[str] = set()
             for cls in base.__subclasses__():
-                wire_type = cls.wire_type
-                assert wire_type, f"{cls.__name__} missing wire_type"
-                gateway_id = f"{prefix}.{wire_type}"
+                type_val = cls.type_
+                assert type_val, f"{cls.__name__} missing type_"
+                gateway_id = f"{prefix}.{type_val}"
                 assert gateway_id not in seen, f"duplicate id {gateway_id!r}"
                 seen.add(gateway_id)
 

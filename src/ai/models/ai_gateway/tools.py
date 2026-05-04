@@ -28,13 +28,21 @@ from ...types import tools as tools_
 class _GatewayBuiltin(tools_.BuiltinTool):
     """Internal base for gateway-native built-ins.
 
-    Each subclass declares ``wire_id`` (the ``provider.tool`` id sent on
-    the wire, e.g. ``"gateway.perplexity_search"``) and ``wire_name`` (the
+    Each subclass declares ``id_`` (the ``provider.tool`` id sent on
+    the wire, e.g. ``"gateway.perplexity_search"``) and ``name_`` (the
     unique name within the model call).
     """
 
-    wire_id: ClassVar[str] = ""
-    wire_name: ClassVar[str] = ""
+    # The ``"id"`` field sent on the wire (e.g. ``"gateway.perplexity_search"``).
+    # Trailing underscore avoids shadowing the ``id`` builtin.
+    id_: ClassVar[str] = ""
+    # The ``"name"`` field sent on the wire (e.g. ``"perplexity_search"``).
+    # Trailing underscore avoids shadowing the ``name`` property on the base.
+    name_: ClassVar[str] = ""
+
+    @property
+    def name(self) -> str:
+        return self.name_
 
 
 # ---------------------------------------------------------------------------
@@ -57,8 +65,8 @@ class PerplexitySearch(_GatewayBuiltin):
     search_language_filter: list[str] | None = None
     search_recency_filter: Literal["day", "week", "month", "year"] | None = None
 
-    wire_id: ClassVar[str] = "gateway.perplexity_search"
-    wire_name: ClassVar[str] = "perplexity_search"
+    id_: ClassVar[str] = "gateway.perplexity_search"
+    name_: ClassVar[str] = "perplexity_search"
 
 
 def perplexity_search(
@@ -122,8 +130,8 @@ class ParallelSearch(_GatewayBuiltin):
     excerpts: Excerpts | None = None
     fetch_policy: FetchPolicy | None = None
 
-    wire_id: ClassVar[str] = "gateway.parallel_search"
-    wire_name: ClassVar[str] = "parallel_search"
+    id_: ClassVar[str] = "gateway.parallel_search"
+    name_: ClassVar[str] = "parallel_search"
 
 
 def parallel_search(

@@ -119,10 +119,10 @@ async def test_computer_use_required_fields(
     assert _beta_header(captured) == "computer-use-2025-11-24"
 
 
-async def test_text_editor_wire_name_differs_from_class(
+async def test_text_editor_name_differs_from_class(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``TextEditor`` ships under the ``str_replace_based_edit_tool`` wire name."""
+    """``TextEditor`` ships under the ``str_replace_based_edit_tool`` name."""
     captured = await _capture_tools(monkeypatch, [anthropic_tools.text_editor()])
 
     assert captured["tools"] == [
