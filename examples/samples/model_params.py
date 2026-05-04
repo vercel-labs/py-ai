@@ -3,6 +3,7 @@
 import asyncio
 
 import ai
+from ai.models.ai_gateway import GatewayStreamParams
 from ai.models.ai_gateway import params as gateway_params
 
 model = ai.ai_gateway("anthropic/claude-sonnet-4")
@@ -14,14 +15,11 @@ messages = [
 
 
 async def main() -> None:
-    async with ai.stream(
-        model,
-        messages,
-        params=[
-            gateway_params.GatewayParams(sort="cost"),
-            gateway_params.GatewayAnthropicParams(speed="fast"),
-        ],
-    ) as stream:
+    params: ai.StreamParams[GatewayStreamParams] = [
+        gateway_params.GatewayParams(sort="cost"),
+        gateway_params.GatewayAnthropicParams(speed="fast"),
+    ]
+    async with ai.stream(model, messages, params=params) as stream:
         async for event in stream:
             if isinstance(event, ai.TextDelta):
                 print(event.chunk, end="", flush=True)
