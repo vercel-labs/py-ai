@@ -1,14 +1,9 @@
-"""Tool schema types — what the LLM layer sees.
-
-These are schema-only definitions used by LanguageModel.stream(tools=...).
-The executable Tool class and @tool decorator live in agents.agent.
-"""
-
-from __future__ import annotations
+"""Tool schema types — what the LLM layer sees."""
 
 from typing import Any
 
 import pydantic
+from pydantic.alias_generators import to_camel
 
 
 class ToolSchema(pydantic.BaseModel):
@@ -18,3 +13,51 @@ class ToolSchema(pydantic.BaseModel):
     description: str
     param_schema: dict[str, Any]
     return_type: Any
+
+
+class BuiltinTool(pydantic.BaseModel):
+    """Base for provider-executed built-in tools.
+
+    All concrete subclasses (and any nested config models they expose)
+    automatically get camelCase aliases for snake_case Python fields, so:
+
+    * users can construct with snake_case kwargs (Pythonic),
+    * ``model_dump()`` (default) emits snake_case (e.g. for the native
+      Anthropic API which uses snake_case),
+    * ``model_dump(by_alias=True)`` emits camelCase (e.g. for the AI
+      Gateway v3 wire which uses camelCase).
+
+    Nested ``BaseModel`` config types are expected to inherit
+    ``BuiltinToolConfig`` (or set the same ``alias_generator`` /
+    ``populate_by_name``) so aliasing works recursively.
+    """
+
+    model_config = pydantic.ConfigDict(
+        frozen=True,
+        populate_by_name=True,
+        alias_generator=to_camel,
+    )
+
+    @property
+    def name(self) -> str:
+        """Tool name.
+
+        Provider-specific subclasses must override this.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} must override the `name` property"
+        )
+
+
+class BuiltinToolConfig(pydantic.BaseModel):
+    """Base for nested config models used inside :class:`BuiltinTool` fields.
+
+    Carries the same alias-generator config so ``model_dump(by_alias=True)``
+    on the parent recursively emits camelCase.
+    """
+
+    model_config = pydantic.ConfigDict(
+        frozen=True,
+        populate_by_name=True,
+        alias_generator=to_camel,
+    )

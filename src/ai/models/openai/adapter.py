@@ -11,6 +11,7 @@ import openai
 import pydantic
 
 from ... import types
+from ...types import tools as tools_
 from .. import core
 from .params import OpenAIChatParams
 
@@ -22,18 +23,26 @@ from .params import OpenAIChatParams
 def _tools_to_openai(
     tools: Sequence[types.ToolLike],
 ) -> list[dict[str, Any]]:
-    """Convert internal Tool objects to OpenAI tool schema format."""
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.param_schema,
-            },
-        }
-        for tool in tools
-    ]
+    """Convert internal Tool objects to OpenAI tool schema format.
+
+    Built-in tools are rejected upstream by ``stream(...)``; this helper
+    only processes custom (host-executed) tools.
+    """
+    result: list[dict[str, Any]] = []
+    for tool in tools:
+        if isinstance(tool, tools_.BuiltinTool):
+            continue
+        result.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.param_schema,
+                },
+            }
+        )
+    return result
 
 
 async def _file_part_to_openai(
@@ -125,6 +134,16 @@ async def _messages_to_openai(
                                         "arguments": part.tool_args,
                                     },
                                 }
+                            )
+                        case (
+                            types.BuiltinToolCallPart() | types.BuiltinToolReturnPart()
+                        ):
+                            raise NotImplementedError(
+                                "OpenAI chat-completions adapter does not "
+                                "support BuiltinToolCallPart or "
+                                "BuiltinToolReturnPart in the message history. "
+                                "Route via the AI Gateway provider until a "
+                                "native Responses adapter ships."
                             )
 
                 entry: dict[str, Any] = {"role": "assistant"}
@@ -246,6 +265,14 @@ async def stream(
       ``"low"``, ``"medium"``, ``"high"``, ``"xhigh"``
       (mutually exclusive with ``budget_tokens``).
     """
+    if tools and any(isinstance(t, tools_.BuiltinTool) for t in tools):
+        raise NotImplementedError(
+            "OpenAI built-in tools require the Responses API. "
+            "The chat-completions adapter does not support them. "
+            "Route via the AI Gateway provider until a native Responses "
+            "adapter ships."
+        )
+
     sdk_client = _make_client(client)
     openai_params = _coerce_openai_params(kwargs.get("params"))
     system_message_mode = openai_params.system_message_mode

@@ -25,7 +25,9 @@ import ai
 from ai import models
 from ai.models.ai_gateway import adapter, ai_gateway, errors
 from ai.models.ai_gateway import params as params_
+from ai.models.anthropic import AnthropicParams
 from ai.models.core import model as model_
+from ai.models.openai import OpenAIChatParams, OpenAIResponsesParams
 from ai.types import events, messages
 
 from .conftest import mock_client, sse, user_msg
@@ -197,6 +199,81 @@ class TestStreaming:
         assert len(final.tool_calls) == 1
         assert json.loads(final.tool_calls[0].tool_args) == {"city": "SF"}
 
+    async def test_provider_executed_tool_call_streaming(self) -> None:
+        """``providerExecuted: true`` routes ``tool-input-*`` to BuiltinTool* events.
+
+        ``tool-result`` with ``providerExecuted: true`` aggregates into
+        ``Message.builtin_tool_returns``.
+        """
+        result_payload = [{"title": "Forecast", "url": "https://example.com"}]
+        body = sse(
+            {
+                "type": "tool-input-start",
+                "id": "tc-1",
+                "toolName": "web_search",
+                "providerExecuted": True,
+            },
+            {"type": "tool-input-delta", "id": "tc-1", "delta": '{"q":"weather"}'},
+            {"type": "tool-input-end", "id": "tc-1"},
+            {
+                "type": "tool-result",
+                "toolCallId": "tc-1",
+                "toolName": "web_search",
+                "output": result_payload,
+                "providerExecuted": True,
+            },
+            {"type": "finish", "finishReason": "stop", "usage": {}},
+        )
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text=body)
+
+        final = await _final(
+            mock_client(httpx.MockTransport(handler)), [user_msg("weather")]
+        )
+
+        assert len(final.builtin_tool_calls) == 1
+        bt = final.builtin_tool_calls[0]
+        assert bt.tool_call_id == "tc-1"
+        assert bt.tool_args == '{"q":"weather"}'
+
+        assert len(final.builtin_tool_returns) == 1
+        ret = final.builtin_tool_returns[0]
+        assert ret.tool_call_id == "tc-1"
+        assert ret.tool_name == "web_search"
+        assert ret.result == result_payload
+
+    async def test_provider_executed_one_shot_tool_call(self) -> None:
+        """One-shot ``tool-call`` with ``providerExecuted`` expands to BuiltinTool*."""
+        body = sse(
+            {
+                "type": "tool-call",
+                "toolCallId": "tc-1",
+                "toolName": "web_search",
+                "input": {"q": "x"},
+                "providerExecuted": True,
+            },
+            {"type": "finish", "finishReason": "stop", "usage": {}},
+        )
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text=body)
+
+        events_seen: list[type] = []
+        async for event in adapter.stream(
+            mock_client(httpx.MockTransport(handler)),
+            _TEST_MODEL,
+            [user_msg("hi")],
+        ):
+            events_seen.append(type(event))
+
+        assert events.BuiltinToolStart in events_seen
+        assert events.BuiltinToolDelta in events_seen
+        assert events.BuiltinToolEnd in events_seen
+        # Crucially, no host-tool events for a provider-executed call.
+        assert events.ToolStart not in events_seen
+        assert events.ToolEnd not in events_seen
+
 
 # ---------------------------------------------------------------------------
 # Request: headers, body, tools
@@ -265,7 +342,7 @@ class TestRequest:
                 extra_body={"futureGatewayField": True},
                 extra_headers={"x-gateway-feature": "enabled"},
             ),
-            params_.GatewayAnthropicParams(
+            AnthropicParams(
                 speed="fast",
                 extra_body={"futureAnthropicField": True},
                 extra_headers={"x-forwarded-provider-feature": "enabled"},
@@ -300,8 +377,8 @@ class TestRequest:
         client = mock_client(httpx.MockTransport(handler))
         model = ai_gateway("openai/gpt-5.4", client=client)
         request_params: list[params_.GatewayStreamParams] = [
-            params_.GatewayOpenAIChatParams(service_tier="auto"),
-            params_.GatewayOpenAIResponsesParams(previous_response_id="resp_123"),
+            OpenAIChatParams(service_tier="auto"),
+            OpenAIResponsesParams(previous_response_id="resp_123"),
         ]
         stream = models.stream(
             model,
@@ -383,6 +460,59 @@ class TestRequest:
         assert prompt[2]["role"] == "tool"
         assert prompt[2]["content"][0]["type"] == "tool-result"
         assert prompt[3]["role"] == "user"
+
+    async def test_multi_turn_round_trip_builtin_parts(self) -> None:
+        """``BuiltinToolCallPart``/``BuiltinToolReturnPart`` serialize as v3
+        ``tool-call``/``tool-result`` blocks tagged ``providerExecuted: true``."""
+        captured_body: dict[str, Any] = {}
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            captured_body.update(json.loads(req.content))
+            return httpx.Response(
+                200,
+                text=sse({"type": "finish", "finishReason": "stop", "usage": {}}),
+            )
+
+        call = messages.BuiltinToolCallPart(
+            tool_call_id="srvtoolu_1",
+            tool_name="web_search",
+            tool_args='{"q":"weather"}',
+            provider_name="anthropic",
+        )
+        ret = messages.BuiltinToolReturnPart(
+            tool_call_id="srvtoolu_1",
+            tool_name="web_search",
+            result=[{"title": "Forecast"}],
+            provider_name="anthropic",
+        )
+        convo = [
+            user_msg("weather?"),
+            messages.Message(role="assistant", parts=[call, ret]),
+            user_msg("thanks"),
+        ]
+
+        await _collect(mock_client(httpx.MockTransport(handler)), convo)
+
+        assistant = next(m for m in captured_body["prompt"] if m["role"] == "assistant")
+        assert assistant["content"] == [
+            {
+                "type": "tool-call",
+                "toolCallId": "srvtoolu_1",
+                "toolName": "web_search",
+                "input": {"q": "weather"},
+                "providerExecuted": True,
+            },
+            {
+                "type": "tool-result",
+                "toolCallId": "srvtoolu_1",
+                "toolName": "web_search",
+                "output": {
+                    "type": "json",
+                    "value": [{"title": "Forecast"}],
+                },
+                "providerExecuted": True,
+            },
+        ]
 
 
 # ---------------------------------------------------------------------------

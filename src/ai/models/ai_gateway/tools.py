@@ -1,0 +1,162 @@
+"""Gateway-native provider-executed tools.
+
+These tools are executed server-side by the AI Gateway itself (not by the
+underlying language-model provider) and therefore work with **any**
+gateway-routed model — Anthropic, OpenAI, Google, etc.
+
+Usage::
+
+    from ai.models import ai_gateway
+
+    tools = [
+        ai_gateway.tools.perplexity_search(max_results=5),
+        ai_gateway.tools.parallel_search(mode="agentic"),
+    ]
+    s = ai.stream(model, msgs, tools=tools)
+
+The configuration fields here mirror the JS gateway tool configs and are
+sent over the wire as ``args`` of a ``provider``-typed tool block.
+"""
+
+from __future__ import annotations
+
+from typing import ClassVar, Literal
+
+from ...types import tools as tools_
+
+
+class _GatewayBuiltin(tools_.BuiltinTool):
+    """Internal base for gateway-native built-ins.
+
+    Each subclass declares ``id_`` (the ``provider.tool`` id sent on
+    the wire, e.g. ``"gateway.perplexity_search"``) and ``name_`` (the
+    unique name within the model call).
+    """
+
+    # The ``"id"`` field sent on the wire (e.g. ``"gateway.perplexity_search"``).
+    # Trailing underscore avoids shadowing the ``id`` builtin.
+    id_: ClassVar[str] = ""
+    # The ``"name"`` field sent on the wire (e.g. ``"perplexity_search"``).
+    # Trailing underscore avoids shadowing the ``name`` property on the base.
+    name_: ClassVar[str] = ""
+
+    @property
+    def name(self) -> str:
+        return self.name_
+
+
+# ---------------------------------------------------------------------------
+# perplexity_search
+# ---------------------------------------------------------------------------
+
+
+class PerplexitySearch(_GatewayBuiltin):
+    """Search the web using Perplexity's Search API.
+
+    Provides ranked search results with advanced filtering options including
+    domain, language, date range, and recency filters.
+    """
+
+    max_results: int | None = None
+    max_tokens_per_page: int | None = None
+    max_tokens: int | None = None
+    country: str | None = None
+    search_domain_filter: list[str] | None = None
+    search_language_filter: list[str] | None = None
+    search_recency_filter: Literal["day", "week", "month", "year"] | None = None
+
+    id_: ClassVar[str] = "gateway.perplexity_search"
+    name_: ClassVar[str] = "perplexity_search"
+
+
+def perplexity_search(
+    *,
+    max_results: int | None = None,
+    max_tokens_per_page: int | None = None,
+    max_tokens: int | None = None,
+    country: str | None = None,
+    search_domain_filter: list[str] | None = None,
+    search_language_filter: list[str] | None = None,
+    search_recency_filter: Literal["day", "week", "month", "year"] | None = None,
+) -> PerplexitySearch:
+    return PerplexitySearch(
+        max_results=max_results,
+        max_tokens_per_page=max_tokens_per_page,
+        max_tokens=max_tokens,
+        country=country,
+        search_domain_filter=search_domain_filter,
+        search_language_filter=search_language_filter,
+        search_recency_filter=search_recency_filter,
+    )
+
+
+# ---------------------------------------------------------------------------
+# parallel_search
+# ---------------------------------------------------------------------------
+
+
+class SourcePolicy(tools_.BuiltinToolConfig):
+    """Source policy for controlling which domains to include/exclude."""
+
+    include_domains: list[str] | None = None
+    exclude_domains: list[str] | None = None
+    after_date: str | None = None
+
+
+class Excerpts(tools_.BuiltinToolConfig):
+    """Excerpt configuration for controlling result length."""
+
+    max_chars_per_result: int | None = None
+    max_chars_total: int | None = None
+
+
+class FetchPolicy(tools_.BuiltinToolConfig):
+    """Fetch policy for controlling content freshness."""
+
+    max_age_seconds: int | None = None
+
+
+class ParallelSearch(_GatewayBuiltin):
+    """Search the web using Parallel AI's Search API.
+
+    Takes a natural-language objective and returns relevant excerpts,
+    replacing multiple keyword searches with a single call for broad
+    or complex queries.
+    """
+
+    mode: Literal["one-shot", "agentic"] | None = None
+    max_results: int | None = None
+    source_policy: SourcePolicy | None = None
+    excerpts: Excerpts | None = None
+    fetch_policy: FetchPolicy | None = None
+
+    id_: ClassVar[str] = "gateway.parallel_search"
+    name_: ClassVar[str] = "parallel_search"
+
+
+def parallel_search(
+    *,
+    mode: Literal["one-shot", "agentic"] | None = None,
+    max_results: int | None = None,
+    source_policy: SourcePolicy | None = None,
+    excerpts: Excerpts | None = None,
+    fetch_policy: FetchPolicy | None = None,
+) -> ParallelSearch:
+    return ParallelSearch(
+        mode=mode,
+        max_results=max_results,
+        source_policy=source_policy,
+        excerpts=excerpts,
+        fetch_policy=fetch_policy,
+    )
+
+
+__all__ = [
+    "Excerpts",
+    "FetchPolicy",
+    "ParallelSearch",
+    "PerplexitySearch",
+    "SourcePolicy",
+    "parallel_search",
+    "perplexity_search",
+]

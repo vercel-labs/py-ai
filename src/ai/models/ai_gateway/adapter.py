@@ -12,15 +12,15 @@ import httpx
 import pydantic
 
 from ... import types
+from ...types import tools as tools_
 from .. import core
+from ..anthropic.params import AnthropicParams
+from ..anthropic.tools import _AnthropicBuiltin
+from ..openai.params import OpenAIChatParams, OpenAIResponsesParams
+from ..openai.tools import _OpenAIBuiltin
 from . import errors, sdk
-from .params import (
-    GATEWAY_STREAM_PARAMS_TYPES,
-    GatewayAnthropicParams,
-    GatewayOpenAIChatParams,
-    GatewayOpenAIResponsesParams,
-    GatewayParams,
-)
+from .params import GATEWAY_STREAM_PARAMS_TYPES, GatewayParams
+from .tools import _GatewayBuiltin
 
 # ---------------------------------------------------------------------------
 # Shared request helpers
@@ -132,6 +132,32 @@ async def _messages_to_prompt(
                                     "input": tool_input,
                                 }
                             )
+                        case types.BuiltinToolCallPart() as btp:
+                            btp_input: Any = (
+                                json.loads(btp.tool_args) if btp.tool_args else {}
+                            )
+                            assistant_content.append(
+                                {
+                                    "type": "tool-call",
+                                    "toolCallId": btp.tool_call_id,
+                                    "toolName": btp.tool_name,
+                                    "input": btp_input,
+                                    "providerExecuted": True,
+                                }
+                            )
+                        case types.BuiltinToolReturnPart() as brp:
+                            assistant_content.append(
+                                {
+                                    "type": "tool-result",
+                                    "toolCallId": brp.tool_call_id,
+                                    "toolName": brp.tool_name,
+                                    "output": {
+                                        "type": "json",
+                                        "value": brp.result,
+                                    },
+                                    "providerExecuted": True,
+                                }
+                            )
                 result.append({"role": "assistant", "content": assistant_content})
 
             case "tool":
@@ -165,6 +191,49 @@ async def _messages_to_prompt(
     return result
 
 
+def _tool_to_v3(tool: types.ToolLike) -> dict[str, Any]:
+    """Convert a tool-like object to the v3 wire format.
+
+    Built-in tools use ``model_dump(by_alias=True)`` to emit camelCase keys,
+    which is what the gateway's JS-derived wire schema expects.  The
+    ``alias_generator=to_camel`` on the ``BuiltinTool`` base class handles
+    the conversion, including for nested config models.
+    """
+    if isinstance(tool, _AnthropicBuiltin):
+        return {
+            "type": "provider",
+            "id": f"anthropic.{tool.type_}",
+            "name": tool.name_,
+            "args": tool.model_dump(mode="json", by_alias=True, exclude_none=True),
+        }
+    if isinstance(tool, _OpenAIBuiltin):
+        return {
+            "type": "provider",
+            "id": f"openai.{tool.type_}",
+            "name": tool.type_,
+            "args": tool.model_dump(mode="json", by_alias=True, exclude_none=True),
+        }
+    if isinstance(tool, _GatewayBuiltin):
+        return {
+            "type": "provider",
+            "id": tool.id_,
+            "name": tool.name_,
+            "args": tool.model_dump(mode="json", by_alias=True, exclude_none=True),
+        }
+    if isinstance(tool, tools_.BuiltinTool):
+        raise TypeError(
+            f"AI Gateway does not support built-in tool "
+            f"{type(tool).__name__}; use anthropic.tools.*, "
+            f"openai.tools.*, or ai_gateway.tools.* helpers."
+        )
+    return {
+        "type": "function",
+        "name": tool.name,
+        "description": tool.description,
+        "inputSchema": tool.param_schema,
+    }
+
+
 async def _build_request_body(
     messages: list[types.Message],
     tools: Sequence[types.proto.ToolLike] | None = None,
@@ -177,15 +246,7 @@ async def _build_request_body(
         "prompt": await _messages_to_prompt(messages),
     }
     if tools:
-        body["tools"] = [
-            {
-                "type": "function",
-                "name": tool.name,
-                "description": tool.description,
-                "inputSchema": tool.param_schema,
-            }
-            for tool in tools
-        ]
+        body["tools"] = [_tool_to_v3(tool) for tool in tools]
     if output_type is not None and issubclass(output_type, pydantic.BaseModel):
         body["responseFormat"] = {
             "type": "json",
@@ -233,8 +294,8 @@ def _normalize_gateway_params(value: Any) -> list[pydantic.BaseModel]:
     for item in raw_items:
         if not isinstance(item, GATEWAY_STREAM_PARAMS_TYPES):
             raise TypeError(
-                "ai-gateway streams accept GatewayParams, GatewayOpenAIChatParams, "
-                "GatewayOpenAIResponsesParams, or GatewayAnthropicParams"
+                "ai-gateway streams accept GatewayParams, OpenAIChatParams, "
+                "OpenAIResponsesParams, or AnthropicParams"
             )
         result.append(item)
     return result
@@ -244,9 +305,9 @@ def _gateway_provider_options_key(param: pydantic.BaseModel) -> str:
     """Return the providerOptions bucket name for one Gateway param wrapper."""
     if isinstance(param, GatewayParams):
         return "gateway"
-    if isinstance(param, GatewayOpenAIChatParams | GatewayOpenAIResponsesParams):
+    if isinstance(param, OpenAIChatParams | OpenAIResponsesParams):
         return "openai"
-    if isinstance(param, GatewayAnthropicParams):
+    if isinstance(param, AnthropicParams):
         return "anthropic"
     raise TypeError(f"unsupported ai-gateway params type {type(param).__name__}")
 
@@ -307,8 +368,15 @@ def _merge_provider_options(
 # ---------------------------------------------------------------------------
 
 
+def _is_provider_executed(data: dict[str, Any]) -> bool:
+    """Whether a v3 tool part marks itself as provider-executed."""
+    return bool(data.get("providerExecuted") or data.get("provider_executed"))
+
+
 def _expand_tool_call(
-    data: dict[str, Any], streamed_tool_ids: set[str]
+    data: dict[str, Any],
+    streamed_tool_ids: set[str],
+    provider_executed_ids: set[str] | None = None,
 ) -> list[types.events.Event]:
     """Expand a complete ``tool-call`` part into Start + Delta + End.
 
@@ -317,9 +385,25 @@ def _expand_tool_call(
     tc_id = data.get("toolCallId", "")
     if tc_id in streamed_tool_ids:
         return []
+    if provider_executed_ids is None:
+        provider_executed_ids = set()
     tool_name = data.get("toolName", "")
     tool_input = data.get("input", "")
     args_str = tool_input if isinstance(tool_input, str) else json.dumps(tool_input)
+    if _is_provider_executed(data) or tc_id in provider_executed_ids:
+        provider_executed_ids.add(tc_id)
+        return [
+            types.events.BuiltinToolStart(tool_call_id=tc_id, tool_name=tool_name),
+            types.events.BuiltinToolDelta(tool_call_id=tc_id, chunk=args_str),
+            types.events.BuiltinToolEnd(
+                tool_call_id=tc_id,
+                tool_call=types.messages.BuiltinToolCallPart(
+                    tool_call_id=tc_id,
+                    tool_name=tool_name,
+                    tool_args=args_str,
+                ),
+            ),
+        ]
     return [
         types.events.ToolStart(tool_call_id=tc_id, tool_name=tool_name),
         types.events.ToolDelta(tool_call_id=tc_id, chunk=args_str),
@@ -357,9 +441,13 @@ def _parse_usage(data: Any) -> types.Usage:
 
 
 def _parse_stream_part(
-    data: dict[str, Any], streamed_tool_ids: set[str]
+    data: dict[str, Any],
+    streamed_tool_ids: set[str],
+    provider_executed_ids: set[str] | None = None,
 ) -> list[types.events.Event]:
     """Convert a ``LanguageModelV3StreamPart`` to public events."""
+    if provider_executed_ids is None:
+        provider_executed_ids = set()
     match data.get("type", ""):
         case "text-start":
             return [types.events.TextStart(block_id=data.get("id", "text"))]
@@ -392,6 +480,14 @@ def _parse_stream_part(
         case "tool-input-start":
             tcid = data.get("id", "")
             streamed_tool_ids.add(tcid)
+            if _is_provider_executed(data):
+                provider_executed_ids.add(tcid)
+                return [
+                    types.events.BuiltinToolStart(
+                        tool_call_id=tcid,
+                        tool_name=data.get("toolName", ""),
+                    )
+                ]
             return [
                 types.events.ToolStart(
                     tool_call_id=tcid,
@@ -400,23 +496,62 @@ def _parse_stream_part(
             ]
 
         case "tool-input-delta":
+            tcid = data.get("id", "")
+            if tcid in provider_executed_ids:
+                return [
+                    types.events.BuiltinToolDelta(
+                        tool_call_id=tcid,
+                        chunk=data.get("delta", ""),
+                    )
+                ]
             return [
                 types.events.ToolDelta(
-                    tool_call_id=data.get("id", ""),
+                    tool_call_id=tcid,
                     chunk=data.get("delta", ""),
                 )
             ]
 
         case "tool-input-end":
+            tcid = data.get("id", "")
+            if tcid in provider_executed_ids:
+                return [
+                    types.events.BuiltinToolEnd(
+                        tool_call_id=tcid,
+                        tool_call=types.messages.BuiltinToolCallPart(
+                            tool_call_id=tcid,
+                            tool_name="",
+                        ),
+                    )
+                ]
             return [
                 types.events.ToolEnd(
-                    tool_call_id=data.get("id", ""),
+                    tool_call_id=tcid,
                     tool_call=types.messages.DUMMY_TOOL_CALL,
                 )
             ]
 
         case "tool-call":
-            return _expand_tool_call(data, streamed_tool_ids)
+            return _expand_tool_call(data, streamed_tool_ids, provider_executed_ids)
+
+        case "tool-result":
+            tcid = data.get("toolCallId", "")
+            tool_name = data.get("toolName", "")
+            output = data.get("output") or data.get("result")
+            is_error = bool(data.get("isError"))
+            if _is_provider_executed(data) or tcid in provider_executed_ids:
+                provider_executed_ids.add(tcid)
+                return [
+                    types.events.BuiltinToolResult(
+                        tool_call_id=tcid,
+                        result=types.messages.BuiltinToolReturnPart(
+                            tool_call_id=tcid,
+                            tool_name=tool_name,
+                            result=output,
+                            is_error=is_error,
+                        ),
+                    )
+                ]
+            return []
 
         case "file":
             return [
@@ -466,8 +601,11 @@ async def stream(
         ) as response:
             yield types.events.StreamStart()
             streamed_tool_ids: set[str] = set()
+            provider_executed_ids: set[str] = set()
             async for data in gateway.iter_sse(response):
-                for event in _parse_stream_part(data, streamed_tool_ids):
+                for event in _parse_stream_part(
+                    data, streamed_tool_ids, provider_executed_ids
+                ):
                     yield event
     except errors.GatewayError:
         raise
