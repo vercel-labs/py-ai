@@ -1,4 +1,4 @@
-"""Outbound adapter: ``ai.Message`` stream → AI SDK UI protocol."""
+"""Outbound adapter: ``ai.messages.Message`` stream → AI SDK UI protocol."""
 
 from .history import to_ui_messages
 from .sse import to_sse

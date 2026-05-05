@@ -97,8 +97,8 @@ class LLMResult:
 async def llm_call_activity(params: LLMParams) -> LLMResult:
     """Call the LLM, drain the stream, return the final message."""
     model = ai.ai_gateway("anthropic/claude-sonnet-4")
-    messages = [ai.Message.model_validate(m) for m in params.messages]
-    tools = [ai.ToolSchema(return_type=None, **t) for t in params.tool_schemas]
+    messages = [ai.messages.Message.model_validate(m) for m in params.messages]
+    tools = [ai.tools.ToolSchema(return_type=None, **t) for t in params.tool_schemas]
 
     s = ai.models.stream(model, messages, tools=tools)
     async for _event in s:
@@ -118,7 +118,7 @@ weather_agent = ai.agent(tools=[get_weather, get_population])
 
 
 @weather_agent.loop
-async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.AgentEvent]:
+async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
     tool_schemas = [
         {"name": t.name, "description": t.description, "param_schema": t.param_schema}
         for t in context.tools
@@ -135,8 +135,8 @@ async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.AgentEvent]:
             start_to_close_timeout=datetime.timedelta(minutes=5),
             retry_policy=temporalio.common.RetryPolicy(maximum_attempts=3),
         )
-        msg = ai.Message.model_validate(result.message)
-        yield ai.StreamEnd(message=msg)
+        msg = ai.messages.Message.model_validate(result.message)
+        yield ai.events.StreamEnd(message=msg)
         context.add(msg)
 
         # 2. No tool calls → done
@@ -144,7 +144,7 @@ async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.AgentEvent]:
             break
 
         # 3. Execute each tool call as a Temporal activity (parallel)
-        async def run_tool(tc: ai.ToolCallPart) -> ai.ToolResultPart:
+        async def run_tool(tc: ai.messages.ToolCallPart) -> ai.messages.ToolResultPart:
             import json
 
             activity_fn = TOOL_ACTIVITIES[tc.tool_name]
@@ -171,7 +171,7 @@ class WeatherWorkflow:
     @temporalio.workflow.run
     async def run(self, user_query: str) -> str:
         model = ai.ai_gateway("anthropic/claude-sonnet-4")
-        messages: list[ai.Message] = [
+        messages: list[ai.messages.Message] = [
             ai.system_message(
                 "Answer questions using the weather and population tools."
             ),
@@ -180,7 +180,7 @@ class WeatherWorkflow:
 
         final_text = ""
         async for event in weather_agent.run(model, messages):
-            if isinstance(event, ai.TerminalEvent):
+            if isinstance(event, ai.events.TerminalEvent):
                 final_text = event.message.text
         return final_text
 

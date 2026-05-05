@@ -10,8 +10,8 @@ import pydantic
 import pytest
 
 import ai
+from ai import events as agent_events_
 from ai import middleware
-from ai.agents import events as agent_events_
 
 from .conftest import (
     MOCK_MODEL,
@@ -77,7 +77,7 @@ async def test_wrap_hook_is_called() -> None:
     my_agent = ai.agent()
 
     @my_agent.loop
-    async def custom(context: ai.Context) -> AsyncGenerator[ai.Event]:
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.events.Event]:
         async for event in ai.models.stream(context.model, context.messages):
             yield event
         await ai.hook("test_hook", payload=Confirmation)
@@ -108,7 +108,7 @@ async def test_wrap_agent_run_ordering() -> None:
     class Outer(ai.Middleware):
         async def wrap_agent_run(
             self, call: middleware.AgentRunContext, next: Any
-        ) -> AsyncGenerator[ai.Event]:
+        ) -> AsyncGenerator[ai.events.Event]:
             order.append("outer-before")
             async for event in next(call):
                 yield event
@@ -117,7 +117,7 @@ async def test_wrap_agent_run_ordering() -> None:
     class Inner(ai.Middleware):
         async def wrap_agent_run(
             self, call: middleware.AgentRunContext, next: Any
-        ) -> AsyncGenerator[ai.Event]:
+        ) -> AsyncGenerator[ai.events.Event]:
             order.append("inner-before")
             async for event in next(call):
                 yield event

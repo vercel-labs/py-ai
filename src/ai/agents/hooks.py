@@ -34,6 +34,7 @@ import pydantic
 
 from .. import middleware as middleware_
 from ..types import messages as messages_
+from ..types import tools as tools_
 from . import runtime as runtime_
 
 # ---------------------------------------------------------------------------
@@ -232,24 +233,6 @@ async def cancel_hook(label: str, *, reason: str | None = None) -> None:
 
 # ── Built-in hook payloads ────────────────────────────────────────
 
-
-class ToolApproval(pydantic.BaseModel):
-    """Payload schema for tool-approval hooks.
-
-    Usage inside a loop::
-
-        approval = await hook(
-            f"approve_{tc.tool_call_id}",
-            payload=ToolApproval,
-            metadata={"tool_name": tc.tool_name},
-            interrupt_loop=True,
-        )
-        if approval.granted:
-            ...
-    """
-
-    granted: bool
-    reason: str | None = None
-
+ToolApproval = tools_.ToolApproval
 
 TOOL_APPROVAL_HOOK_TYPE = ToolApproval.__name__

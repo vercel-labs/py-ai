@@ -252,7 +252,7 @@ def _mcp_tool_to_native(
     if tool_prefix:
         name = f"{tool_prefix}_{name}"
 
-    schema = types.ToolSchema(
+    schema = types.tools.ToolSchema(
         name=name,
         description=mcp_tool.description or "",
         param_schema=mcp_tool.inputSchema,

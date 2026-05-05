@@ -8,7 +8,7 @@ from typing import Annotated
 import pytest
 
 import ai
-from ai.agents import events as agent_events_
+from ai import events as agent_events_
 
 from ..conftest import (
     MOCK_MODEL,
@@ -49,7 +49,7 @@ def test_sub_agent_tool_alias_extracted() -> None:
 
     @ai.tool
     async def t() -> ai.SubAgentTool:
-        yield ai.StreamStart()
+        yield ai.events.StreamStart()
 
     assert isinstance(_factory(t), ai.MessageAggregator)
 

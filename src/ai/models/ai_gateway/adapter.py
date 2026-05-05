@@ -27,31 +27,31 @@ from .tools import _GatewayBuiltin
 # ---------------------------------------------------------------------------
 
 
-def _extract_prompt(messages: list[types.Message]) -> str:
+def _extract_prompt(messages: list[types.messages.Message]) -> str:
     """Concatenate all text from user/system messages into one prompt."""
     parts: list[str] = []
     for msg in messages:
         if msg.role in ("user", "system"):
             for p in msg.parts:
-                if isinstance(p, types.TextPart):
+                if isinstance(p, types.messages.TextPart):
                     parts.append(p.text)
     return " ".join(parts)
 
 
 def _extract_input_files(
-    messages: list[types.Message],
-) -> list[types.FilePart]:
+    messages: list[types.messages.Message],
+) -> list[types.messages.FilePart]:
     """Collect all file parts from user messages."""
-    files_: list[types.FilePart] = []
+    files_: list[types.messages.FilePart] = []
     for msg in messages:
         if msg.role == "user":
             for p in msg.parts:
-                if isinstance(p, types.FilePart):
+                if isinstance(p, types.messages.FilePart):
                     files_.append(p)
     return files_
 
 
-def _file_part_to_wire(part: types.FilePart) -> dict[str, Any]:
+def _file_part_to_wire(part: types.messages.FilePart) -> dict[str, Any]:
     """Convert a :class:`FilePart` to the gateway wire format for input files."""
     data = part.data
     if isinstance(data, str) and types.media.is_url(data):
@@ -70,7 +70,7 @@ def _file_part_to_wire(part: types.FilePart) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-async def _file_part_to_v3(part: types.FilePart) -> dict[str, Any]:
+async def _file_part_to_v3(part: types.messages.FilePart) -> dict[str, Any]:
     """Convert a :class:`FilePart` to a v3 ``file`` content part."""
     data = part.data
     if isinstance(data, str) and types.media.is_downloadable_url(data):
@@ -88,7 +88,7 @@ async def _file_part_to_v3(part: types.FilePart) -> dict[str, Any]:
 
 
 async def _messages_to_prompt(
-    messages: list[types.Message],
+    messages: list[types.messages.Message],
 ) -> list[dict[str, Any]]:
     """Convert ``Message`` list to the v3 prompt wire format."""
     result: list[dict[str, Any]] = []
@@ -97,16 +97,16 @@ async def _messages_to_prompt(
         match msg.role:
             case "system":
                 text = "".join(
-                    p.text for p in msg.parts if isinstance(p, types.TextPart)
+                    p.text for p in msg.parts if isinstance(p, types.messages.TextPart)
                 )
                 result.append({"role": "system", "content": text})
 
             case "user":
                 content: list[dict[str, Any]] = []
                 for p in msg.parts:
-                    if isinstance(p, types.TextPart):
+                    if isinstance(p, types.messages.TextPart):
                         content.append({"type": "text", "text": p.text})
-                    elif isinstance(p, types.FilePart):
+                    elif isinstance(p, types.messages.FilePart):
                         content.append(await _file_part_to_v3(p))
                 result.append({"role": "user", "content": content})
 
@@ -114,13 +114,13 @@ async def _messages_to_prompt(
                 assistant_content: list[dict[str, Any]] = []
                 for part in msg.parts:
                     match part:
-                        case types.ReasoningPart(text=text):
+                        case types.messages.ReasoningPart(text=text):
                             assistant_content.append(
                                 {"type": "reasoning", "text": text}
                             )
-                        case types.TextPart(text=text):
+                        case types.messages.TextPart(text=text):
                             assistant_content.append({"type": "text", "text": text})
-                        case types.ToolCallPart() as tp:
+                        case types.messages.ToolCallPart() as tp:
                             tool_input: Any = (
                                 json.loads(tp.tool_args) if tp.tool_args else {}
                             )
@@ -132,7 +132,7 @@ async def _messages_to_prompt(
                                     "input": tool_input,
                                 }
                             )
-                        case types.BuiltinToolCallPart() as btp:
+                        case types.messages.BuiltinToolCallPart() as btp:
                             btp_input: Any = (
                                 json.loads(btp.tool_args) if btp.tool_args else {}
                             )
@@ -145,7 +145,7 @@ async def _messages_to_prompt(
                                     "providerExecuted": True,
                                 }
                             )
-                        case types.BuiltinToolReturnPart() as brp:
+                        case types.messages.BuiltinToolReturnPart() as brp:
                             assistant_content.append(
                                 {
                                     "type": "tool-result",
@@ -163,7 +163,7 @@ async def _messages_to_prompt(
             case "tool":
                 tool_results: list[dict[str, Any]] = []
                 for part in msg.parts:
-                    if isinstance(part, types.ToolResultPart):
+                    if isinstance(part, types.messages.ToolResultPart):
                         output = (
                             {
                                 "type": "error-text",
@@ -191,7 +191,7 @@ async def _messages_to_prompt(
     return result
 
 
-def _tool_to_v3(tool: types.ToolLike) -> dict[str, Any]:
+def _tool_to_v3(tool: types.proto.ToolLike) -> dict[str, Any]:
     """Convert a tool-like object to the v3 wire format.
 
     Built-in tools use ``model_dump(by_alias=True)`` to emit camelCase keys,
@@ -235,7 +235,7 @@ def _tool_to_v3(tool: types.ToolLike) -> dict[str, Any]:
 
 
 async def _build_request_body(
-    messages: list[types.Message],
+    messages: list[types.messages.Message],
     tools: Sequence[types.proto.ToolLike] | None = None,
     output_type: type[Any] | None = None,
     **kwargs: Any,
@@ -413,10 +413,10 @@ def _expand_tool_call(
     ]
 
 
-def _parse_usage(data: Any) -> types.Usage:
+def _parse_usage(data: Any) -> types.usage.Usage:
     """Parse v3 usage data into an internal ``Usage``."""
     if not isinstance(data, dict):
-        return types.Usage()
+        return types.usage.Usage()
 
     input_tokens_obj = data.get("inputTokens")
     output_tokens_obj = data.get("outputTokens")
@@ -424,7 +424,7 @@ def _parse_usage(data: Any) -> types.Usage:
     if isinstance(input_tokens_obj, dict) or isinstance(output_tokens_obj, dict):
         inp = input_tokens_obj if isinstance(input_tokens_obj, dict) else {}
         out = output_tokens_obj if isinstance(output_tokens_obj, dict) else {}
-        return types.Usage(
+        return types.usage.Usage(
             input_tokens=inp.get("total") or 0,
             output_tokens=out.get("total") or 0,
             reasoning_tokens=out.get("reasoning"),
@@ -433,7 +433,7 @@ def _parse_usage(data: Any) -> types.Usage:
             raw=data,
         )
 
-    return types.Usage(
+    return types.usage.Usage(
         input_tokens=data.get("prompt_tokens") or data.get("inputTokens") or 0,
         output_tokens=(data.get("completion_tokens") or data.get("outputTokens") or 0),
         raw=data,
@@ -574,7 +574,7 @@ def _parse_stream_part(
 async def stream(
     client: core.client.Client,
     model: core.model.Model[Any],
-    messages: list[types.Message],
+    messages: list[types.messages.Message],
     *,
     tools: Sequence[types.proto.ToolLike] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
@@ -626,9 +626,9 @@ async def stream(
 async def _generate_image(
     client: core.client.Client,
     model: core.model.Model[Any],
-    messages: list[types.Message],
+    messages: list[types.messages.Message],
     params: core.ImageParams,
-) -> types.Message:
+) -> types.messages.Message:
     """Hit ``/image-model`` and return a Message with FileParts."""
     prompt = _extract_prompt(messages)
     input_files = _extract_input_files(messages)
@@ -648,25 +648,25 @@ async def _generate_image(
     usage_data = data.get("usage")
     usage = None
     if usage_data:
-        usage = types.Usage(
+        usage = types.usage.Usage(
             input_tokens=usage_data.get("inputTokens") or 0,
             output_tokens=usage_data.get("outputTokens") or 0,
         )
 
-    parts: list[types.Part] = []
+    parts: list[types.messages.Part] = []
     for img_b64 in raw_images:
         media_type = types.media.detect_image_media_type(img_b64) or "image/png"
-        parts.append(types.FilePart(data=img_b64, media_type=media_type))
+        parts.append(types.messages.FilePart(data=img_b64, media_type=media_type))
 
-    return types.Message(role="assistant", parts=parts, usage=usage)
+    return types.messages.Message(role="assistant", parts=parts, usage=usage)
 
 
 async def _generate_video(
     client: core.client.Client,
     model: core.model.Model[Any],
-    messages: list[types.Message],
+    messages: list[types.messages.Message],
     params: core.VideoParams,
-) -> types.Message:
+) -> types.messages.Message:
     """Hit ``/video-model`` (SSE) and return a Message with FileParts."""
     prompt = _extract_prompt(messages)
     input_files = _extract_input_files(messages)
@@ -704,7 +704,7 @@ async def _generate_video(
         )
 
     raw_videos: list[dict[str, Any]] = event_data.get("videos", [])
-    parts: list[types.Part] = []
+    parts: list[types.messages.Part] = []
     for video_data in raw_videos:
         vtype = video_data.get("type", "base64")
         media_type = video_data.get("mediaType", "video/mp4")
@@ -715,20 +715,22 @@ async def _generate_video(
             )
             if content_type:
                 media_type = content_type
-            parts.append(types.FilePart(data=downloaded_bytes, media_type=media_type))
+            parts.append(
+                types.messages.FilePart(data=downloaded_bytes, media_type=media_type)
+            )
         else:
             raw_data = video_data.get("data", "")
-            parts.append(types.FilePart(data=raw_data, media_type=media_type))
+            parts.append(types.messages.FilePart(data=raw_data, media_type=media_type))
 
-    return types.Message(role="assistant", parts=parts)
+    return types.messages.Message(role="assistant", parts=parts)
 
 
 async def generate(
     client: core.client.Client,
     model: core.model.Model[Any],
-    messages: list[types.Message],
+    messages: list[types.messages.Message],
     params: core.GenerateParams,
-) -> types.Message:
+) -> types.messages.Message:
     """Generate media through the AI Gateway."""
     if isinstance(params, core.VideoParams):
         return await _generate_video(client, model, messages, params)

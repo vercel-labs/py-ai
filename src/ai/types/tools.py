@@ -6,6 +6,25 @@ import pydantic
 from pydantic.alias_generators import to_camel
 
 
+class ToolApproval(pydantic.BaseModel):
+    """Payload schema for tool-approval hooks.
+
+    Usage inside a loop::
+
+        approval = await hook(
+            f"approve_{tc.tool_call_id}",
+            payload=ToolApproval,
+            metadata={"tool_name": tc.tool_name},
+            interrupt_loop=True,
+        )
+        if approval.granted:
+            ...
+    """
+
+    granted: bool
+    reason: str | None = None
+
+
 class ToolSchema(pydantic.BaseModel):
     """What the LLM sees: name, description, and JSON Schema for parameters."""
 

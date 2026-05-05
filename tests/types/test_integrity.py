@@ -501,7 +501,7 @@ async def test_stream_sanitizes_internal_messages() -> None:
         model: models.Model[pydantic.BaseModel],
         messages: list[messages.Message],
         *,
-        tools: Sequence[ai.ToolLike] | None = None,
+        tools: Sequence[ai.tools.ToolLike] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[events_.Event]:

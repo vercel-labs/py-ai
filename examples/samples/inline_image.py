@@ -27,7 +27,7 @@ async def main() -> None:
     # arrive as FileEvent events and accumulate on s.message.
     async with ai.stream(model, messages) as s:
         async for event in s:
-            if isinstance(event, ai.TextDelta):
+            if isinstance(event, ai.events.TextDelta):
                 print(event.chunk, end="", flush=True)
 
     print()

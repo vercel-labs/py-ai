@@ -44,13 +44,13 @@ async def main() -> None:
     ) as s:
         async for event in s:
             match event:
-                case ai.TextDelta():
+                case ai.events.TextDelta():
                     print(event.chunk, end="", flush=True)
-                case ai.types.BuiltinToolEnd():
+                case ai.events.BuiltinToolEnd():
                     args = json.loads(event.tool_call.tool_args or "{}")
                     print(f"\n[{event.tool_call.tool_name}] input:")
                     print(format(args))
-                case ai.types.BuiltinToolResult():
+                case ai.events.BuiltinToolResult():
                     print(f"\n[{event.result.tool_name}] result:")
                     print(format(event.result.result))
         print()
@@ -61,13 +61,13 @@ async def main() -> None:
     ) as s:
         async for event in s:
             match event:
-                case ai.TextDelta():
+                case ai.events.TextDelta():
                     print(event.chunk, end="", flush=True)
-                case ai.types.BuiltinToolEnd():
+                case ai.events.BuiltinToolEnd():
                     args = json.loads(event.tool_call.tool_args or "{}")
                     print(f"\n[{event.tool_call.tool_name}] input:")
                     print(format(args))
-                case ai.types.BuiltinToolResult():
+                case ai.events.BuiltinToolResult():
                     print(f"\n[{event.result.tool_name}] result:")
                     print(format(event.result.result))
         print()

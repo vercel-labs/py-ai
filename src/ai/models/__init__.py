@@ -13,7 +13,7 @@ Usage::
     msgs = [ai.user_message("hello")]
     s = ai.stream(model, msgs)
     async for event in s:
-        if isinstance(event, ai.TextDelta):
+        if isinstance(event, ai.events.TextDelta):
             print(event.chunk, end="", flush=True)
 
     # explicit client for custom auth

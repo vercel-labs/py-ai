@@ -1,4 +1,4 @@
-"""Inbound adapter: AI SDK v6 UIMessages → internal ``ai.Message`` list.
+"""Inbound adapter: AI SDK v6 UIMessages → internal ``ai.messages.Message`` list.
 
 The primary entry point is :func:`to_messages`, which bundles normalization,
 approval extraction, parsing, and pre-registration of approval resolutions.
@@ -207,7 +207,7 @@ def to_messages(
 
     1. normalize stale tool states (``call`` → ``input-available``, etc.)
     2. extract approval responses
-    3. parse UIMessages into ``ai.Message`` list, splitting at tool boundaries
+    3. parse UIMessages into ``ai.messages.Message`` list, splitting at tool boundaries
     4. if *apply_approvals_* is True, pre-register resolutions via ``resolve_hook``
     5. strip trailing assistant message when approval responses are present
     """

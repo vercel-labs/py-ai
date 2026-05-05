@@ -16,8 +16,8 @@ from . import params as params_
 @dataclasses.dataclass(frozen=True)
 class StreamRequest[ProviderParamsT: pydantic.BaseModel]:
     model: model_.Model[ProviderParamsT]
-    messages: list[types.Message]
-    tools: Sequence[types.ToolLike] | None = None
+    messages: list[types.messages.Message]
+    tools: Sequence[types.proto.ToolLike] | None = None
     output_type: type[pydantic.BaseModel] | None = None
     params: params_.StreamParams[ProviderParamsT] | None = None
 
@@ -25,7 +25,7 @@ class StreamRequest[ProviderParamsT: pydantic.BaseModel]:
 @dataclasses.dataclass(frozen=True)
 class GenerateRequest:
     model: model_.Model[Any]
-    messages: list[types.Message]
+    messages: list[types.messages.Message]
     params: params_.GenerateParams
 
 
@@ -34,12 +34,14 @@ class StreamExecutor(Protocol):
     def _do_stream[ProviderParamsT: pydantic.BaseModel](
         self,
         request: StreamRequest[ProviderParamsT],
-    ) -> AsyncGenerator[types.Event]: ...
+    ) -> AsyncGenerator[types.events.Event]: ...
 
 
 @runtime_checkable
 class GenerateExecutor(Protocol):
-    async def _do_generate(self, request: GenerateRequest) -> types.Message: ...
+    async def _do_generate(
+        self, request: GenerateRequest
+    ) -> types.messages.Message: ...
 
 
 class Executor:
@@ -48,7 +50,7 @@ class Executor:
     async def _do_stream[ProviderParamsT: pydantic.BaseModel](
         self,
         request: StreamRequest[ProviderParamsT],
-    ) -> AsyncGenerator[types.Event]:
+    ) -> AsyncGenerator[types.events.Event]:
         c = client_.auto_client(request.model)
         fn = adapters.get_stream_adapter(request.model.adapter)
         kwargs: dict[str, Any] = {}
@@ -64,7 +66,7 @@ class Executor:
         ):
             yield ev
 
-    async def _do_generate(self, request: GenerateRequest) -> types.Message:
+    async def _do_generate(self, request: GenerateRequest) -> types.messages.Message:
         c = client_.auto_client(request.model)
         fn = adapters.get_generate_adapter(request.model.adapter)
         return await fn(c, request.model, request.messages, params=request.params)
@@ -115,10 +117,12 @@ def _normalize_stream_params[ProviderParamsT: pydantic.BaseModel](
 class Stream:
     """Async-iterable wrapper around an adapter's event stream."""
 
-    def __init__(self, gen: AsyncGenerator[types.Event]) -> None:
+    def __init__(self, gen: AsyncGenerator[types.events.Event]) -> None:
         self._gen = gen
-        self._message: types.Message = types.Message(role="assistant", parts=[])
-        self._parts: dict[str, types.Part] = {}
+        self._message: types.messages.Message = types.messages.Message(
+            role="assistant", parts=[]
+        )
+        self._parts: dict[str, types.messages.Part] = {}
         self._finish_future: asyncio.Future[None] = (
             asyncio.get_event_loop().create_future()
         )
@@ -142,7 +146,7 @@ class Stream:
     def __aiter__(self) -> Self:
         return self
 
-    async def __anext__(self: Self) -> types.Event:
+    async def __anext__(self: Self) -> types.events.Event:
         try:
             event = await self._gen.__anext__()
         except Exception:
@@ -154,11 +158,11 @@ class Stream:
         return event.model_copy(update={"message": self._message, **updates})
 
     @property
-    def message(self) -> types.Message:
+    def message(self) -> types.messages.Message:
         return self._message
 
     @property
-    def usage(self) -> types.Usage | None:
+    def usage(self) -> types.usage.Usage | None:
         return self._message.usage
 
     @property
@@ -166,14 +170,14 @@ class Stream:
         return self._message.text
 
     @property
-    def tool_calls(self) -> list[types.ToolCallPart]:
+    def tool_calls(self) -> list[types.messages.ToolCallPart]:
         return self._message.tool_calls
 
     @property
     def output(self) -> Any:
         return self._message.output
 
-    def _aggregate_event(self, event: types.Event) -> dict[str, Any]:
+    def _aggregate_event(self, event: types.events.Event) -> dict[str, Any]:
         updates: dict[str, Any] = {}
 
         # grab usage from any event that carries one
@@ -181,31 +185,31 @@ class Stream:
             self._message.usage = event.usage
 
         match event:
-            case types.TextStart(block_id=bid):
-                tp = types.TextPart(id=bid, text="")
+            case types.events.TextStart(block_id=bid):
+                tp = types.messages.TextPart(id=bid, text="")
                 self._message.parts.append(tp)
                 self._parts[bid] = tp
-            case types.TextDelta(block_id=bid, chunk=c):
+            case types.events.TextDelta(block_id=bid, chunk=c):
                 existing_text = self._parts.get(bid)
-                if isinstance(existing_text, types.TextPart):
+                if isinstance(existing_text, types.messages.TextPart):
                     existing_text.text += c
-            case types.ReasoningStart(block_id=bid):
-                rp = types.ReasoningPart(id=bid, text="")
+            case types.events.ReasoningStart(block_id=bid):
+                rp = types.messages.ReasoningPart(id=bid, text="")
                 self._message.parts.append(rp)
                 self._parts[bid] = rp
-            case types.ReasoningDelta(block_id=bid, chunk=c):
+            case types.events.ReasoningDelta(block_id=bid, chunk=c):
                 existing_reasoning = self._parts.get(bid)
-                if isinstance(existing_reasoning, types.ReasoningPart):
+                if isinstance(existing_reasoning, types.messages.ReasoningPart):
                     existing_reasoning.text += c
-            case types.ReasoningEnd(block_id=bid, signature=sig):
+            case types.events.ReasoningEnd(block_id=bid, signature=sig):
                 existing_reasoning = self._parts.get(bid)
                 if (
-                    isinstance(existing_reasoning, types.ReasoningPart)
+                    isinstance(existing_reasoning, types.messages.ReasoningPart)
                     and sig is not None
                 ):
                     existing_reasoning.signature = sig
-            case types.ToolStart(tool_call_id=tcid, tool_name=name):
-                tcp = types.ToolCallPart(
+            case types.events.ToolStart(tool_call_id=tcid, tool_name=name):
+                tcp = types.messages.ToolCallPart(
                     id=tcid,
                     tool_call_id=tcid,
                     tool_name=name,
@@ -213,18 +217,18 @@ class Stream:
                 )
                 self._message.parts.append(tcp)
                 self._parts[tcid] = tcp
-            case types.ToolDelta(tool_call_id=tcid, chunk=c):
+            case types.events.ToolDelta(tool_call_id=tcid, chunk=c):
                 existing_tool = self._parts.get(tcid)
-                if isinstance(existing_tool, types.ToolCallPart):
+                if isinstance(existing_tool, types.messages.ToolCallPart):
                     existing_tool.tool_args += c
-            case types.ToolEnd(tool_call_id=tcid):
+            case types.events.ToolEnd(tool_call_id=tcid):
                 existing_tool = self._parts.get(tcid)
-                if isinstance(existing_tool, types.ToolCallPart):
+                if isinstance(existing_tool, types.messages.ToolCallPart):
                     updates["tool_call"] = existing_tool
-            case types.BuiltinToolStart(
+            case types.events.BuiltinToolStart(
                 tool_call_id=tcid, tool_name=name, provider_name=pname
             ):
-                btcp = types.BuiltinToolCallPart(
+                btcp = types.messages.BuiltinToolCallPart(
                     id=tcid,
                     tool_call_id=tcid,
                     tool_name=name,
@@ -233,19 +237,21 @@ class Stream:
                 )
                 self._message.parts.append(btcp)
                 self._parts[tcid] = btcp
-            case types.BuiltinToolDelta(tool_call_id=tcid, chunk=c):
+            case types.events.BuiltinToolDelta(tool_call_id=tcid, chunk=c):
                 existing_btc = self._parts.get(tcid)
-                if isinstance(existing_btc, types.BuiltinToolCallPart):
+                if isinstance(existing_btc, types.messages.BuiltinToolCallPart):
                     existing_btc.tool_args += c
-            case types.BuiltinToolEnd(tool_call_id=tcid):
+            case types.events.BuiltinToolEnd(tool_call_id=tcid):
                 existing_btc = self._parts.get(tcid)
-                if isinstance(existing_btc, types.BuiltinToolCallPart):
+                if isinstance(existing_btc, types.messages.BuiltinToolCallPart):
                     updates["tool_call"] = existing_btc
-            case types.BuiltinToolResult(result=res):
+            case types.events.BuiltinToolResult(result=res):
                 self._message.parts.append(res)
-            case types.FileEvent(block_id=bid, media_type=mt, data=d, filename=fname):
-                fp = types.FilePart(
-                    id=bid or types.generate_id(),
+            case types.events.FileEvent(
+                block_id=bid, media_type=mt, data=d, filename=fname
+            ):
+                fp = types.messages.FilePart(
+                    id=bid or types.messages.generate_id(),
                     data=d,
                     media_type=mt,
                     filename=fname,
@@ -260,9 +266,9 @@ class Stream:
 
 def stream[ProviderParamsT: pydantic.BaseModel](
     model: model_.Model[ProviderParamsT],
-    messages: list[types.Message],
+    messages: list[types.messages.Message],
     *,
-    tools: Sequence[types.ToolLike] | None = None,
+    tools: Sequence[types.proto.ToolLike] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
     params: params_.StreamParams[ProviderParamsT] | None = None,
     executor: StreamExecutor = _default_executor,
@@ -282,11 +288,11 @@ def stream[ProviderParamsT: pydantic.BaseModel](
 
 async def generate(
     model: model_.Model[Any],
-    messages: list[types.Message],
+    messages: list[types.messages.Message],
     params: params_.GenerateParams,
     *,
     executor: GenerateExecutor = _default_executor,
-) -> types.Message:
+) -> types.messages.Message:
     """Generate a non-streaming response (images, video, etc.)."""
     messages = integrity.prepare_messages(messages)
     request = GenerateRequest(model, messages, params)

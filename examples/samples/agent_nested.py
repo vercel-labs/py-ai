@@ -46,12 +46,12 @@ async def main() -> None:
 
     async for event in orchestrator.run(model, messages):
         # Subtool results
-        if isinstance(event, ai.PartialToolCallResult):
-            if isinstance(event.value, ai.TextDelta):
+        if isinstance(event, ai.events.PartialToolCallResult):
+            if isinstance(event.value, ai.events.TextDelta):
                 print(event.value.chunk.upper(), end="", flush=True)
-            elif isinstance(event.value, ai.StreamEnd):
+            elif isinstance(event.value, ai.events.StreamEnd):
                 print()
-        elif isinstance(event, ai.TextDelta):
+        elif isinstance(event, ai.events.TextDelta):
             print(event.chunk, end="", flush=True)
     print()
 

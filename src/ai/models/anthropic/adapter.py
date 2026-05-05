@@ -45,10 +45,10 @@ _TOOL_RESULT_BLOCK_TYPES: frozenset[str] = frozenset(
 
 
 def _split_tools(
-    tools: Sequence[types.ToolLike],
-) -> tuple[list[types.ToolSchemaLike], list[tools_.BuiltinTool]]:
+    tools: Sequence[types.proto.ToolLike],
+) -> tuple[list[types.proto.ToolSchemaLike], list[tools_.BuiltinTool]]:
     """Split ``tools`` into custom (host-executed) and built-in (provider-executed)."""
-    custom: list[types.ToolSchemaLike] = []
+    custom: list[types.proto.ToolSchemaLike] = []
     builtin: list[tools_.BuiltinTool] = []
     for t in tools:
         if isinstance(t, tools_.BuiltinTool):
@@ -59,7 +59,7 @@ def _split_tools(
 
 
 def _custom_tools_to_anthropic(
-    tools: Sequence[types.ToolSchemaLike],
+    tools: Sequence[types.proto.ToolSchemaLike],
 ) -> list[dict[str, Any]]:
     """Convert custom (host-executed) Tool objects to Anthropic tool schema format."""
     return [
@@ -104,7 +104,7 @@ def _builtin_tools_to_anthropic(
 
 
 def _file_part_to_anthropic(
-    part: types.FilePart,
+    part: types.messages.FilePart,
 ) -> dict[str, Any]:
     """Convert a :class:`FilePart` to an Anthropic content block.
 
@@ -171,7 +171,7 @@ def _file_part_to_anthropic(
 
 
 async def _messages_to_anthropic(
-    messages: list[types.Message],
+    messages: list[types.messages.Message],
     *,
     send_reasoning: bool = True,
 ) -> tuple[str | None, list[dict[str, Any]]]:
@@ -188,13 +188,15 @@ async def _messages_to_anthropic(
         match msg.role:
             case "system":
                 system_prompt = "".join(
-                    p.text for p in msg.parts if isinstance(p, types.TextPart)
+                    p.text for p in msg.parts if isinstance(p, types.messages.TextPart)
                 )
             case "assistant":
                 content: list[dict[str, Any]] = []
                 for part in msg.parts:
                     match part:
-                        case types.ReasoningPart(text=text, signature=signature):
+                        case types.messages.ReasoningPart(
+                            text=text, signature=signature
+                        ):
                             if send_reasoning and signature:
                                 content.append(
                                     {
@@ -203,9 +205,9 @@ async def _messages_to_anthropic(
                                         "signature": signature,
                                     }
                                 )
-                        case types.TextPart(text=text):
+                        case types.messages.TextPart(text=text):
                             content.append({"type": "text", "text": text})
-                        case types.ToolCallPart():
+                        case types.messages.ToolCallPart():
                             tool_input = (
                                 json.loads(part.tool_args) if part.tool_args else {}
                             )
@@ -217,7 +219,7 @@ async def _messages_to_anthropic(
                                     "input": tool_input,
                                 }
                             )
-                        case types.BuiltinToolCallPart():
+                        case types.messages.BuiltinToolCallPart():
                             btc_input = (
                                 json.loads(part.tool_args) if part.tool_args else {}
                             )
@@ -229,7 +231,7 @@ async def _messages_to_anthropic(
                                     "input": btc_input,
                                 }
                             )
-                        case types.BuiltinToolReturnPart():
+                        case types.messages.BuiltinToolReturnPart():
                             # Result block type comes from the original wire
                             # event ("web_search_tool_result", etc.); stored
                             # in provider_details when emitted.
@@ -251,7 +253,7 @@ async def _messages_to_anthropic(
             case "tool":
                 tool_results: list[dict[str, Any]] = []
                 for part in msg.parts:
-                    if isinstance(part, types.ToolResultPart):
+                    if isinstance(part, types.messages.ToolResultPart):
                         entry: dict[str, Any] = {
                             "type": "tool_result",
                             "tool_use_id": part.tool_call_id,
@@ -266,19 +268,23 @@ async def _messages_to_anthropic(
                     result.append({"role": "user", "content": tool_results})
 
             case "user":
-                has_files = any(isinstance(p, types.FilePart) for p in msg.parts)
+                has_files = any(
+                    isinstance(p, types.messages.FilePart) for p in msg.parts
+                )
                 if not has_files:
                     content_text = "".join(
-                        p.text for p in msg.parts if isinstance(p, types.TextPart)
+                        p.text
+                        for p in msg.parts
+                        if isinstance(p, types.messages.TextPart)
                     )
                     result.append({"role": "user", "content": content_text})
                 else:
                     user_content: list[dict[str, Any]] = []
                     for p in msg.parts:
                         match p:
-                            case types.TextPart(text=text):
+                            case types.messages.TextPart(text=text):
                                 user_content.append({"type": "text", "text": text})
-                            case types.FilePart():
+                            case types.messages.FilePart():
                                 user_content.append(_file_part_to_anthropic(p))
                     result.append({"role": "user", "content": user_content})
 
@@ -410,9 +416,9 @@ def _result_block_content(block: Any) -> Any:
 async def stream(
     client: core.client.Client,
     model: core.model.Model[Any],
-    messages: list[types.Message],
+    messages: list[types.messages.Message],
     *,
-    tools: Sequence[types.ToolLike] | None = None,
+    tools: Sequence[types.proto.ToolLike] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
     thinking: bool = False,
     budget_tokens: int = 10000,
@@ -422,7 +428,7 @@ async def stream(
 
     Yields :class:`~ai.types.events.Event` objects as the response streams in.
     Pure delta emitter — the :class:`~ai.models.Stream` wrapper aggregates
-    parts into the final :class:`~ai.types.Message`.
+    parts into the final :class:`~ai.types.messages.Message`.
 
     Extra keyword arguments beyond the ``StreamFn`` protocol:
 
@@ -663,7 +669,7 @@ async def stream(
 
             snapshot = sdk_stream.current_message_snapshot
             sdk_usage = snapshot.usage
-            usage = types.Usage(
+            usage = types.usage.Usage(
                 input_tokens=sdk_usage.input_tokens or 0,
                 output_tokens=sdk_usage.output_tokens or 0,
                 cache_read_tokens=getattr(sdk_usage, "cache_read_input_tokens", None),

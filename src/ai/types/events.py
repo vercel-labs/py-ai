@@ -1,4 +1,6 @@
-from typing import Annotated, Literal
+import abc
+from collections.abc import Callable, Sequence
+from typing import Annotated, Any, Literal
 
 import pydantic
 
@@ -173,3 +175,68 @@ DiscriminatedEvent = Annotated[
     Event,
     pydantic.Field(discriminator="kind"),
 ]
+
+
+# ---------------------------------------------------------------------------
+# Agent-layer event types
+#
+# These extend the model-streaming ``Event`` vocabulary with events that
+# originate in the agent runtime: tool-execution outcomes and hook
+# suspension points.
+# ---------------------------------------------------------------------------
+
+
+class Aggregator[Item, Result, ModelResult]:
+    @abc.abstractmethod
+    def feed(self, item: Item) -> None: ...
+
+    @abc.abstractmethod
+    def snapshot(self) -> Result: ...
+
+    @abc.abstractmethod
+    def to_model_output(self) -> ModelResult: ...
+
+
+class PartialToolCallResult(pydantic.BaseModel):
+    """Emitted when tool calls or other yield_from callers yield values."""
+
+    tool_call_id: str | None = None
+    tool_name: str | None = None
+    label: object = None
+    value: Any = None
+
+    def key(self) -> object:
+        return (self.tool_call_id, self.label)
+
+    aggregator_factory: Callable[[], Aggregator[Any, Any, Any]] | None = pydantic.Field(
+        default=None, exclude=True, repr=False
+    )
+
+    kind: Literal["partial_tool_call_result"] = "partial_tool_call_result"
+
+
+class ToolCallResult(pydantic.BaseModel):
+    """Emitted after tool calls execute -- carries the result message."""
+
+    message: messages.Message
+    results: Sequence[messages.ToolResultPart]
+
+    model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
+
+    kind: Literal["tool_call_result"] = "tool_call_result"
+
+
+class HookEvent(pydantic.BaseModel):
+    """Emitted when a hook suspends, resolves, or is cancelled."""
+
+    message: messages.Message
+    hook: messages.HookPart[Any]
+
+    kind: Literal["hook"] = "hook"
+
+
+AgentMessageEvent = Event | ToolCallResult | HookEvent
+
+AgentEvent = Event | ToolCallResult | HookEvent | PartialToolCallResult
+
+TerminalEvent = StreamEnd | ToolCallResult | HookEvent

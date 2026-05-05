@@ -1,6 +1,6 @@
 """Anthropic provider-executed (built-in) tools.
 
-Each class subclasses :class:`ai.types.BuiltinTool` with typed
+Each class subclasses :class:`ai.types.tools.BuiltinTool` with typed
 configuration fields. The adapter dispatches on subclass identity
 (``isinstance``) to convert each instance to Anthropic wire format.
 

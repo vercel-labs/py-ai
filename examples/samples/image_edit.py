@@ -19,7 +19,7 @@ async def main() -> None:
     # In practice you would load a real image file:
     #   image_data = pathlib.Path("my_photo.png").read_bytes()
     #   input_image = ai.file_part(image_data, media_type="image/png")
-    input_image = ai.FilePart(
+    input_image = ai.messages.FilePart(
         data="https://picsum.photos/id/237/400/300.jpg",
         media_type="image/jpeg",
     )

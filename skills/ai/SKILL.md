@@ -62,11 +62,11 @@ Key properties on streamed messages:
 - `msg.output` — validated Pydantic instance (when using `output_type`)
 - `msg.get_hook_part()` — find a hook suspension part
 
-Serialize: `msg.model_dump()`. Restore: `ai.Message.model_validate(data)`.
+Serialize: `msg.model_dump()`. Restore: `ai.messages.Message.model_validate(data)`.
 
 ## Streaming tools
 
-A regular `@ai.tool` returns the tool result directly. An async-generator tool yields intermediate values that stream to the consumer as `ai.PartialToolCallResult` events; an *aggregator* decides what the model sees as the final result.
+A regular `@ai.tool` returns the tool result directly. An async-generator tool yields intermediate values that stream to the consumer as `ai.events.PartialToolCallResult` events; an *aggregator* decides what the model sees as the final result.
 
 Declare the aggregator via the return-type annotation:
 
@@ -97,7 +97,7 @@ type Joined = Annotated[AsyncGenerator[str], ai.Aggregate(ai.ConcatAggregator, d
 
 Or pass the factory as a keyword argument: `@ai.tool(aggregator=ai.LastAggregator)`. Specifying both an annotation marker and the kwarg raises `TypeError`.
 
-Built-in aggregators: `ai.ConcatAggregator`, `ai.LastAggregator`, `ai.MessageAggregator`. Subclass `ai.SimpleAggregator[Item, Result]` (in/out same type) or `ai.Aggregator[Item, Result, ModelResult]` (separate model output) for custom ones.
+Built-in aggregators: `ai.ConcatAggregator`, `ai.LastAggregator`, `ai.MessageAggregator`. Subclass `ai.SimpleAggregator[Item, Result]` (in/out same type) or `ai.events.Aggregator[Item, Result, ModelResult]` (separate model output) for custom ones.
 
 ## Custom agent loops
 
@@ -121,7 +121,7 @@ async def custom(context: ai.Context):
         ):
             async for event in ai.util.merge(s, tr.events()):
                 yield event
-                if isinstance(event, ai.ToolEnd):
+                if isinstance(event, ai.events.ToolEnd):
                     tr.schedule(context.resolve(event.tool_call))
 
             context.add(s.message)
@@ -177,7 +177,7 @@ async def multi(model: ai.Model, query: str) -> str:
     return f"{r1}\n{r2}"
 ```
 
-Each forwarded event is wrapped in `ai.PartialToolCallResult` carrying the `label`, so the consumer can route by source.
+Each forwarded event is wrapped in `ai.events.PartialToolCallResult` carrying the `label`, so the consumer can route by source.
 
 ## Hooks
 

@@ -65,7 +65,7 @@ async def test_tool_call_returns_tool_message() -> None:
         """Double a number."""
         return x * 2
 
-    part = ai.ToolCallPart(
+    part = ai.messages.ToolCallPart(
         tool_call_id="tc-1",
         tool_name="double",
         tool_args='{"x": 5}',
@@ -89,7 +89,7 @@ async def test_tool_call_catches_errors() -> None:
         """Always fails."""
         raise ValueError("boom")
 
-    part = ai.ToolCallPart(
+    part = ai.messages.ToolCallPart(
         tool_call_id="tc-err",
         tool_name="fail",
         tool_args='{"x": 1}',
@@ -107,7 +107,7 @@ async def test_tool_call_allows_kwarg_overrides() -> None:
         """Double a number."""
         return x * 2
 
-    part = ai.ToolCallPart(
+    part = ai.messages.ToolCallPart(
         tool_call_id="tc-1",
         tool_name="double",
         tool_args='{"x": 5}',
@@ -125,7 +125,7 @@ async def test_tool_call_override_validation_failure() -> None:
         """Double a number."""
         return x * 2
 
-    part = ai.ToolCallPart(
+    part = ai.messages.ToolCallPart(
         tool_call_id="tc-1",
         tool_name="double",
         tool_args='{"x": 5}',
@@ -142,7 +142,7 @@ async def test_tool_call_malformed_args_become_error_message() -> None:
         """Double a number."""
         return x * 2
 
-    part = ai.ToolCallPart(
+    part = ai.messages.ToolCallPart(
         tool_call_id="tc-1",
         tool_name="double",
         tool_args='{"x": ',

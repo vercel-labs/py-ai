@@ -15,7 +15,7 @@ import pydantic
 from .. import middleware as middleware_
 from .. import models, types, util
 from ..types import builders
-from . import events as events_
+from ..types import events as events_
 from . import runtime
 
 
@@ -48,12 +48,12 @@ class LastAggregator[T](SimpleAggregator[T, T | None]):
 
 
 class MessageBundle(pydantic.BaseModel):
-    messages: tuple[types.Message, ...]
+    messages: tuple[types.messages.Message, ...]
 
 
 class MessageAggregator(events_.Aggregator[events_.AgentEvent, MessageBundle, str]):
     def __init__(self) -> None:
-        self._messages: list[types.Message] = []
+        self._messages: list[types.messages.Message] = []
 
     def feed(self, item: events_.AgentEvent) -> None:
         if isinstance(item, events_.PartialToolCallResult):
@@ -83,7 +83,7 @@ class Aggregate:
     to an async-generator tool::
 
         type SubAgentTool = Annotated[
-            AsyncGenerator[ai.AgentEvent], Aggregate(MessageAggregator)
+            AsyncGenerator[ai.events.AgentEvent], Aggregate(MessageAggregator)
         ]
 
         @ai.tool
@@ -201,7 +201,7 @@ class Tool[**P, R]:
     def __init__(
         self,
         fn: Callable[P, Awaitable[R]],
-        schema: types.ToolSchema,
+        schema: types.tools.ToolSchema,
         validator: type[pydantic.BaseModel] | None = None,
         *,
         is_gen: bool = False,
@@ -309,7 +309,7 @@ def tool[**P, T, R](
 
         validator = pydantic.create_model(f"{fn.__name__}_Args", **fields)
 
-        schema = types.ToolSchema(
+        schema = types.tools.ToolSchema(
             name=fn.__name__,
             description=inspect.getdoc(fn) or "",
             param_schema=validator.model_json_schema(),
@@ -345,7 +345,7 @@ class ToolCall:
     Calling it executes the tool and returns a ``role="tool"`` message.
     """
 
-    def __init__(self, part: types.ToolCallPart, tool: Tool[..., Any]) -> None:
+    def __init__(self, part: types.messages.ToolCallPart, tool: Tool[..., Any]) -> None:
         self._part = part
         self._tool = tool
         self._kwargs: dict[str, Any] | None = None
@@ -400,7 +400,7 @@ class ToolCall:
                 )
             except Exception as exc:
                 return tool_result(
-                    types.ToolResultPart(
+                    types.messages.ToolResultPart(
                         tool_call_id=call.tool_call_id,
                         tool_name=call.tool_name,
                         result=str(exc),
@@ -408,7 +408,7 @@ class ToolCall:
                     )
                 )
             return tool_result(
-                types.ToolResultPart(
+                types.messages.ToolResultPart(
                     tool_call_id=call.tool_call_id,
                     tool_name=call.tool_name,
                     result=result,
@@ -452,7 +452,7 @@ class ToolRunner:
         self._active.add(self._tg.create_task(tc()))
         self._sched_waiter.set_result(None)
 
-    def get_tool_message(self) -> types.Message | None:
+    def get_tool_message(self) -> types.messages.Message | None:
         if self._tool_results:
             return builders.tool_message(*[t.message for t in self._tool_results])
         return None
@@ -481,7 +481,7 @@ class Context(pydantic.BaseModel):
     """Everything that goes into the LLM."""
 
     model: models.Model[Any]
-    messages: list[types.Message]
+    messages: list[types.messages.Message]
     tools: list[Tool[..., Any]]
 
     _tools_by_name: dict[str, Tool[..., Any]] = pydantic.PrivateAttr()
@@ -498,24 +498,29 @@ class Context(pydantic.BaseModel):
         )
 
     @overload
-    def resolve(self, tool_part: types.ToolCallPart) -> ToolCall: ...
+    def resolve(self, tool_part: types.messages.ToolCallPart) -> ToolCall: ...
     @overload
-    def resolve(self, tool_part: Sequence[types.ToolCallPart]) -> list[ToolCall]: ...
+    def resolve(
+        self, tool_part: Sequence[types.messages.ToolCallPart]
+    ) -> list[ToolCall]: ...
 
     def resolve(
-        self, tool_part: types.ToolCallPart | Sequence[types.ToolCallPart]
+        self,
+        tool_part: types.messages.ToolCallPart | Sequence[types.messages.ToolCallPart],
     ) -> ToolCall | list[ToolCall]:
         """Resolve ToolCallPart(s) into callable ToolCall object(s)."""
-        if isinstance(tool_part, types.ToolCallPart):
+        if isinstance(tool_part, types.messages.ToolCallPart):
             return ToolCall(
                 part=tool_part, tool=self._tools_by_name[tool_part.tool_name]
             )
         return [self.resolve(tp) for tp in tool_part]
 
-    def add(self, message: types.Message | Sequence[types.Message] | None) -> None:
+    def add(
+        self, message: types.messages.Message | Sequence[types.messages.Message] | None
+    ) -> None:
         if message is None:
             return
-        if isinstance(message, types.Message):
+        if isinstance(message, types.messages.Message):
             self.messages.append(message)
         else:
             self.messages.extend(message)
@@ -526,10 +531,10 @@ class LoopFn(Protocol):
 
 
 def tool_result(
-    *items: types.Message
-    | types.ToolResultPart
+    *items: types.messages.Message
+    | types.messages.ToolResultPart
     | events_.ToolCallResult
-    | list[types.Message],
+    | list[types.messages.Message],
     tool_call_id: str | None = None,
     result: Any = None,
     tool_name: str = "",
@@ -553,7 +558,7 @@ def tool_result(
         )
         return events_.ToolCallResult(message=msg, results=msg.tool_results)
 
-    unwrapped: list[types.Message | types.ToolResultPart] = []
+    unwrapped: list[types.messages.Message | types.messages.ToolResultPart] = []
     for item in items:
         if isinstance(item, events_.ToolCallResult):
             unwrapped.append(item.message)
@@ -648,7 +653,7 @@ class Agent:
                 async for event in util.merge(stream, tr.events()):
                     yield event
 
-                    if isinstance(event, types.ToolEnd):
+                    if isinstance(event, types.events.ToolEnd):
                         tool = context.resolve(event.tool_call)
                         tr.schedule(tool)
 
@@ -661,7 +666,7 @@ class Agent:
     async def run(
         self,
         model: models.Model[Any],
-        messages: list[types.Message],
+        messages: list[types.messages.Message],
         *,
         middleware: list[middleware_.Middleware] | None = None,
     ) -> AsyncGenerator[events_.AgentEvent]:
