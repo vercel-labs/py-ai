@@ -6,9 +6,9 @@ from typing import Any
 import pydantic
 
 import ai
-from ai import events as agent_events_
 from ai import models
 from ai.types import builders
+from ai.types import events as agent_events_
 from ai.types import events as events_
 from ai.types import messages as messages_
 from ai.types import usage as usage_

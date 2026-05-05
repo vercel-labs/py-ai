@@ -22,8 +22,8 @@ from typing import TYPE_CHECKING, Any
 
 import pydantic
 
-from .types import messages as messages_
-from .types.proto import ToolLike
+from ..types import messages as messages_
+from ..types.proto import ToolLike
 
 # Compat shim: ``StreamResultLike`` was removed from ``ai.types.proto`` when
 # the model layer was reworked.  Middleware is dead code under the new
@@ -43,9 +43,9 @@ type StreamResultLike = Any
 # ---------------------------------------------------------------------------
 
 if TYPE_CHECKING:
-    from .agents.agent import Tool
-    from .models.core.model import Model
-    from .types import events as events_
+    from ..models.core.model import Model
+    from ..types import events as events_
+    from .agent import Tool
 
 
 @dataclasses.dataclass(frozen=True)

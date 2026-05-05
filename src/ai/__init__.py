@@ -1,4 +1,4 @@
-from . import middleware, models, util
+from . import models, util
 from .agents import (
     TOOL_APPROVAL_HOOK_TYPE,
     Agent,
@@ -19,12 +19,13 @@ from .agents import (
     cancel_hook,
     hook,
     mcp,
+    middleware,
     resolve_hook,
     tool,
     tool_result,
     yield_from,
 )
-from .middleware import AgentRunContext, Middleware
+from .agents.middleware import AgentRunContext, Middleware
 from .models import (
     Client,
     Executor,

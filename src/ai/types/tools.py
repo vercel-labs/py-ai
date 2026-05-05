@@ -1,9 +1,25 @@
 """Tool schema types — what the LLM layer sees."""
 
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import pydantic
 from pydantic.alias_generators import to_camel
+
+
+@runtime_checkable
+class ToolSchemaLike(Protocol):
+    """Anything that exposes a tool schema to the LLM layer.
+
+    Structural type: ``name``, ``description``, ``param_schema``.
+    Satisfied by both :class:`ToolSchema` and the agents' ``Tool`` class.
+    """
+
+    @property
+    def name(self) -> str: ...
+    @property
+    def description(self) -> str: ...
+    @property
+    def param_schema(self) -> dict[str, Any]: ...
 
 
 class ToolApproval(pydantic.BaseModel):
@@ -66,6 +82,12 @@ class BuiltinTool(pydantic.BaseModel):
         raise NotImplementedError(
             f"{type(self).__name__} must override the `name` property"
         )
+
+
+# Anything the LLM layer can use as a tool: either a host-executed
+# function tool (described by a schema) or a provider-executed built-in
+# tool subclass.
+type ToolLike = ToolSchemaLike | BuiltinTool
 
 
 class BuiltinToolConfig(pydantic.BaseModel):

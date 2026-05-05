@@ -10,8 +10,8 @@ import pydantic
 import pytest
 
 import ai
-from ai import events as agent_events_
 from ai import middleware
+from ai.types import events as agent_events_
 
 from .conftest import (
     MOCK_MODEL,

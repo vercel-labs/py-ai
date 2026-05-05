@@ -12,10 +12,10 @@ from typing import Annotated, Any, Protocol, Self, get_type_hints, overload
 
 import pydantic
 
-from .. import middleware as middleware_
 from .. import models, types, util
 from ..types import builders
 from ..types import events as events_
+from . import middleware as middleware_
 from . import runtime
 
 

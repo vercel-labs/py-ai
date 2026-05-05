@@ -32,9 +32,9 @@ from typing import Any
 
 import pydantic
 
-from .. import middleware as middleware_
 from ..types import messages as messages_
 from ..types import tools as tools_
+from . import middleware as middleware_
 from . import runtime as runtime_
 
 # ---------------------------------------------------------------------------
