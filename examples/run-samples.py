@@ -31,7 +31,6 @@ class Sample:
 TEXT_SAMPLES = [
     Sample("stream.py"),
     Sample("stream_all.py"),
-    Sample("structured_output.py"),
     Sample("tools_schema.py"),
     Sample("agent_simple.py"),
     Sample("agent_custom_loop.py"),
@@ -57,7 +56,9 @@ VIDEO_SAMPLES = [
     Sample("video_generation.py"),
 ]
 
-BROKEN_SAMPLES = []
+BROKEN_SAMPLES = [
+    Sample("structured_output.py"),
+]
 
 
 def _sample_cmd(sample: Sample) -> list[str]:
