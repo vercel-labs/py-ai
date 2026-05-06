@@ -67,30 +67,33 @@ async def run(
 ) -> AsyncGenerator[events_.AgentEvent]:
     """Run *source* and yield every event that gets put into the Runtime queue."""
     rt = Runtime()
-    token = _runtime.set(rt)
-
-    # MCP connection pool — scoped to this run.
-    mcp_pool: dict[str, mcp_client._Connection] = {}
-    mcp_token = mcp_client._pool.set(mcp_pool)
 
     async def _drain() -> None:
-        async for event in source:
-            await rt.put_event(event)
+        # We do all of the contextvar stuff in _drain so that we don't
+        # yield while we have outstanding contextvar manipulations.
+        token = _runtime.set(rt)
 
-    try:
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(_stop_when_done(rt, _drain()))
+        # MCP connection pool — scoped to this run.
+        mcp_pool: dict[str, mcp_client._Connection] = {}
+        mcp_token = mcp_client._pool.set(mcp_pool)
 
-            while True:
-                item = await rt._event_queue.get()
-                if isinstance(item, Runtime._Sentinel):
-                    return
-                yield item
+        try:
+            async for event in source:
+                await rt.put_event(event)
 
-    finally:
-        rt.cleanup_hooks()
+        finally:
+            rt.cleanup_hooks()
 
-        await mcp_client.close_connections()
-        mcp_client._pool.reset(mcp_token)
+            await mcp_client.close_connections()
+            mcp_client._pool.reset(mcp_token)
 
-        _runtime.reset(token)
+            _runtime.reset(token)
+
+    async with asyncio.TaskGroup() as tg:
+        tg.create_task(_stop_when_done(rt, _drain()))
+
+        while True:
+            item = await rt._event_queue.get()
+            if isinstance(item, Runtime._Sentinel):
+                return
+            yield item
