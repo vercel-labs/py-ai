@@ -18,9 +18,10 @@ async def get_facts(topic: str) -> str:
     return facts.get(topic.lower(), f"No facts found for {topic}.")
 
 
-# This tool is an async generator — it streams intermediate messages
-# through the runtime sink, then returns the final result.
-@ai.tool  # type: ignore[arg-type]  # async generator tools are supported at runtime
+# This tool is an async generator — it streams the sub-agent's events
+# through the runtime sink. ``MessageAggregator`` collects the streamed
+# messages and returns the final assistant text as the tool result.
+@ai.tool(aggregator=ai.MessageAggregator)
 async def research(topic: str) -> AsyncGenerator[ai.AgentEvent]:
     """Research a topic in depth using a sub-agent."""
     researcher = ai.agent(tools=[get_facts])
@@ -49,10 +50,9 @@ async def main() -> None:
         if isinstance(event, ai.PartialToolCallResult):
             if isinstance(event.value, ai.TextDelta):
                 print(event.value.chunk.upper(), end="", flush=True)
-            elif isinstance(event, ai.StreamEnd):
+            elif isinstance(event.value, ai.StreamEnd):
                 print()
-
-        if isinstance(event, ai.TextDelta):
+        elif isinstance(event, ai.TextDelta):
             print(event.chunk, end="", flush=True)
     print()
 

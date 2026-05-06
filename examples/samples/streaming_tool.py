@@ -1,8 +1,9 @@
 """Streaming from inside a tool via an async generator.
 
-An async generator tool yields events that flow through the runtime
-sink to the consumer in real time. The final yielded message's text
-becomes the tool result.
+An async generator tool yields values that flow through the runtime
+sink to the consumer in real time as ``PartialToolCallResult`` events.
+The tool's ``aggregator`` decides how the yielded values are combined
+into the final tool result that goes back to the model.
 """
 
 import asyncio
@@ -11,23 +12,15 @@ from collections.abc import AsyncGenerator
 import ai
 
 
-@ai.tool  # type: ignore[arg-type]  # async generator tools are supported at runtime
-async def talk_to_mothership(
-    question: str,
-) -> AsyncGenerator[ai.AgentEvent | ai.Message]:
+@ai.tool(aggregator=ai.LastAggregator)
+async def talk_to_mothership(question: str) -> AsyncGenerator[str]:
     """Ask the mothership a question. Streams progress back to the caller."""
-    for step in ["Connecting...", "Transmitting...", "Awaiting response..."]:
-        yield ai.TextStart(block_id=f"progress-{step}")
-        yield ai.TextDelta(block_id=f"progress-{step}", chunk=step)
-        yield ai.TextEnd(block_id=f"progress-{step}")
+    for step in ["Connecting...", "Transmitting...", f"Asking: {question!r}..."]:
+        yield step
         await asyncio.sleep(0.3)
 
-    # The final yielded message's text is returned as the tool result.
-    final = ai.Message(
-        role="assistant",
-        parts=[ai.TextPart(text="The mothership says: Soon.")],
-    )
-    yield final
+    # LastAggregator keeps only the final yield, which becomes the tool result.
+    yield "The mothership says: Soon."
 
 
 async def main() -> None:
@@ -41,11 +34,10 @@ async def main() -> None:
     ]
 
     async for event in my_agent.run(model, messages):
-        if isinstance(event, ai.TextDelta):
-            if event.block_id.startswith("progress-"):
-                print(f"  [{event.chunk}]")
-            else:
-                print(event.chunk, end="", flush=True)
+        if isinstance(event, ai.PartialToolCallResult):
+            print(f"  [{event.value}]")
+        elif isinstance(event, ai.TextDelta):
+            print(event.chunk, end="", flush=True)
     print()
 
 

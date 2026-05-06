@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import json
-from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from typing import Any, Protocol, Self, get_type_hints, overload
 
 import pydantic
@@ -15,6 +16,63 @@ from .. import models, types, util
 from ..types import builders
 from . import events as events_
 from . import runtime
+
+
+class SimpleAggregator[Item, Result](events_.Aggregator[Item, Result, Result]):
+    def to_model_output(self) -> Result:
+        return self.snapshot()
+
+
+class ConcatAggregator(SimpleAggregator[str, str]):
+    def __init__(self, *, delim: str = "") -> None:
+        self._parts: list[str] = []
+        self._delim = delim
+
+    def feed(self, item: str) -> None:
+        self._parts.append(item)
+
+    def snapshot(self) -> str:
+        return self._delim.join(self._parts)
+
+
+class LastAggregator[T](SimpleAggregator[T, T | None]):
+    def __init__(self) -> None:
+        self._val: T | None = None
+
+    def feed(self, item: T) -> None:
+        self._val = item
+
+    def snapshot(self) -> T | None:
+        return self._val
+
+
+class MessageBundle(pydantic.BaseModel):
+    messages: tuple[types.Message, ...]
+
+
+class MessageAggregator(events_.Aggregator[events_.AgentEvent, MessageBundle, str]):
+    def __init__(self) -> None:
+        self._messages: list[types.Message] = []
+
+    def feed(self, item: events_.AgentEvent) -> None:
+        if isinstance(item, events_.PartialToolCallResult):
+            return
+        msg = item.message
+        if msg is None:
+            return
+        if self._messages and self._messages[-1].id == msg.id:
+            self._messages[-1] = msg
+        else:
+            self._messages.append(msg)
+
+    def snapshot(self) -> MessageBundle:
+        return MessageBundle(messages=tuple(self._messages))
+
+    def to_model_output(self) -> str:
+        for m in reversed(self._messages):
+            if m.role == "assistant" and m.text:
+                return m.text
+        return ""
 
 
 class Tool[**P, R]:
@@ -27,11 +85,13 @@ class Tool[**P, R]:
         validator: type[pydantic.BaseModel] | None = None,
         *,
         is_gen: bool = False,
+        aggregator: Callable[[], events_.Aggregator[Any, Any, R]] | None = None,
     ) -> None:
         self._fn = fn
         self._validator = validator
         self._is_gen = is_gen
         self.schema = schema
+        self._aggregator = aggregator
 
     def parse_args(self, json_args: str) -> dict[str, Any]:
         """Parse and validate JSON args into Python kwargs."""
@@ -60,10 +120,13 @@ class Tool[**P, R]:
         # Generator tool (e.g. agent-as-a-tool): drain the async
         # generator, forward each yielded message to the runtime for
         # real-time streaming, and return the final text as the result.
-        return await yield_from(  # type: ignore[return-value]
-            self._fn(**kwargs),  # type: ignore[arg-type,call-arg]
+        assert self._aggregator
+        stream = self._fn(**kwargs)  # type: ignore[call-arg]
+        return await yield_from(
+            stream,  # type: ignore[arg-type]
             tool_name=tool_name,
             tool_call_id=tool_call_id,
+            aggregator=self._aggregator,
         )
 
     @property
@@ -83,34 +146,57 @@ class Tool[**P, R]:
         return self._fn
 
 
-def tool[**P, R](fn: Callable[P, Awaitable[R]]) -> Tool[P, R]:
+@overload
+def tool[**P, R](fn: Callable[P, Awaitable[R]], /) -> Tool[P, R]: ...
+
+
+@overload
+def tool[**P, T, R](
+    *, aggregator: Callable[[], events_.Aggregator[T, Any, R]]
+) -> Callable[[Callable[P, AsyncGenerator[T]]], Tool[P, R]]: ...
+
+
+def tool[**P, T, R](
+    fn: Callable[P, Awaitable[R]] | None = None,
+    /,
+    *,
+    aggregator: Callable[[], events_.Aggregator[T, Any, R]] | None = None,
+) -> Callable[[Callable[P, AsyncGenerator[T]]], Tool[P, R]] | Tool[P, R]:
     """Decorator: turn an async function into a :class:`Tool`."""
-    sig = inspect.signature(fn)
-    hints = get_type_hints(fn) if hasattr(fn, "__annotations__") else {}
 
-    fields: dict[str, Any] = {}
-    for param_name, param in sig.parameters.items():
-        param_type = hints.get(param_name, str)
-        if param.default is inspect.Parameter.empty:
-            fields[param_name] = (param_type, ...)
-        else:
-            fields[param_name] = (param_type, param.default)
+    def wrap(fn: Any) -> Tool[P, R]:
+        sig = inspect.signature(fn)
+        hints = get_type_hints(fn) if hasattr(fn, "__annotations__") else {}
 
-    validator = pydantic.create_model(f"{fn.__name__}_Args", **fields)
+        fields: dict[str, Any] = {}
+        for param_name, param in sig.parameters.items():
+            param_type = hints.get(param_name, str)
+            if param.default is inspect.Parameter.empty:
+                fields[param_name] = (param_type, ...)
+            else:
+                fields[param_name] = (param_type, param.default)
 
-    schema = types.ToolSchema(
-        name=fn.__name__,
-        description=inspect.getdoc(fn) or "",
-        param_schema=validator.model_json_schema(),
-        return_type=hints.get("return", None),
-    )
+        validator = pydantic.create_model(f"{fn.__name__}_Args", **fields)
 
-    return Tool(
-        fn=fn,
-        schema=schema,
-        validator=validator,
-        is_gen=inspect.isasyncgenfunction(fn),
-    )
+        schema = types.ToolSchema(
+            name=fn.__name__,
+            description=inspect.getdoc(fn) or "",
+            param_schema=validator.model_json_schema(),
+            return_type=hints.get("return", None),
+        )
+
+        return Tool(
+            fn=fn,
+            schema=schema,
+            validator=validator,
+            is_gen=inspect.isasyncgenfunction(fn),
+            aggregator=aggregator,
+        )
+
+    if fn is None:
+        return wrap
+    else:
+        return wrap(fn)
 
 
 class ToolCall:
@@ -339,14 +425,15 @@ def tool_result(
     return events_.ToolCallResult(message=msg, results=msg.tool_results)
 
 
-async def yield_from(
-    source: AsyncIterable[events_.AgentEvent],
+async def yield_from[T, R](
+    source: AsyncGenerator[T],
     *,
+    aggregator: Callable[[], events_.Aggregator[T, object, R]],
     # TODO: is this what we really want for labelling?
     tool_name: str | None = None,
     tool_call_id: str | None = None,
     label: object = None,
-) -> str:
+) -> R:
     """Drain *source*, forwarding each event to the current runtime.
 
     Use inside a custom loop to stream messages from a sub-agent to the
@@ -367,23 +454,22 @@ async def yield_from(
 
     Returns the final message's text (empty string if no messages).
     """
+    agg = aggregator()
+
     rt = runtime.get_runtime()
-    last: types.Message | None = None
-    async for item in source:
-        if isinstance(item, types.Message):
-            last = item
-            continue
-        await rt.put_event(
-            events_.PartialToolCallResult(
-                tool_call_id=tool_call_id,
-                tool_name=tool_name,
-                label=label,
-                value=item,
+    async with contextlib.aclosing(source) as src:
+        async for item in src:
+            agg.feed(item)
+            await rt.put_event(
+                events_.PartialToolCallResult(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    label=label,
+                    value=item,
+                    aggregator_factory=aggregator,
+                )
             )
-        )
-        if isinstance(item, events_.TerminalEvent):
-            last = item.message
-    return last.text if last else ""
+    return agg.to_model_output()
 
 
 class Agent:
