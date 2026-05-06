@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pydantic
 import pytest
 
@@ -17,11 +19,11 @@ def test_simple_types_produce_correct_schema() -> None:
         return f"Hello {name}" * count
 
     assert greet.name == "greet"
-    assert greet.description == "Say hello."
-    props = greet.param_schema["properties"]
+    assert _function_args(greet).description == "Say hello."
+    props = _schema(greet)["properties"]
     assert props["name"]["type"] == "string"
     assert props["count"]["type"] == "integer"
-    assert set(greet.param_schema["required"]) == {"name", "count"}
+    assert set(_schema(greet)["required"]) == {"name", "count"}
 
 
 def test_optional_param_not_required() -> None:
@@ -30,9 +32,10 @@ def test_optional_param_not_required() -> None:
         """Search."""
         return query
 
-    assert "query" in search.param_schema.get("required", [])
-    assert "limit" not in search.param_schema.get("required", [])
-    assert "limit" in search.param_schema["properties"]
+    schema = _schema(search)
+    assert "query" in schema.get("required", [])
+    assert "limit" not in schema.get("required", [])
+    assert "limit" in schema["properties"]
 
 
 def test_default_value_not_required() -> None:
@@ -51,9 +54,27 @@ def test_complex_type_schema() -> None:
         """Send message."""
         return "sent"
 
-    props = send.param_schema["properties"]
+    props = _schema(send)["properties"]
     assert props["recipients"]["type"] == "array"
     assert props["recipients"]["items"]["type"] == "string"
+
+
+# -- Execution (ToolCall) --------------------------------------------------
+
+
+async def test_tool_call_with_json_args() -> None:
+    @ai.tool
+    async def add(a: int, b: int) -> int:
+        """Add two numbers."""
+        return a + b
+
+    part = ai.messages.ToolCallPart(
+        tool_call_id="tc-add",
+        tool_name="add",
+        tool_args='{"a": 1, "b": 2}',
+    )
+    result = await ai.ToolCall(part=part, tool=add)()
+    assert result.results[0].result == 3
 
 
 # -- ToolCall binds a ToolCallPart to a Tool and returns tool messages ----
@@ -73,7 +94,7 @@ async def test_tool_call_returns_tool_message() -> None:
     tc = ai.ToolCall(part=part, tool=double)
     result = await tc()
 
-    assert tc.fn is double.fn
+    assert tc.fn.__name__ == "double"
     assert tc.kwargs == {"x": 5}
     assert result.message.role == "tool"
     assert len(result.results) == 1
@@ -157,7 +178,17 @@ async def test_tool_call_malformed_args_become_error_message() -> None:
 # -- Helpers ---------------------------------------------------------------
 
 
-def _required(tool: ai.Tool[..., object]) -> list[str]:
-    result = tool.param_schema.get("required", [])
+def _required(tool: ai.AgentTool) -> list[str]:
+    result = _schema(tool).get("required", [])
     assert isinstance(result, list)
     return result
+
+
+def _schema(tool: ai.AgentTool) -> dict[str, Any]:
+    return _function_args(tool).params
+
+
+def _function_args(tool: ai.AgentTool) -> ai.tools.FunctionToolArgs:
+    args = tool.tool.args
+    assert isinstance(args, ai.tools.FunctionToolArgs)
+    return args

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 from typing import Any
 
 import mcp.types
@@ -42,7 +43,7 @@ def test_mcp_tool_to_native_basic() -> None:
     native = _mcp_tool_to_native(mcp_tool, "test:key", _noop_transport_factory, None)
 
     assert native.name == "mcp_basic_test"
-    assert native.description == "Echo input"
+    assert _function_args(native).description == "Echo input"
 
 
 def test_mcp_tool_to_native_with_prefix() -> None:
@@ -54,12 +55,12 @@ def test_mcp_tool_to_native_with_prefix() -> None:
 
 
 def test_mcp_tool_to_native_schema_preserved() -> None:
-    """The inputSchema from the MCP tool is passed through as param_schema."""
+    """The inputSchema from the MCP tool is passed through as params."""
     mcp_tool = _fake_mcp_tool()
     native = _mcp_tool_to_native(mcp_tool, "test:key", _noop_transport_factory, None)
 
-    assert native.param_schema == mcp_tool.inputSchema
-    assert native.description == "Echo input"
+    assert _function_args(native).params == mcp_tool.inputSchema
+    assert _function_args(native).description == "Echo input"
 
 
 # -- End-to-end: MCP tool executes through Agent default loop ---------------
@@ -77,8 +78,8 @@ async def test_mcp_tool_executes_through_agent() -> None:
     # but with a fake fn so we don't need a real MCP server.
     mcp_tool = _fake_mcp_tool(name="mcp_e2e_echo")
     native = _mcp_tool_to_native(mcp_tool, "test:key", _noop_transport_factory, None)
-    # Replace the real fn (which would try to connect) with our fake.
-    native._fn = fake_fn
+    # Replace the executor (which would try to connect) with our fake.
+    native = dataclasses.replace(native, fn=fake_fn)
 
     my_agent = ai.agent(tools=[native])
 
@@ -103,3 +104,9 @@ async def test_mcp_tool_executes_through_agent() -> None:
 
     # LLM was called twice (tool call + final text).
     assert llm.call_count == 2
+
+
+def _function_args(tool: ai.AgentTool) -> ai.tools.FunctionToolArgs:
+    args = tool.tool.args
+    assert isinstance(args, ai.tools.FunctionToolArgs)
+    return args

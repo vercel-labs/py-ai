@@ -32,8 +32,8 @@ from typing import Any
 
 import pydantic
 
+from .. import types
 from ..types import messages as messages_
-from ..types import tools as tools_
 from . import middleware as middleware_
 from . import runtime as runtime_
 
@@ -233,6 +233,6 @@ async def cancel_hook(label: str, *, reason: str | None = None) -> None:
 
 # ── Built-in hook payloads ────────────────────────────────────────
 
-ToolApproval = tools_.ToolApproval
+ToolApproval = types.tools.ToolApproval
 
 TOOL_APPROVAL_HOOK_TYPE = ToolApproval.__name__

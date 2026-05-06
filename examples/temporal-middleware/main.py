@@ -115,7 +115,14 @@ async def llm_call_activity(params: LLMParams) -> LLMResult:
     """Call the LLM, drain the stream, return the final message."""
     model = ai.ai_gateway("anthropic/claude-sonnet-4")
     messages = [ai.messages.Message.model_validate(m) for m in params.messages]
-    tools = [ai.tools.ToolSchema(return_type=None, **t) for t in params.tool_schemas]
+    tools = [
+        ai.Tool(
+            kind="function",
+            name=t["name"],
+            args=ai.tools.FunctionToolArgs.model_validate(t["args"]),
+        )
+        for t in params.tool_schemas
+    ]
 
     s = ai.models.stream(model, messages, tools=tools)
     async for _event in s:
@@ -236,8 +243,7 @@ class WeatherWorkflow:
         tool_schemas = [
             {
                 "name": t.name,
-                "description": t.description,
-                "param_schema": t.param_schema,
+                "args": t.tool.args.model_dump(mode="json"),
             }
             for t in weather_agent.tools
         ]

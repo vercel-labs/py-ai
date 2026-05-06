@@ -411,7 +411,7 @@ class TestRequest:
         await _collect(
             mock_client(httpx.MockTransport(handler)),
             [user_msg("find something")],
-            tools=[lookup],
+            tools=[lookup.tool],
         )
 
         assert "tools" in captured_body

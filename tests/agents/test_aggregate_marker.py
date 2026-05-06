@@ -18,8 +18,8 @@ from ..conftest import (
 )
 
 
-def _factory(t: ai.Tool[..., object]) -> object:
-    factory = t._aggregator
+def _factory(t: ai.AgentTool) -> object:
+    factory = t.aggregator
     assert factory is not None
     return factory()
 

@@ -17,7 +17,7 @@ from . import params as params_
 class StreamRequest[ProviderParamsT: pydantic.BaseModel]:
     model: model_.Model[ProviderParamsT]
     messages: list[types.messages.Message]
-    tools: Sequence[types.proto.ToolLike] | None = None
+    tools: Sequence[types.tools.Tool] | None = None
     output_type: type[pydantic.BaseModel] | None = None
     params: params_.StreamParams[ProviderParamsT] | None = None
 
@@ -268,7 +268,7 @@ def stream[ProviderParamsT: pydantic.BaseModel](
     model: model_.Model[ProviderParamsT],
     messages: list[types.messages.Message],
     *,
-    tools: Sequence[types.proto.ToolLike] | None = None,
+    tools: Sequence[types.tools.Tool] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
     params: params_.StreamParams[ProviderParamsT] | None = None,
     executor: StreamExecutor = _default_executor,

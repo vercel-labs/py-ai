@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 import pydantic
 
 from ..types import messages as messages_
-from ..types.proto import ToolLike
+from ..types.tools import Tool
 
 # Compat shim: ``StreamResultLike`` was removed from ``ai.types.proto`` when
 # the model layer was reworked.  Middleware is dead code under the new
@@ -45,7 +45,7 @@ type StreamResultLike = Any
 if TYPE_CHECKING:
     from ..models.core.model import Model
     from ..types import events as events_
-    from .agent import Tool
+    from .agent import AgentTool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -54,7 +54,7 @@ class ModelContext:
 
     model: Model[Any]
     messages: list[messages_.Message]
-    tools: Sequence[ToolLike] | None
+    tools: Sequence[Tool] | None
     output_type: type[pydantic.BaseModel] | None
     kwargs: dict[str, Any]
 
@@ -108,7 +108,7 @@ class AgentRunContext:
 
     model: Model[Any]
     messages: list[messages_.Message]
-    tools: list[Tool[..., Any]]
+    tools: list[AgentTool]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "messages", list(self.messages))

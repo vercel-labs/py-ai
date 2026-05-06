@@ -6,7 +6,6 @@ Every tool call is gated behind user approval before execution.
 
 import asyncio
 from collections.abc import AsyncGenerator
-from typing import Any
 
 import ai
 
@@ -19,7 +18,7 @@ async def talk_to_mothership(question: str) -> str:
     return f"Mothership says: {question} -> Soon."
 
 
-TOOLS: list[ai.Tool[..., Any]] = [talk_to_mothership]
+TOOLS: list[ai.AgentTool] = [talk_to_mothership]
 
 chat_agent = ai.agent(tools=TOOLS)
 

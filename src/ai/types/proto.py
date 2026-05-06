@@ -1,3 +1,3 @@
-from .tools import ToolLike, ToolSchemaLike
+from .tools import Tool
 
-__all__ = ["ToolLike", "ToolSchemaLike"]
+__all__ = ["Tool"]

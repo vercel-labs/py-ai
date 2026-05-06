@@ -14,7 +14,6 @@ import pydantic
 from ... import types
 from ...types import events
 from ...types import messages as messages_
-from ...types import tools as tools_
 from .. import core
 from . import tools as anthropic_tools
 from .params import (
@@ -45,13 +44,13 @@ _TOOL_RESULT_BLOCK_TYPES: frozenset[str] = frozenset(
 
 
 def _split_tools(
-    tools: Sequence[types.proto.ToolLike],
-) -> tuple[list[types.proto.ToolSchemaLike], list[tools_.BuiltinTool]]:
-    """Split ``tools`` into custom (host-executed) and built-in (provider-executed)."""
-    custom: list[types.proto.ToolSchemaLike] = []
-    builtin: list[tools_.BuiltinTool] = []
+    tools: Sequence[types.tools.Tool],
+) -> tuple[list[types.tools.Tool], list[types.tools.Tool]]:
+    """Split ``tools`` into host-executed and provider-executed declarations."""
+    custom: list[types.tools.Tool] = []
+    builtin: list[types.tools.Tool] = []
     for t in tools:
-        if isinstance(t, tools_.BuiltinTool):
+        if t.kind == "provider":
             builtin.append(t)
         else:
             custom.append(t)
@@ -59,46 +58,70 @@ def _split_tools(
 
 
 def _custom_tools_to_anthropic(
-    tools: Sequence[types.proto.ToolSchemaLike],
+    tools: Sequence[types.tools.Tool],
 ) -> list[dict[str, Any]]:
     """Convert custom (host-executed) Tool objects to Anthropic tool schema format."""
-    return [
-        {
-            "name": tool.name,
-            "description": tool.description,
-            "input_schema": tool.param_schema,
-        }
-        for tool in tools
-    ]
+    result: list[dict[str, Any]] = []
+    for tool in tools:
+        args = tool.args
+        if not isinstance(args, types.tools.FunctionToolArgs):
+            raise TypeError(f"function tool {tool.name!r} has invalid args")
+        result.append(
+            {
+                "name": tool.name,
+                "description": args.description or "",
+                "input_schema": args.params,
+            }
+        )
+    return result
+
+
+def _anthropic_provider_type(args: pydantic.BaseModel) -> tuple[str, str | None]:
+    match args:
+        case anthropic_tools.WebSearchArgs():
+            return "web_search_20260209", "code-execution-web-tools-2026-02-09"
+        case anthropic_tools.WebFetchArgs():
+            return "web_fetch_20260209", "code-execution-web-tools-2026-02-09"
+        case anthropic_tools.CodeExecutionArgs():
+            return "code_execution_20260120", None
+        case anthropic_tools.ComputerUseArgs():
+            return "computer_20251124", "computer-use-2025-11-24"
+        case anthropic_tools.TextEditorArgs():
+            return "text_editor_20250728", None
+        case anthropic_tools.BashArgs():
+            return "bash_20250124", "computer-use-2025-01-24"
+        case anthropic_tools.MemoryArgs():
+            return "memory_20250818", "context-management-2025-06-27"
+        case _:
+            raise ValueError(
+                f"AnthropicModel does not support provider args {type(args).__name__}"
+            )
 
 
 def _builtin_tools_to_anthropic(
-    builtin: Sequence[tools_.BuiltinTool],
+    builtin: Sequence[types.tools.Tool],
 ) -> tuple[list[dict[str, Any]], set[str]]:
     """Convert built-in tools to Anthropic wire format.
 
     Returns ``(wire_tools, beta_headers)``. Beta headers are merged into
     the ``anthropic-beta`` request header by the caller.
 
-    Each tool's pydantic ``model_dump()`` produces the snake_case fields that
-    the Anthropic API expects.  The ``type`` and ``name`` wire fields come
-    from ClassVars on the tool subclass.
+    Provider tool schemas keep args in the snake_case shape the native
+    Anthropic API expects.
     """
     wire: list[dict[str, Any]] = []
     betas: set[str] = set()
     for tool in builtin:
-        if not isinstance(tool, anthropic_tools._AnthropicBuiltin):
-            raise ValueError(
-                f"AnthropicModel does not support built-in tool {type(tool).__name__}"
-            )
+        wire_type, beta = _anthropic_provider_type(tool.args)
+        args = tool.args.model_dump(mode="json", exclude_none=True)
         block: dict[str, Any] = {
-            "type": tool.type_,
-            "name": tool.name_,
-            **tool.model_dump(mode="json", exclude_none=True),
+            "type": wire_type,
+            "name": tool.name,
+            **args,
         }
         wire.append(block)
-        if tool.beta is not None:
-            betas.add(tool.beta)
+        if isinstance(beta, str):
+            betas.add(beta)
 
     return wire, betas
 
@@ -418,7 +441,7 @@ async def stream(
     model: core.model.Model[Any],
     messages: list[types.messages.Message],
     *,
-    tools: Sequence[types.proto.ToolLike] | None = None,
+    tools: Sequence[types.tools.Tool] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
     thinking: bool = False,
     budget_tokens: int = 10000,

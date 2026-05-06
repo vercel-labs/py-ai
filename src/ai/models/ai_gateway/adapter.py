@@ -12,15 +12,14 @@ import httpx
 import pydantic
 
 from ... import types
-from ...types import tools as tools_
 from .. import core
+from ..anthropic import tools as anthropic_tools
 from ..anthropic.params import AnthropicParams
-from ..anthropic.tools import _AnthropicBuiltin
+from ..openai import tools as openai_tools
 from ..openai.params import OpenAIChatParams, OpenAIResponsesParams
-from ..openai.tools import _OpenAIBuiltin
 from . import errors, sdk
+from . import tools as gateway_tools
 from .params import GATEWAY_STREAM_PARAMS_TYPES, GatewayParams
-from .tools import _GatewayBuiltin
 
 # ---------------------------------------------------------------------------
 # Shared request helpers
@@ -191,52 +190,80 @@ async def _messages_to_prompt(
     return result
 
 
-def _tool_to_v3(tool: types.proto.ToolLike) -> dict[str, Any]:
-    """Convert a tool-like object to the v3 wire format.
-
-    Built-in tools use ``model_dump(by_alias=True)`` to emit camelCase keys,
-    which is what the gateway's JS-derived wire schema expects.  The
-    ``alias_generator=to_camel`` on the ``BuiltinTool`` base class handles
-    the conversion, including for nested config models.
-    """
-    if isinstance(tool, _AnthropicBuiltin):
+def _tool_to_v3(tool: types.tools.Tool) -> dict[str, Any]:
+    """Convert a tool schema blob to the v3 wire format."""
+    if tool.kind == "provider":
         return {
             "type": "provider",
-            "id": f"anthropic.{tool.type_}",
-            "name": tool.name_,
-            "args": tool.model_dump(mode="json", by_alias=True, exclude_none=True),
+            "id": _provider_tool_id(tool),
+            "name": tool.name,
+            "args": tool.args.model_dump(
+                mode="json",
+                by_alias=True,
+                exclude_none=True,
+            ),
         }
-    if isinstance(tool, _OpenAIBuiltin):
-        return {
-            "type": "provider",
-            "id": f"openai.{tool.type_}",
-            "name": tool.type_,
-            "args": tool.model_dump(mode="json", by_alias=True, exclude_none=True),
-        }
-    if isinstance(tool, _GatewayBuiltin):
-        return {
-            "type": "provider",
-            "id": tool.id_,
-            "name": tool.name_,
-            "args": tool.model_dump(mode="json", by_alias=True, exclude_none=True),
-        }
-    if isinstance(tool, tools_.BuiltinTool):
-        raise TypeError(
-            f"AI Gateway does not support built-in tool "
-            f"{type(tool).__name__}; use anthropic.tools.*, "
-            f"openai.tools.*, or ai_gateway.tools.* helpers."
-        )
+    args = tool.args
+    if not isinstance(args, types.tools.FunctionToolArgs):
+        raise TypeError(f"function tool {tool.name!r} has invalid args")
     return {
         "type": "function",
         "name": tool.name,
-        "description": tool.description,
-        "inputSchema": tool.param_schema,
+        "description": args.description or "",
+        "inputSchema": args.params,
     }
+
+
+def _provider_tool_id(tool: types.tools.Tool) -> str:
+    match tool.args:
+        case anthropic_tools.WebSearchArgs():
+            return "anthropic.web_search_20260209"
+        case anthropic_tools.WebFetchArgs():
+            return "anthropic.web_fetch_20260209"
+        case anthropic_tools.CodeExecutionArgs():
+            return "anthropic.code_execution_20260120"
+        case anthropic_tools.ComputerUseArgs():
+            return "anthropic.computer_20251124"
+        case anthropic_tools.TextEditorArgs():
+            return "anthropic.text_editor_20250728"
+        case anthropic_tools.BashArgs():
+            return "anthropic.bash_20250124"
+        case anthropic_tools.MemoryArgs():
+            return "anthropic.memory_20250818"
+        case openai_tools.WebSearchArgs():
+            return "openai.web_search"
+        case openai_tools.WebSearchPreviewArgs():
+            return "openai.web_search_preview"
+        case openai_tools.FileSearchArgs():
+            return "openai.file_search"
+        case openai_tools.CodeInterpreterArgs():
+            return "openai.code_interpreter"
+        case openai_tools.ImageGenerationArgs():
+            return "openai.image_generation"
+        case openai_tools.LocalShellArgs():
+            return "openai.local_shell"
+        case openai_tools.ShellArgs():
+            return "openai.shell"
+        case openai_tools.ApplyPatchArgs():
+            return "openai.apply_patch"
+        case openai_tools.McpArgs():
+            return "openai.mcp"
+        case openai_tools.ToolSearchArgs():
+            return "openai.tool_search"
+        case gateway_tools.PerplexitySearchArgs():
+            return "gateway.perplexity_search"
+        case gateway_tools.ParallelSearchArgs():
+            return "gateway.parallel_search"
+        case _:
+            raise TypeError(
+                f"provider tool {tool.name!r} has unsupported args "
+                f"{type(tool.args).__name__}"
+            )
 
 
 async def _build_request_body(
     messages: list[types.messages.Message],
-    tools: Sequence[types.proto.ToolLike] | None = None,
+    tools: Sequence[types.tools.Tool] | None = None,
     output_type: type[Any] | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
@@ -576,7 +603,7 @@ async def stream(
     model: core.model.Model[Any],
     messages: list[types.messages.Message],
     *,
-    tools: Sequence[types.proto.ToolLike] | None = None,
+    tools: Sequence[types.tools.Tool] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
     **kwargs: Any,
 ) -> AsyncGenerator[types.events.Event]:

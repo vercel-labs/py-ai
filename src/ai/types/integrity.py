@@ -33,6 +33,8 @@ _LLM_PART_TYPES = (
     messages_.TextPart,
     messages_.ToolCallPart,
     messages_.ToolResultPart,
+    messages_.BuiltinToolCallPart,
+    messages_.BuiltinToolReturnPart,
     messages_.ReasoningPart,
     messages_.FilePart,
 )

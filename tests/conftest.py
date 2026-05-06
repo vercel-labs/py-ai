@@ -165,7 +165,7 @@ class MockAdapter:
         model: models.Model[pydantic.BaseModel],
         messages: list[messages_.Message],
         *,
-        tools: Sequence[ai.tools.ToolLike] | None = None,
+        tools: Sequence[ai.tools.Tool] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[events_.Event]:

@@ -21,7 +21,7 @@ messages = [
     ),
 ]
 
-tools = [ai.anthropic.tools.web_search(max_uses=3)]
+tools = [ai.anthropic.tools.web_search(ai.anthropic.tools.WebSearchArgs(max_uses=3))]
 
 
 _ENCRYPTED_KEYS = frozenset({"encrypted_content", "encrypted_stdout"})

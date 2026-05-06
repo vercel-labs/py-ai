@@ -11,7 +11,6 @@ import openai
 import pydantic
 
 from ... import types
-from ...types import tools as tools_
 from .. import core
 from .params import OpenAIChatParams
 
@@ -21,7 +20,7 @@ from .params import OpenAIChatParams
 
 
 def _tools_to_openai(
-    tools: Sequence[types.proto.ToolLike],
+    tools: Sequence[types.tools.Tool],
 ) -> list[dict[str, Any]]:
     """Convert internal Tool objects to OpenAI tool schema format.
 
@@ -30,15 +29,18 @@ def _tools_to_openai(
     """
     result: list[dict[str, Any]] = []
     for tool in tools:
-        if isinstance(tool, tools_.BuiltinTool):
+        if tool.kind == "provider":
             continue
+        args = tool.args
+        if not isinstance(args, types.tools.FunctionToolArgs):
+            raise TypeError(f"function tool {tool.name!r} has invalid args")
         result.append(
             {
                 "type": "function",
                 "function": {
                     "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.param_schema,
+                    "description": args.description or "",
+                    "parameters": args.params,
                 },
             }
         )
@@ -248,7 +250,7 @@ async def stream(
     model: core.model.Model[Any],
     messages: list[types.messages.Message],
     *,
-    tools: Sequence[types.proto.ToolLike] | None = None,
+    tools: Sequence[types.tools.Tool] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
     thinking: bool = False,
     budget_tokens: int | None = None,
@@ -270,7 +272,7 @@ async def stream(
       ``"low"``, ``"medium"``, ``"high"``, ``"xhigh"``
       (mutually exclusive with ``budget_tokens``).
     """
-    if tools and any(isinstance(t, tools_.BuiltinTool) for t in tools):
+    if tools and any(t.kind == "provider" for t in tools):
         raise NotImplementedError(
             "OpenAI built-in tools require the Responses API. "
             "The chat-completions adapter does not support them. "

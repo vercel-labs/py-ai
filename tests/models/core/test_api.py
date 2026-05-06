@@ -39,7 +39,7 @@ async def test_stream_tool_end_includes_aggregated_tool_call() -> None:
         model: models.Model[pydantic.BaseModel],
         messages: list[messages_.Message],
         *,
-        tools: Sequence[ai.tools.ToolLike] | None = None,
+        tools: Sequence[ai.tools.Tool] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[events_.Event]:
@@ -76,7 +76,7 @@ async def test_stream_uses_explicit_model_client() -> None:
         model: models.Model[pydantic.BaseModel],
         messages: list[messages_.Message],
         *,
-        tools: Sequence[ai.tools.ToolLike] | None = None,
+        tools: Sequence[ai.tools.Tool] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[events_.Event]:
@@ -112,7 +112,7 @@ async def test_stream_forwards_output_type_and_request_params() -> None:
         model: models.Model[pydantic.BaseModel],
         messages: list[messages_.Message],
         *,
-        tools: Sequence[ai.tools.ToolLike] | None = None,
+        tools: Sequence[ai.tools.Tool] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[events_.Event]:

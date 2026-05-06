@@ -104,7 +104,7 @@ class StreamFn(Protocol):
         model: Model[Any],
         messages: list[types.messages.Message],
         *,
-        tools: Sequence[types.proto.ToolLike] | None = None,
+        tools: Sequence[types.tools.Tool] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[types.events.Event]: ...

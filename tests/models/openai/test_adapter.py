@@ -174,7 +174,7 @@ async def test_builtin_tool_in_request_raises(
         _TEST_CLIENT,
         _MODEL,
         [ai.user_message("Hi")],
-        tools=[openai_tools.web_search()],
+        tools=[openai_tools.web_search(openai_tools.WebSearchArgs())],
     )
 
     with pytest.raises(NotImplementedError, match="Responses API"):

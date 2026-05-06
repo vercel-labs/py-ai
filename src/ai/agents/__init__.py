@@ -1,6 +1,7 @@
 from . import mcp, ui
 from .agent import (
     Agent,
+    AgentTool,
     Aggregate,
     ConcatAggregator,
     Context,
@@ -28,6 +29,7 @@ from .hooks import (
 
 __all__ = [
     "Agent",
+    "AgentTool",
     "Aggregate",
     "ConcatAggregator",
     "Context",

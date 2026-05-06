@@ -5,7 +5,7 @@ import contextlib
 import contextvars
 import dataclasses
 import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     import mcp.types
 
 from ... import types
-from ..agent import Tool as Tool_
+from ..agent import AgentTool, Tool
 
 __all__ = [
     "get_stdio_tools",
@@ -98,7 +98,7 @@ def _make_tool_fn(
     connection_key: str,
     tool_name: str,
     transport_factory: Callable[[], contextlib.AbstractAsyncContextManager[Any]],
-) -> Callable[..., Any]:
+) -> Callable[..., Awaitable[Any]]:
     """Create a tool function that manages its own connection."""
 
     async def call_tool(**kwargs: Any) -> Any:
@@ -147,7 +147,7 @@ async def get_stdio_tools(
     env: dict[str, str] | None = None,
     cwd: str | None = None,
     tool_prefix: str | None = None,
-) -> list[Tool_[..., Any]]:
+) -> list[AgentTool]:
     """Get tools from an MCP server running as a subprocess.
 
     Connection is managed automatically - created on first use, cleaned up
@@ -161,7 +161,7 @@ async def get_stdio_tools(
         tool_prefix: Optional prefix to add to all tool names.
 
     Returns:
-        List of Tool objects that can be passed to an agent or custom loop.
+        List of AgentTool objects that can be passed to an agent.
 
     Example::
 
@@ -197,7 +197,7 @@ async def get_http_tools(
     *,
     headers: dict[str, str] | None = None,
     tool_prefix: str | None = None,
-) -> list[Tool_[..., Any]]:
+) -> list[AgentTool]:
     """Get tools from an MCP server over HTTP (Streamable HTTP transport).
 
     Connection is managed automatically - created on first use, cleaned up
@@ -209,7 +209,7 @@ async def get_http_tools(
         tool_prefix: Optional prefix to add to all tool names.
 
     Returns:
-        List of Tool objects that can be passed to an agent or custom loop.
+        List of AgentTool objects that can be passed to an agent.
 
     Example::
 
@@ -242,8 +242,8 @@ def _mcp_tool_to_native(
     connection_key: str,
     transport_factory: Callable[[], contextlib.AbstractAsyncContextManager[Any]],
     tool_prefix: str | None,
-) -> Tool_[..., Any]:
-    """Convert an MCP tool to a native Tool.
+) -> AgentTool:
+    """Convert an MCP tool to a native AgentTool.
 
     ``mcp_tool`` is typed as :class:`mcp.types.Tool` for static analysis;
     the actual ``mcp.types`` import is deferred to the calling function.
@@ -252,16 +252,18 @@ def _mcp_tool_to_native(
     if tool_prefix:
         name = f"{tool_prefix}_{name}"
 
-    schema = types.tools.ToolSchema(
+    tool = Tool(
+        kind="function",
         name=name,
-        description=mcp_tool.description or "",
-        param_schema=mcp_tool.inputSchema,
-        return_type=Any,
+        args=types.tools.FunctionToolArgs(
+            description=mcp_tool.description or "",
+            params=mcp_tool.inputSchema,
+        ),
     )
 
-    return Tool_(
+    return AgentTool(
+        tool=tool,
         fn=_make_tool_fn(connection_key, mcp_tool.name, transport_factory),
-        schema=schema,
     )
 
 

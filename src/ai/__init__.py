@@ -2,6 +2,7 @@ from . import models, util
 from .agents import (
     TOOL_APPROVAL_HOOK_TYPE,
     Agent,
+    AgentTool,
     Aggregate,
     ConcatAggregator,
     Context,
@@ -90,6 +91,7 @@ __all__ = [
     "ai_gateway",
     # Agents — primary API
     "Agent",
+    "AgentTool",
     "agent",
     "Context",
     # Agents — tools

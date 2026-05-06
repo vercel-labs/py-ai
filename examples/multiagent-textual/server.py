@@ -71,7 +71,7 @@ MODEL = ai.ai_gateway("anthropic/claude-sonnet-4")
 
 
 def _gated_agent(
-    tools: list[ai.Tool[..., Any]],
+    tools: list[ai.AgentTool],
     approval_tool: str,
     label: str,
 ) -> ai.Agent:

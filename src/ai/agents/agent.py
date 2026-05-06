@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import inspect
 import json
 import typing
@@ -194,90 +195,53 @@ def _aggregate_from_return_type(fn: Callable[..., Any]) -> Aggregate | None:
         )
     return matches[0] if matches else None
 
+Tool = types.tools.Tool
 
-class Tool[**P, R]:
-    """Wraps async function, introspects schema, attaches a validator"""
 
-    def __init__(
-        self,
-        fn: Callable[P, Awaitable[R]],
-        schema: types.tools.ToolSchema,
-        validator: type[pydantic.BaseModel] | None = None,
-        *,
-        is_gen: bool = False,
-        aggregator: Callable[[], events_.Aggregator[Any, Any, R]] | None = None,
-    ) -> None:
-        self._fn = fn
-        self._validator = validator
-        self._is_gen = is_gen
-        self.schema = schema
-        self._aggregator = aggregator
+@dataclasses.dataclass(frozen=True)
+class AgentTool:
+    """Agent-owned executable tool paired with its model-facing declaration."""
 
-    def parse_args(self, json_args: str) -> dict[str, Any]:
-        """Parse and validate JSON args into Python kwargs."""
-        kwargs = json.loads(json_args) if json_args else {}
-        return self.validate_kwargs(kwargs)
-
-    def validate_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        """Validate kwargs and return normalized Python values."""
-        if self._validator is not None:
-            validated = self._validator.model_validate(kwargs)
-            return dict(validated.model_dump())
-        return kwargs
-
-    async def execute_kwargs(
-        self,
-        kwargs: dict[str, Any],
-        *,
-        tool_name: str | None,
-        tool_call_id: str | None,
-    ) -> R:
-        """Validate kwargs and call the underlying tool implementation."""
-        kwargs = self.validate_kwargs(kwargs)
-        if not self._is_gen:
-            return await self._fn(**kwargs)  # type: ignore[call-arg]
-
-        # Generator tool (e.g. agent-as-a-tool): drain the async
-        # generator, forward each yielded message to the runtime for
-        # real-time streaming, and return the final text as the result.
-        assert self._aggregator
-        stream = self._fn(**kwargs)  # type: ignore[call-arg]
-        return await yield_from(
-            stream,  # type: ignore[arg-type]
-            tool_name=tool_name,
-            tool_call_id=tool_call_id,
-            aggregator=self._aggregator,
-        )
+    tool: Tool
+    fn: Callable[..., Any]
+    validator: type[pydantic.BaseModel] | None = None
+    is_gen: bool = False
+    aggregator: Callable[[], events_.Aggregator[Any, Any, Any]] | None = None
 
     @property
     def name(self) -> str:
-        return self.schema.name
+        return self.tool.name
 
     @property
-    def description(self) -> str:
-        return self.schema.description
+    def _aggregator(
+        self,
+    ) -> Callable[[], events_.Aggregator[Any, Any, Any]] | None:
+        return self.aggregator
 
-    @property
-    def param_schema(self) -> dict[str, Any]:
-        return self.schema.param_schema
 
-    @property
-    def fn(self) -> Callable[P, Awaitable[R]]:
-        return self._fn
+def _validate_kwargs(
+    tool: AgentTool,
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate kwargs and return normalized Python values."""
+    if tool.validator is not None:
+        validated = tool.validator.model_validate(kwargs)
+        return dict(validated.model_dump())
+    return kwargs
 
 
 @overload
-def tool[**P, R](fn: Callable[P, Awaitable[R]], /) -> Tool[P, R]: ...
+def tool[**P, R](fn: Callable[P, Awaitable[R]], /) -> AgentTool: ...
 
 
 @overload
-def tool[**P, T](fn: Callable[P, AsyncGenerator[T]], /) -> Tool[P, Any]: ...
+def tool[**P, T](fn: Callable[P, AsyncGenerator[T]], /) -> AgentTool: ...
 
 
 @overload
 def tool[**P, T, R](
     *, aggregator: Callable[[], events_.Aggregator[T, Any, R]]
-) -> Callable[[Callable[P, AsyncGenerator[T]]], Tool[P, R]]: ...
+) -> Callable[[Callable[P, AsyncGenerator[T]]], AgentTool]: ...
 
 
 def tool[**P, T, R](
@@ -285,7 +249,7 @@ def tool[**P, T, R](
     /,
     *,
     aggregator: Callable[[], events_.Aggregator[T, Any, R]] | None = None,
-) -> Callable[[Callable[P, AsyncGenerator[T]]], Tool[P, R]] | Tool[P, R]:
+) -> Callable[[Callable[P, AsyncGenerator[T]]], AgentTool] | AgentTool:
     """Decorator: turn an async function into a :class:`Tool`.
 
     For async-generator tools, declare the aggregator either via the
@@ -295,7 +259,7 @@ def tool[**P, T, R](
     ``TypeError``.
     """
 
-    def wrap(fn: Any) -> Tool[P, R]:
+    def wrap(fn: Any) -> AgentTool:
         sig = inspect.signature(fn)
         hints = get_type_hints(fn) if hasattr(fn, "__annotations__") else {}
 
@@ -309,13 +273,6 @@ def tool[**P, T, R](
 
         validator = pydantic.create_model(f"{fn.__name__}_Args", **fields)
 
-        schema = types.tools.ToolSchema(
-            name=fn.__name__,
-            description=inspect.getdoc(fn) or "",
-            param_schema=validator.model_json_schema(),
-            return_type=hints.get("return", None),
-        )
-
         annotated_aggregate = _aggregate_from_return_type(fn)
         if annotated_aggregate is not None and aggregator is not None:
             raise TypeError(
@@ -325,9 +282,18 @@ def tool[**P, T, R](
             )
         effective_aggregator = aggregator or annotated_aggregate
 
-        return Tool(
+        tool_decl = Tool(
+            kind="function",
+            name=fn.__name__,
+            args=types.tools.FunctionToolArgs(
+                description=inspect.getdoc(fn) or "",
+                params=validator.model_json_schema(),
+            ),
+        )
+
+        return AgentTool(
+            tool=tool_decl,
             fn=fn,
-            schema=schema,
             validator=validator,
             is_gen=inspect.isasyncgenfunction(fn),
             aggregator=effective_aggregator,
@@ -340,12 +306,16 @@ def tool[**P, T, R](
 
 
 class ToolCall:
-    """Callable that binds a :class:`ToolCallPart` to its :class:`Tool`.
+    """Callable that binds a :class:`ToolCallPart` to its :class:`AgentTool`.
 
     Calling it executes the tool and returns a ``role="tool"`` message.
     """
 
-    def __init__(self, part: types.messages.ToolCallPart, tool: Tool[..., Any]) -> None:
+    def __init__(
+        self,
+        part: types.messages.ToolCallPart,
+        tool: AgentTool,
+    ) -> None:
         self._part = part
         self._tool = tool
         self._kwargs: dict[str, Any] | None = None
@@ -365,7 +335,8 @@ class ToolCall:
     @property
     def kwargs(self) -> dict[str, Any]:
         if self._kwargs is None:
-            self._kwargs = self._tool.parse_args(self._part.tool_args)
+            kwargs = json.loads(self._part.tool_args) if self._part.tool_args else {}
+            self._kwargs = _validate_kwargs(self._tool, kwargs)
         return dict(self._kwargs)
 
     async def __call__(self, **overrides: Any) -> events_.ToolCallResult:
@@ -381,7 +352,7 @@ class ToolCall:
         if overrides:
             # Overrides come from user code, not the model — validate
             # eagerly so programming errors surface immediately.
-            base_kwargs = self._tool.validate_kwargs({**base_kwargs, **overrides})
+            base_kwargs = _validate_kwargs(self._tool, {**base_kwargs, **overrides})
 
         call = middleware_.ToolContext(
             tool_call_id=self._part.tool_call_id,
@@ -393,11 +364,20 @@ class ToolCall:
 
         async def _real(call: middleware_.ToolContext) -> events_.ToolCallResult:
             try:
-                result = await tool.execute_kwargs(
-                    call.kwargs,
-                    tool_call_id=call.tool_call_id,
-                    tool_name=call.tool_name,
-                )
+                kwargs = _validate_kwargs(tool, call.kwargs)
+                if tool.is_gen:
+                    # Generator tool (e.g. agent-as-a-tool): drain the async
+                    # generator, forward each yielded message to the runtime for
+                    # real-time streaming, and return the final text as the result.
+                    assert tool.aggregator
+                    result = await yield_from(
+                        tool.fn(**kwargs),
+                        tool_call_id=call.tool_call_id,
+                        tool_name=call.tool_name,
+                        aggregator=tool.aggregator,
+                    )
+                else:
+                    result = await tool.fn(**kwargs)
             except Exception as exc:
                 return tool_result(
                     types.messages.ToolResultPart(
@@ -482,14 +462,16 @@ class Context(pydantic.BaseModel):
 
     model: models.Model[Any]
     messages: list[types.messages.Message]
-    tools: list[Tool[..., Any]]
+    tools: list[Tool]
 
-    _tools_by_name: dict[str, Tool[..., Any]] = pydantic.PrivateAttr()
+    _agent_tools_by_name: dict[str, AgentTool] = pydantic.PrivateAttr(
+        default_factory=dict
+    )
 
     model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
 
     def model_post_init(self, __context: Any) -> None:
-        self._tools_by_name = {t.name: t for t in self.tools}
+        self._agent_tools_by_name = {}
 
     def keep_running(self) -> bool:
         """Call at top of an agent loop to see whether to keep running."""
@@ -510,9 +492,12 @@ class Context(pydantic.BaseModel):
     ) -> ToolCall | list[ToolCall]:
         """Resolve ToolCallPart(s) into callable ToolCall object(s)."""
         if isinstance(tool_part, types.messages.ToolCallPart):
-            return ToolCall(
-                part=tool_part, tool=self._tools_by_name[tool_part.tool_name]
-            )
+            tool = self._agent_tools_by_name.get(tool_part.tool_name)
+            if tool is None:
+                raise KeyError(
+                    f"No agent executor registered for tool {tool_part.tool_name!r}"
+                )
+            return ToolCall(part=tool_part, tool=tool)
         return [self.resolve(tp) for tp in tool_part]
 
     def add(
@@ -623,13 +608,13 @@ class Agent:
     def __init__(
         self,
         *,
-        tools: list[Tool[..., Any]] | None = None,
+        tools: list[AgentTool] | None = None,
     ) -> None:
-        self._tools: list[Tool[..., Any]] = tools or []
+        self._tools: list[AgentTool] = tools or []
         self._loop_fn: LoopFn | None = None
 
     @property
-    def tools(self) -> list[Tool[..., Any]]:
+    def tools(self) -> list[AgentTool]:
         """The agent's registered tools (read-only copy)."""
         return list(self._tools)
 
@@ -697,8 +682,9 @@ class Agent:
             context = Context(
                 model=call.model,
                 messages=list(call.messages),
-                tools=call.tools,
+                tools=[tool.tool for tool in call.tools],
             )
+            context._agent_tools_by_name = {tool.name: tool for tool in call.tools}
             source = loop_fn(context)
             async for event in runtime.run(source):
                 yield event
@@ -724,7 +710,7 @@ class Agent:
 
 def agent(
     *,
-    tools: list[Tool[..., Any]] | None = None,
+    tools: list[AgentTool] | None = None,
 ) -> Agent:
     """Create an Agent."""
     return Agent(tools=tools)

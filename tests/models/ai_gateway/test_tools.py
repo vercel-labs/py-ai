@@ -3,7 +3,6 @@
 The gateway adapter accepts native ``anthropic.tools.*``, ``openai.tools.*``,
 and ``ai_gateway.tools.*`` instances and serializes them as v3 ``provider``
 blocks of the shape ``{type, id, name, args}`` with camelCase ``args`` keys.
-Foreign ``BuiltinTool`` subclasses are rejected with a clear redirect message.
 """
 
 from __future__ import annotations
@@ -12,14 +11,13 @@ import json
 from typing import Any
 
 import httpx
+import pydantic
 import pytest
 
+from ai import types
 from ai.models import ai_gateway as ai_gateway_pkg
 from ai.models import anthropic, openai
 from ai.models.ai_gateway import adapter, ai_gateway
-from ai.models.anthropic.tools import _AnthropicBuiltin
-from ai.models.openai.tools import _OpenAIBuiltin
-from ai.types import tools as tools_
 
 from .conftest import mock_client, sse, user_msg
 
@@ -46,7 +44,9 @@ class TestGatewayBuiltins:
             client,
             _TEST_MODEL,
             [user_msg("hi")],
-            tools=[anthropic.tools.web_search(max_uses=3)],
+            tools=[
+                anthropic.tools.web_search(anthropic.tools.WebSearchArgs(max_uses=3))
+            ],
         ):
             pass
 
@@ -69,8 +69,10 @@ class TestGatewayBuiltins:
             [user_msg("hi")],
             tools=[
                 openai.tools.mcp(
-                    server_label="my-server",
-                    server_url="https://mcp.example.com",
+                    openai.tools.McpArgs(
+                        server_label="my-server",
+                        server_url="https://mcp.example.com",
+                    )
                 ),
             ],
         ):
@@ -98,8 +100,10 @@ class TestGatewayBuiltins:
             [user_msg("hi")],
             tools=[
                 ai_gateway_pkg.tools.perplexity_search(
-                    max_results=5,
-                    search_domain_filter=["nature.com"],
+                    ai_gateway_pkg.tools.PerplexitySearchArgs(
+                        max_results=5,
+                        search_domain_filter=["nature.com"],
+                    )
                 ),
             ],
         ):
@@ -127,8 +131,12 @@ class TestGatewayBuiltins:
             [user_msg("hi")],
             tools=[
                 ai_gateway_pkg.tools.parallel_search(
-                    mode="agentic",
-                    source_policy={"include_domains": ["wikipedia.org"]},
+                    ai_gateway_pkg.tools.ParallelSearchArgs(
+                        mode="agentic",
+                        source_policy=ai_gateway_pkg.tools.SourcePolicy(
+                            include_domains=["wikipedia.org"],
+                        ),
+                    )
                 ),
             ],
         ):
@@ -146,26 +154,11 @@ class TestGatewayBuiltins:
             }
         ]
 
-    async def test_native_builtins_have_types(self) -> None:
-        """Every concrete native built-in declares a non-empty type_
-        and the gateway-derived id is unique per provider."""
-        for base, prefix in (
-            (_AnthropicBuiltin, "anthropic"),
-            (_OpenAIBuiltin, "openai"),
-        ):
-            seen: set[str] = set()
-            for cls in base.__subclasses__():
-                type_val = cls.type_
-                assert type_val, f"{cls.__name__} missing type_"
-                gateway_id = f"{prefix}.{type_val}"
-                assert gateway_id not in seen, f"duplicate id {gateway_id!r}"
-                seen.add(gateway_id)
+    async def test_unknown_provider_args_rejected(self) -> None:
+        """Provider-executed tools need a registered args type."""
 
-    async def test_foreign_builtin_tool_rejected(self) -> None:
-        """A BuiltinTool subclass not in either provider hierarchy raises."""
-
-        class CustomBuiltin(tools_.BuiltinTool):
-            pass
+        class UnknownArgs(pydantic.BaseModel):
+            value: str
 
         def handler(req: httpx.Request) -> httpx.Response:
             raise AssertionError("request should not be sent")
@@ -175,11 +168,15 @@ class TestGatewayBuiltins:
             client,
             _TEST_MODEL,
             [user_msg("hi")],
-            tools=[CustomBuiltin()],
+            tools=[
+                types.tools.Tool(
+                    kind="provider",
+                    name="bad",
+                    args=UnknownArgs(value="x"),
+                )
+            ],
         )
 
-        with pytest.raises(
-            TypeError, match="anthropic.tools|openai.tools|ai_gateway.tools"
-        ):
+        with pytest.raises(TypeError, match="unsupported args"):
             async for _ in stream:
                 pass
