@@ -55,14 +55,12 @@ async def test_web_search_full_fields(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch,
         [
             anthropic_tools.web_search(
-                anthropic_tools.WebSearchArgs(
-                    max_uses=3,
-                    allowed_domains=["example.com"],
-                    user_location=anthropic_tools.UserLocation(
-                        city="SF",
-                        country="US",
-                    ),
-                )
+                max_uses=3,
+                allowed_domains=["example.com"],
+                user_location=anthropic_tools.UserLocation(
+                    city="SF",
+                    country="US",
+                ),
             )
         ],
     )
@@ -90,9 +88,7 @@ async def test_web_fetch_citations(
         monkeypatch,
         [
             anthropic_tools.web_fetch(
-                anthropic_tools.WebFetchArgs(
-                    citations=anthropic_tools.Citations(enabled=True),
-                )
+                citations=anthropic_tools.Citations(enabled=True),
             )
         ],
     )
@@ -113,10 +109,8 @@ async def test_computer_use_required_fields(
         monkeypatch,
         [
             anthropic_tools.computer_use(
-                anthropic_tools.ComputerUseArgs(
-                    display_width_px=1024,
-                    display_height_px=768,
-                )
+                display_width_px=1024,
+                display_height_px=768,
             )
         ],
     )
@@ -136,10 +130,7 @@ async def test_text_editor_name_differs_from_class(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``TextEditor`` ships under the ``str_replace_based_edit_tool`` name."""
-    captured = await _capture_tools(
-        monkeypatch,
-        [anthropic_tools.text_editor(anthropic_tools.TextEditorArgs())],
-    )
+    captured = await _capture_tools(monkeypatch, [anthropic_tools.text_editor()])
 
     assert captured["tools"] == [
         {"type": "text_editor_20250728", "name": "str_replace_based_edit_tool"}
@@ -152,9 +143,9 @@ async def test_bare_tools_emit_only_type_and_name(
     captured = await _capture_tools(
         monkeypatch,
         [
-            anthropic_tools.code_execution(anthropic_tools.CodeExecutionArgs()),
-            anthropic_tools.bash(anthropic_tools.BashArgs()),
-            anthropic_tools.memory(anthropic_tools.MemoryArgs()),
+            anthropic_tools.code_execution(),
+            anthropic_tools.bash(),
+            anthropic_tools.memory(),
         ],
     )
 
@@ -172,8 +163,8 @@ async def test_betas_merge_dedup_with_user_betas(
     captured = await _capture_tools(
         monkeypatch,
         [
-            anthropic_tools.web_search(anthropic_tools.WebSearchArgs()),
-            anthropic_tools.web_fetch(anthropic_tools.WebFetchArgs()),
+            anthropic_tools.web_search(),
+            anthropic_tools.web_fetch(),
         ],
         params=anthropic_params.AnthropicParams(betas=["custom-beta-2026-01-01"]),
     )
@@ -191,18 +182,14 @@ async def test_betas_merge_dedup_with_user_betas(
 def test_web_search_rejects_mutually_exclusive_domains() -> None:
     with pytest.raises(ValueError, match="only one of"):
         anthropic_tools.web_search(
-            anthropic_tools.WebSearchArgs(
-                allowed_domains=["a.example"],
-                blocked_domains=["b.example"],
-            )
+            allowed_domains=["a.example"],
+            blocked_domains=["b.example"],
         )
 
 
 def test_web_fetch_rejects_mutually_exclusive_domains() -> None:
     with pytest.raises(ValueError, match="only one of"):
         anthropic_tools.web_fetch(
-            anthropic_tools.WebFetchArgs(
-                allowed_domains=["a.example"],
-                blocked_domains=["b.example"],
-            )
+            allowed_domains=["a.example"],
+            blocked_domains=["b.example"],
         )

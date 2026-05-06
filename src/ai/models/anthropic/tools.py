@@ -94,7 +94,19 @@ def _check_domains(
         )
 
 
-def web_search(args: WebSearchArgs) -> types.tools.Tool:
+def web_search(
+    *,
+    max_uses: int | None = None,
+    allowed_domains: list[str] | None = None,
+    blocked_domains: list[str] | None = None,
+    user_location: UserLocation | None = None,
+) -> types.tools.Tool:
+    args = WebSearchArgs(
+        max_uses=max_uses,
+        allowed_domains=allowed_domains,
+        blocked_domains=blocked_domains,
+        user_location=user_location,
+    )
     _check_domains("web_search", args.allowed_domains, args.blocked_domains)
     return types.tools.Tool(
         kind="provider",
@@ -103,7 +115,23 @@ def web_search(args: WebSearchArgs) -> types.tools.Tool:
     )
 
 
-def web_fetch(args: WebFetchArgs) -> types.tools.Tool:
+def web_fetch(
+    *,
+    max_uses: int | None = None,
+    allowed_domains: list[str] | None = None,
+    blocked_domains: list[str] | None = None,
+    citations: Citations | bool | None = None,
+    max_content_tokens: int | None = None,
+) -> types.tools.Tool:
+    args = WebFetchArgs(
+        max_uses=max_uses,
+        allowed_domains=allowed_domains,
+        blocked_domains=blocked_domains,
+        citations=Citations(enabled=citations)
+        if isinstance(citations, bool)
+        else citations,
+        max_content_tokens=max_content_tokens,
+    )
     _check_domains("web_fetch", args.allowed_domains, args.blocked_domains)
     return types.tools.Tool(
         kind="provider",
@@ -112,43 +140,54 @@ def web_fetch(args: WebFetchArgs) -> types.tools.Tool:
     )
 
 
-def code_execution(args: CodeExecutionArgs) -> types.tools.Tool:
+def code_execution() -> types.tools.Tool:
     return types.tools.Tool(
         kind="provider",
         name="code_execution",
-        args=args,
+        args=CodeExecutionArgs(),
     )
 
 
-def computer_use(args: ComputerUseArgs) -> types.tools.Tool:
+def computer_use(
+    *,
+    display_width_px: int,
+    display_height_px: int,
+    display_number: int | None = None,
+    enable_zoom: bool | None = None,
+) -> types.tools.Tool:
     return types.tools.Tool(
         kind="provider",
         name="computer",
-        args=args,
+        args=ComputerUseArgs(
+            display_width_px=display_width_px,
+            display_height_px=display_height_px,
+            display_number=display_number,
+            enable_zoom=enable_zoom,
+        ),
     )
 
 
-def text_editor(args: TextEditorArgs) -> types.tools.Tool:
+def text_editor(*, max_characters: int | None = None) -> types.tools.Tool:
     return types.tools.Tool(
         kind="provider",
         name="str_replace_based_edit_tool",
-        args=args,
+        args=TextEditorArgs(max_characters=max_characters),
     )
 
 
-def bash(args: BashArgs) -> types.tools.Tool:
+def bash() -> types.tools.Tool:
     return types.tools.Tool(
         kind="provider",
         name="bash",
-        args=args,
+        args=BashArgs(),
     )
 
 
-def memory(args: MemoryArgs) -> types.tools.Tool:
+def memory() -> types.tools.Tool:
     return types.tools.Tool(
         kind="provider",
         name="memory",
-        args=args,
+        args=MemoryArgs(),
     )
 
 

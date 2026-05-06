@@ -42,9 +42,7 @@ async def main() -> None:
     async with ai.stream(
         model,
         messages,
-        tools=[
-            ai.anthropic.tools.web_search(ai.anthropic.tools.WebSearchArgs(max_uses=3))
-        ],
+        tools=[ai.anthropic.tools.web_search(max_uses=3)],
     ) as s:
         async for event in s:
             match event:
@@ -63,11 +61,7 @@ async def main() -> None:
     async with ai.stream(
         model,
         messages,
-        tools=[
-            ai.ai_gateway.tools.perplexity_search(
-                ai.ai_gateway.tools.PerplexitySearchArgs(max_results=5)
-            )
-        ],
+        tools=[ai.ai_gateway.tools.perplexity_search(max_results=5)],
     ) as s:
         async for event in s:
             match event:

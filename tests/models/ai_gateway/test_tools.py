@@ -44,9 +44,7 @@ class TestGatewayBuiltins:
             client,
             _TEST_MODEL,
             [user_msg("hi")],
-            tools=[
-                anthropic.tools.web_search(anthropic.tools.WebSearchArgs(max_uses=3))
-            ],
+            tools=[anthropic.tools.web_search(max_uses=3)],
         ):
             pass
 
@@ -69,10 +67,8 @@ class TestGatewayBuiltins:
             [user_msg("hi")],
             tools=[
                 openai.tools.mcp(
-                    openai.tools.McpArgs(
-                        server_label="my-server",
-                        server_url="https://mcp.example.com",
-                    )
+                    server_label="my-server",
+                    server_url="https://mcp.example.com",
                 ),
             ],
         ):
@@ -100,10 +96,8 @@ class TestGatewayBuiltins:
             [user_msg("hi")],
             tools=[
                 ai_gateway_pkg.tools.perplexity_search(
-                    ai_gateway_pkg.tools.PerplexitySearchArgs(
-                        max_results=5,
-                        search_domain_filter=["nature.com"],
-                    )
+                    max_results=5,
+                    search_domain_filter=["nature.com"],
                 ),
             ],
         ):
@@ -131,12 +125,10 @@ class TestGatewayBuiltins:
             [user_msg("hi")],
             tools=[
                 ai_gateway_pkg.tools.parallel_search(
-                    ai_gateway_pkg.tools.ParallelSearchArgs(
-                        mode="agentic",
-                        source_policy=ai_gateway_pkg.tools.SourcePolicy(
-                            include_domains=["wikipedia.org"],
-                        ),
-                    )
+                    mode="agentic",
+                    source_policy=ai_gateway_pkg.tools.SourcePolicy(
+                        include_domains=["wikipedia.org"],
+                    ),
                 ),
             ],
         ):

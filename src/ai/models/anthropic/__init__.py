@@ -10,9 +10,7 @@ Usage::
     # built-in tools
     s = ai.stream(
         model, msgs,
-        tools=[
-            anthropic.tools.web_search(anthropic.tools.WebSearchArgs(max_uses=5))
-        ],
+        tools=[anthropic.tools.web_search(max_uses=5)],
     )
 
 The adapter module is loaded lazily to avoid pulling in the ``anthropic``

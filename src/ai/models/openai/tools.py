@@ -129,44 +129,159 @@ class ToolSearchArgs(pydantic.BaseModel):
     execution: dict[str, Any] | None = None
 
 
-def web_search(args: WebSearchArgs) -> types.tools.Tool:
-    return types.tools.Tool(kind="provider", name="web_search", args=args)
+def web_search(
+    *,
+    external_web_access: bool | None = None,
+    filters: WebSearchFilters | None = None,
+    search_context_size: Literal["low", "medium", "high"] | None = None,
+    user_location: WebSearchUserLocation | None = None,
+) -> types.tools.Tool:
+    return types.tools.Tool(
+        kind="provider",
+        name="web_search",
+        args=WebSearchArgs(
+            external_web_access=external_web_access,
+            filters=filters,
+            search_context_size=search_context_size,
+            user_location=user_location,
+        ),
+    )
 
 
-def web_search_preview(args: WebSearchPreviewArgs) -> types.tools.Tool:
-    return types.tools.Tool(kind="provider", name="web_search_preview", args=args)
+def web_search_preview(
+    *,
+    search_context_size: Literal["low", "medium", "high"] | None = None,
+    user_location: WebSearchUserLocation | None = None,
+) -> types.tools.Tool:
+    return types.tools.Tool(
+        kind="provider",
+        name="web_search_preview",
+        args=WebSearchPreviewArgs(
+            search_context_size=search_context_size,
+            user_location=user_location,
+        ),
+    )
 
 
-def file_search(args: FileSearchArgs) -> types.tools.Tool:
-    return types.tools.Tool(kind="provider", name="file_search", args=args)
+def file_search(
+    *,
+    vector_store_ids: list[str],
+    max_num_results: int | None = None,
+    ranking: FileSearchRanking | None = None,
+    filters: dict[str, Any] | None = None,
+) -> types.tools.Tool:
+    return types.tools.Tool(
+        kind="provider",
+        name="file_search",
+        args=FileSearchArgs(
+            vector_store_ids=vector_store_ids,
+            max_num_results=max_num_results,
+            ranking=ranking,
+            filters=filters,
+        ),
+    )
 
 
-def code_interpreter(args: CodeInterpreterArgs) -> types.tools.Tool:
-    return types.tools.Tool(kind="provider", name="code_interpreter", args=args)
+def code_interpreter(
+    *,
+    container: CodeInterpreterContainer | str | None = None,
+) -> types.tools.Tool:
+    return types.tools.Tool(
+        kind="provider",
+        name="code_interpreter",
+        args=CodeInterpreterArgs(container=container),
+    )
 
 
-def image_generation(args: ImageGenerationArgs) -> types.tools.Tool:
-    return types.tools.Tool(kind="provider", name="image_generation", args=args)
+def image_generation(
+    *,
+    background: Literal["transparent", "opaque", "auto"] | None = None,
+    input_fidelity: Literal["high", "low"] | None = None,
+    model: str | None = None,
+    moderation: Literal["auto", "low"] | None = None,
+    output_compression: int | None = None,
+    output_format: Literal["png", "webp", "jpeg"] | None = None,
+    partial_images: int | None = None,
+    quality: Literal["low", "medium", "high", "auto"] | None = None,
+    size: str | None = None,
+) -> types.tools.Tool:
+    return types.tools.Tool(
+        kind="provider",
+        name="image_generation",
+        args=ImageGenerationArgs(
+            background=background,
+            input_fidelity=input_fidelity,
+            model=model,
+            moderation=moderation,
+            output_compression=output_compression,
+            output_format=output_format,
+            partial_images=partial_images,
+            quality=quality,
+            size=size,
+        ),
+    )
 
 
-def local_shell(args: LocalShellArgs) -> types.tools.Tool:
-    return types.tools.Tool(kind="provider", name="local_shell", args=args)
+def local_shell() -> types.tools.Tool:
+    return types.tools.Tool(kind="provider", name="local_shell", args=LocalShellArgs())
 
 
-def shell(args: ShellArgs) -> types.tools.Tool:
-    return types.tools.Tool(kind="provider", name="shell", args=args)
+def shell(*, environment: str | None = None) -> types.tools.Tool:
+    return types.tools.Tool(
+        kind="provider",
+        name="shell",
+        args=ShellArgs(environment=environment),
+    )
 
 
-def apply_patch(args: ApplyPatchArgs) -> types.tools.Tool:
-    return types.tools.Tool(kind="provider", name="apply_patch", args=args)
+def apply_patch() -> types.tools.Tool:
+    return types.tools.Tool(
+        kind="provider",
+        name="apply_patch",
+        args=ApplyPatchArgs(),
+    )
 
 
-def mcp(args: McpArgs) -> types.tools.Tool:
-    return types.tools.Tool(kind="provider", name="mcp", args=args)
+def mcp(
+    *,
+    server_label: str,
+    server_url: str | None = None,
+    connector_id: str | None = None,
+    authorization: str | None = None,
+    headers: dict[str, str] | None = None,
+    allowed_tools: list[str] | dict[str, Any] | None = None,
+    server_description: str | None = None,
+) -> types.tools.Tool:
+    return types.tools.Tool(
+        kind="provider",
+        name="mcp",
+        args=McpArgs(
+            server_label=server_label,
+            server_url=server_url,
+            connector_id=connector_id,
+            authorization=authorization,
+            headers=headers,
+            allowed_tools=allowed_tools,
+            server_description=server_description,
+        ),
+    )
 
 
-def tool_search(args: ToolSearchArgs) -> types.tools.Tool:
-    return types.tools.Tool(kind="provider", name="tool_search", args=args)
+def tool_search(
+    *,
+    description: str | None = None,
+    parameters: dict[str, Any] | None = None,
+    execution: dict[str, Any] | None = None,
+) -> types.tools.Tool:
+    return types.tools.Tool(
+        kind="provider",
+        name="tool_search",
+        args=ToolSearchArgs(
+            description=description,
+            parameters=parameters,
+            execution=execution,
+        ),
+    )
 
 
 __all__ = [

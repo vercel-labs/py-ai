@@ -13,9 +13,7 @@ Usage::
         model,
         msgs,
         params=[anthropic.AnthropicParams(speed="fast")],
-        tools=[
-            anthropic.tools.web_search(anthropic.tools.WebSearchArgs(max_uses=5))
-        ],
+        tools=[anthropic.tools.web_search(max_uses=5)],
     )
 
     # The gateway also exposes its own provider-executed tools that work
@@ -23,11 +21,7 @@ Usage::
     s = ai.stream(
         model,
         msgs,
-        tools=[
-            ai_gateway.tools.perplexity_search(
-                ai_gateway.tools.PerplexitySearchArgs(max_results=5)
-            )
-        ],
+        tools=[ai_gateway.tools.perplexity_search(max_results=5)],
     )
 
 The heavy ``.adapter`` module is loaded lazily so that ``import ai`` does
