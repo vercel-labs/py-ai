@@ -24,10 +24,17 @@ class UITextPart(pydantic.BaseModel):
 
 
 class UIReasoningPart(pydantic.BaseModel):
-    """Reasoning/thinking content part in AI SDK v6 format."""
+    """Reasoning/thinking content part in AI SDK v6 format.
+
+    Wire shape from the AI SDK frontend is
+    ``{type: "reasoning", text, state}``.  ``state`` is
+    ``"streaming"`` while the block is open and ``"done"`` once closed;
+    we accept it but don't currently route on it.
+    """
 
     type: Literal["reasoning"]
-    reasoning: str
+    text: str
+    state: Literal["streaming", "done"] | None = None
 
 
 # Tool invocation states in AI SDK v6:

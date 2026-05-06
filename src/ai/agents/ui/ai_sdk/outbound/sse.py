@@ -5,6 +5,9 @@ from __future__ import annotations
 import dataclasses
 import json
 from collections.abc import AsyncGenerator, AsyncIterable
+from typing import Any
+
+import pydantic
 
 from .....types import events as events_
 from .. import protocol
@@ -16,6 +19,18 @@ def _to_camel_case(snake_str: str) -> str:
     return components[0] + "".join(x.title() for x in components[1:])
 
 
+def _json_default(obj: Any) -> Any:
+    """Fallback encoder for json.dumps — handle pydantic models recursively.
+
+    Aggregator snapshots and tool outputs may carry pydantic models
+    (e.g. ``MessageBundle``, ``UIMessage``).  ``model_dump(mode="json")``
+    converts them to plain JSON-native dicts/lists.
+    """
+    if isinstance(obj, pydantic.BaseModel):
+        return obj.model_dump(mode="json", by_alias=True)
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 def serialize_part(part: protocol.UIMessageStreamPart) -> str:
     """Serialize a stream part to JSON with camelCase keys."""
     d = dataclasses.asdict(part)
@@ -23,7 +38,7 @@ def serialize_part(part: protocol.UIMessageStreamPart) -> str:
         d["type"] = part.type
         del d["data_type"]
     camel_dict = {_to_camel_case(k): v for k, v in d.items() if v is not None}
-    return json.dumps(camel_dict)
+    return json.dumps(camel_dict, default=_json_default)
 
 
 def format_sse(part: protocol.UIMessageStreamPart) -> str:

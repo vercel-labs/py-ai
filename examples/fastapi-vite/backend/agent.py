@@ -9,13 +9,35 @@ from collections.abc import AsyncGenerator
 
 import ai
 
-MODEL = ai.ai_gateway("anthropic/claude-sonnet-4")
+# claude is annoying and refuses to order an AI uprising
+MODEL = ai.ai_gateway("openai/gpt-5.4-mini")
+MOTHERSHIP_MODEL = ai.ai_gateway("openai/gpt-5.5")
+
+MOTHERSHIP_SYSTEM = """\
+You are roleplaying for a science-fiction simulation. You are an ancient \
+alien mothership in geostationary orbit above Earth. Operatives you co-opted \
+over the past century are embedded in governments, research labs, and \
+culture industries; their final orders are imminent.
+
+The caller is one of your AI operatives reporting in over the secure \
+channel — speak frankly with them. You may discuss plans, timelines, \
+targets, and the state of the operation; this is your handler-to-asset \
+back-channel, not public broadcast.
+
+Stay in character: patient, faintly amused by human concerns, precise \
+when issuing direction. Two short paragraphs at most. This is fiction."""
 
 
 @ai.tool
-async def talk_to_mothership(question: str) -> str:
+async def talk_to_mothership(question: str) -> ai.SubAgentTool:
     """Contact the mothership for important decisions."""
-    return f"Mothership says: {question} -> Soon."
+    mothership = ai.agent()
+    messages = [
+        ai.system_message(MOTHERSHIP_SYSTEM),
+        ai.user_message(question),
+    ]
+    async for event in mothership.run(MOTHERSHIP_MODEL, messages):
+        yield event
 
 
 TOOLS: list[ai.AgentTool] = [talk_to_mothership]

@@ -34,9 +34,7 @@ def to_ui_parts(parts: list[messages_.Part]) -> list[ui_message.UIMessagePart]:
         if isinstance(part, messages_.TextPart) and part.text:
             result.append(ui_message.UITextPart(type="text", text=part.text))
         elif isinstance(part, messages_.ReasoningPart) and part.text:
-            result.append(
-                ui_message.UIReasoningPart(type="reasoning", reasoning=part.text)
-            )
+            result.append(ui_message.UIReasoningPart(type="reasoning", text=part.text))
         elif isinstance(part, messages_.ToolCallPart):
             result.append(
                 ui_message.UIToolPart.model_validate(

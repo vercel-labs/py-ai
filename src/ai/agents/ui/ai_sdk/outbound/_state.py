@@ -6,7 +6,9 @@ from typing import Any
 
 from .....types import events as events_
 from .....types import messages as messages_
+from ....agent import MessageBundle
 from .. import _approvals, protocol
+from . import history
 
 
 def _tool_error_text(part: messages_.ToolResultPart) -> str:
@@ -41,6 +43,11 @@ class _StreamState:
         self.completed_reasoning_ids: set[str] = set()
         self.text_delta_ids: set[str] = set()
         self.reasoning_delta_ids: set[str] = set()
+
+        # Per-tool-call aggregators for streaming generator tools.  Each
+        # PartialToolCallResult feeds its value into the aggregator and
+        # the snapshot goes out as a preliminary tool output.
+        self.partial_aggregators: dict[str, events_.Aggregator[Any, Any, Any]] = {}
 
     # -- boundary helpers ----------------------------------------------------
 
@@ -219,8 +226,52 @@ class _StreamState:
     def on_partial_tool_result(
         self, event: events_.PartialToolCallResult
     ) -> list[protocol.UIMessageStreamPart]:
-        # TODO: Emit something!
-        return []
+        """Feed the value into the tool's aggregator and emit a preliminary output.
+
+        Each PartialToolCallResult carries one yielded value plus the
+        aggregator factory the tool was declared with.  We instantiate
+        the aggregator once per ``tool_call_id`` and use its snapshot
+        as the ``output`` of a preliminary ``ToolOutputAvailablePart``.
+        The AI SDK supersedes preliminary outputs with the final
+        ``ToolCallResult`` when it arrives.
+        """
+        out: list[protocol.UIMessageStreamPart] = []
+
+        tcid = event.tool_call_id
+        factory = event.aggregator_factory
+        if tcid is None or factory is None:
+            return out
+
+        out.extend(self._ensure_started())
+
+        agg = self.partial_aggregators.get(tcid)
+        if agg is None:
+            agg = factory()
+            self.partial_aggregators[tcid] = agg
+        agg.feed(event.value)
+
+        snapshot = agg.snapshot()
+        # MessageBundle is the snapshot type for sub-agent streams.  The
+        # AI SDK frontend speaks UIMessage, so convert here rather than
+        # leaking internal Message shape onto the wire.  A sub-agent's
+        # bundle contains only assistant/tool/internal messages, so
+        # ``to_ui_messages`` produces a single bubble (or none yet, if
+        # there's no assistant anchor) — take the last and skip emit if
+        # absent.
+        if isinstance(snapshot, MessageBundle):
+            ui_msgs = history.to_ui_messages(list(snapshot.messages))
+            if not ui_msgs:
+                return out
+            snapshot = ui_msgs[-1]
+
+        out.append(
+            protocol.ToolOutputAvailablePart(
+                tool_call_id=tcid,
+                output=snapshot,
+                preliminary=True,
+            )
+        )
+        return out
 
     # -- phase: hooks -------------------------------------------------------
 

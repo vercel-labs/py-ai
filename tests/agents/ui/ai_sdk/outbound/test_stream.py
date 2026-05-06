@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
+import ai
 from ai.agents.ui.ai_sdk import protocol, to_stream
 from ai.types import events as agent_events_
 from ai.types import events as events_
@@ -149,6 +150,88 @@ async def test_approval_request_hook_emits_approval_part() -> None:
     assert len(approval_parts) == 1
     assert approval_parts[0].tool_call_id == "tc1"
     assert approval_parts[0].approval_id == "approve_tc1"
+
+
+async def test_partial_tool_results_emit_preliminary_outputs() -> None:
+    """Each PartialToolCallResult feeds the aggregator and yields a preliminary part."""
+    out = await _collect(
+        [
+            agent_events_.PartialToolCallResult(
+                tool_call_id="tc1",
+                tool_name="search",
+                value="hit 1, ",
+                aggregator_factory=ai.ConcatAggregator,
+            ),
+            agent_events_.PartialToolCallResult(
+                tool_call_id="tc1",
+                tool_name="search",
+                value="hit 2, ",
+                aggregator_factory=ai.ConcatAggregator,
+            ),
+            agent_events_.PartialToolCallResult(
+                tool_call_id="tc1",
+                tool_name="search",
+                value="hit 3",
+                aggregator_factory=ai.ConcatAggregator,
+            ),
+        ]
+    )
+
+    prelim = [
+        p
+        for p in out
+        if isinstance(p, protocol.ToolOutputAvailablePart) and p.preliminary
+    ]
+    assert [p.output for p in prelim] == [
+        "hit 1, ",
+        "hit 1, hit 2, ",
+        "hit 1, hit 2, hit 3",
+    ]
+    assert all(p.tool_call_id == "tc1" for p in prelim)
+
+
+async def test_partial_message_bundle_becomes_ui_message() -> None:
+    """MessageAggregator's MessageBundle snapshot collapses to a single UIMessage."""
+    from ai.agents.ui.ai_sdk.ui_message import UIMessage
+
+    inner_msg = messages_.Message(
+        role="assistant",
+        parts=[messages_.TextPart(text="hi from sub-agent")],
+    )
+
+    out = await _collect(
+        [
+            agent_events_.PartialToolCallResult(
+                tool_call_id="tc1",
+                tool_name="research",
+                value=agent_events_.ToolCallResult(message=inner_msg, results=[]),
+                aggregator_factory=ai.MessageAggregator,
+            ),
+        ]
+    )
+
+    [prelim] = [
+        p
+        for p in out
+        if isinstance(p, protocol.ToolOutputAvailablePart) and p.preliminary
+    ]
+    assert isinstance(prelim.output, UIMessage)
+    assert prelim.output.role == "assistant"
+    assert prelim.output.parts[0].type == "text"
+
+
+async def test_partial_tool_result_without_factory_is_skipped() -> None:
+    """Without an aggregator_factory there's nothing to snapshot."""
+    out = await _collect(
+        [
+            agent_events_.PartialToolCallResult(
+                tool_call_id="tc1",
+                tool_name="search",
+                value="ignored",
+            ),
+        ]
+    )
+    assert not any(isinstance(p, protocol.ToolOutputAvailablePart) for p in out)
 
 
 # NOTE: agent-change boundary detection used to be driven by
