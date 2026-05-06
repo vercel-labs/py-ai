@@ -4,8 +4,13 @@ https://docs.anthropic.com/en/docs/build-with-claude/tool-use/web-search-tool
 
 import asyncio
 import json
+import sys
 
 import ai
+
+if ai.anthropic.client().api_key is None:
+    print(f"[SKIP] {ai.anthropic.api_key_env} not set")
+    sys.exit(0)
 
 model = ai.anthropic("claude-sonnet-4-6")
 
