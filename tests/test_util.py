@@ -1,9 +1,10 @@
-"""Tests for ai.util.merge."""
+"""Tests for ai.util."""
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterable
+import contextvars
+from collections.abc import AsyncIterable, AsyncIterator
 from typing import Any
 
 import async_solipsism  # type: ignore[import-untyped]
@@ -190,3 +191,262 @@ async def test_cleanup_with_non_generator_iterable() -> None:
         await _collect(util.merge(SimpleIter(), failing()))
 
     assert exc_info.group_contains(RuntimeError, match="boom")
+
+
+# -- unwrap_generator_exit --------------------------------------------------
+
+
+async def test_unwrap_generator_exit_pure_generator_exit() -> None:
+    """A BaseExceptionGroup containing only GeneratorExit unwraps to GeneratorExit."""
+    with pytest.raises(GeneratorExit):
+        async with util.unwrap_generator_exit():
+            raise BaseExceptionGroup("group", [GeneratorExit()])
+
+
+async def test_unwrap_generator_exit_nested_generator_exits() -> None:
+    """Nested groups containing only GeneratorExits also unwrap."""
+    with pytest.raises(GeneratorExit):
+        async with util.unwrap_generator_exit():
+            raise BaseExceptionGroup(
+                "outer",
+                [BaseExceptionGroup("inner", [GeneratorExit()])],
+            )
+
+
+async def test_unwrap_generator_exit_mixed_propagates() -> None:
+    """A group with non-GeneratorExit exceptions propagates as-is."""
+    with pytest.raises(BaseExceptionGroup) as exc_info:
+        async with util.unwrap_generator_exit():
+            raise BaseExceptionGroup("group", [GeneratorExit(), ValueError("x")])
+    assert exc_info.group_contains(ValueError, match="x")
+
+
+async def test_unwrap_generator_exit_non_group_passes_through() -> None:
+    """Non-group exceptions pass through unchanged."""
+    with pytest.raises(ValueError, match="x"):
+        async with util.unwrap_generator_exit():
+            raise ValueError("x")
+
+
+async def test_unwrap_generator_exit_no_exception() -> None:
+    """No exception → context manager returns normally."""
+    async with util.unwrap_generator_exit():
+        pass
+
+
+# -- maybe_aclosing --------------------------------------------------------
+
+
+async def test_maybe_aclosing_calls_aclose_on_asyncgen() -> None:
+    """A normal async generator's aclose runs when the with block exits."""
+    closed = False
+
+    async def gen() -> AsyncIterator[int]:
+        nonlocal closed
+        try:
+            yield 1
+        finally:
+            closed = True
+
+    async with util.maybe_aclosing(gen()) as g:
+        async for _ in g:
+            break
+    assert closed
+
+
+async def test_maybe_aclosing_no_aclose_attribute() -> None:
+    """Iterables without an aclose method are handled gracefully."""
+
+    class SimpleIter:
+        def __aiter__(self) -> SimpleIter:
+            return self
+
+        async def __anext__(self) -> int:
+            raise StopAsyncIteration
+
+    s = SimpleIter()
+    async with util.maybe_aclosing(s) as it:
+        assert it is s
+
+
+async def test_maybe_aclosing_runs_aclose_on_exception() -> None:
+    """aclose still runs when the body raises."""
+    closed = False
+
+    async def gen() -> AsyncIterator[int]:
+        nonlocal closed
+        try:
+            yield 1
+        finally:
+            closed = True
+
+    with pytest.raises(ValueError):
+        async with util.maybe_aclosing(gen()) as g:
+            async for _ in g:
+                raise ValueError
+    assert closed
+
+
+# -- decouple --------------------------------------------------------------
+
+
+async def test_decouple_yields_all_items() -> None:
+    """Basic: every item from the source is yielded in order."""
+    result = await _collect(util.decouple(_from_list([1, 2, 3])))
+    assert result == [1, 2, 3]
+
+
+async def test_decouple_with_task_group() -> None:
+    """Works equivalently when given an explicit TaskGroup."""
+
+    async def consume() -> list[int]:
+        async with asyncio.TaskGroup() as tg:
+            return await _collect(util.decouple(_from_list([1, 2, 3]), task_group=tg))
+
+    assert await consume() == [1, 2, 3]
+
+
+async def test_decouple_forwards_exception_to_consumer() -> None:
+    """An exception raised by the source surfaces in the consumer."""
+
+    async def failing() -> AsyncIterable[int]:
+        yield 1
+        raise ValueError("boom")
+
+    items: list[int] = []
+    with pytest.raises(ValueError, match="boom"):
+        async for x in util.decouple(failing()):
+            items.append(x)
+    assert items == [1]
+
+
+async def test_decouple_contextvar_stable_across_yields() -> None:
+    """ContextVars set inside the source persist across yields under decouple."""
+    var: contextvars.ContextVar[str] = contextvars.ContextVar("test")
+
+    async def src() -> AsyncIterator[str]:
+        var.set("hello")
+        yield "a"
+        # If the next anext ran in a different task context, this would
+        # fall back to the default and the lookup would raise.
+        assert var.get() == "hello"
+        yield "b"
+
+    assert await _collect(util.decouple(src())) == ["a", "b"]
+
+
+async def test_decouple_aclose_runs_iter_cleanup_in_worker_context() -> None:
+    """Breaking the consumer aclose's the source in the worker's task context.
+
+    foo's finally calls ``var.reset(token)``, which raises ``ValueError`` if
+    the reset runs in a different context than the matching ``set``. So if
+    decouple drives the source's cleanup from a foreign task, this test
+    surfaces it as the reset raising.
+    """
+    var: contextvars.ContextVar[str] = contextvars.ContextVar("test")
+    cleanup_seen: str | None = None
+
+    async def src() -> AsyncIterator[int]:
+        token = var.set("worker")
+        try:
+            for i in range(100):
+                yield i
+        finally:
+            nonlocal cleanup_seen
+            cleanup_seen = var.get()
+            var.reset(token)  # would raise on context mismatch
+
+    n = 0
+    async with util.maybe_aclosing(util.decouple(src())) as it:
+        async for _ in it:
+            n += 1
+            if n == 3:
+                break
+
+    assert cleanup_seen == "worker"
+
+
+# -- merge: TaskGroup-inside-asyncgen wrapping ----------------------------
+
+
+async def test_merge_aclose_returns_cleanly_after_break() -> None:
+    """Aclose'ing merge mid-stream returns without raising BaseExceptionGroup.
+
+    Without ``unwrap_generator_exit``, the TaskGroup's __aexit__ wraps the
+    GeneratorExit thrown by aclose into a BaseExceptionGroup, which then
+    propagates out of aclose itself.
+    """
+
+    async def src() -> AsyncIterator[int]:
+        for i in range(100):
+            yield i
+
+    m = util.merge(src())
+    n = 0
+    async for _ in m:
+        n += 1
+        if n == 3:
+            break
+
+    # Should complete without raising BaseExceptionGroup.
+    await m.aclose()  # type: ignore[attr-defined]
+
+
+async def test_merge_preserves_contextvar_across_yields() -> None:
+    """merge must keep contextvars consistent across yields from the same iter.
+
+    On main, ``merge`` wraps each ``__anext__`` call in a fresh task, so a
+    contextvar set in one anext is invisible in the next, and a finally-block
+    ``var.reset(token)`` raises ValueError because the token was created in
+    a different task's context than the one running reset.
+    """
+    var: contextvars.ContextVar[str] = contextvars.ContextVar("test")
+
+    async def src() -> AsyncIterator[int]:
+        token = var.set("hello")
+        try:
+            yield 1
+            yield 2
+        finally:
+            var.reset(token)  # raises ValueError on context mismatch
+
+    items = [x async for x in util.merge(src())]
+    assert items == [1, 2]
+
+
+def test_merge_cleanup_on_asyncio_shutdown() -> None:
+    """A leaked partially-consumed merge gen is cleaned up correctly on shutdown.
+
+    The consumer breaks out of ``async for x in merge(src())`` without
+    explicitly aclose'ing the merge gen, so cleanup is left to asyncio.run's
+    shutdown sequence (``_cancel_all_tasks`` then ``shutdown_asyncgens``).
+    The source's finally must still run in a context that matches its
+    matched ``var.set`` — i.e. the cancellation has to drive ``src``'s
+    cleanup from the same task that called ``var.set``. Run as a sync test
+    so we drive a real ``asyncio.run`` lifecycle instead of pytest-asyncio's
+    per-test loop.
+    """
+    cleanup_log: list[str] = []
+    var: contextvars.ContextVar[str] = contextvars.ContextVar("test")
+
+    async def src() -> AsyncIterator[int]:
+        token = var.set("hello")
+        try:
+            for i in range(100):
+                yield i
+        finally:
+            try:
+                var.reset(token)
+                cleanup_log.append("ok")
+            except Exception as e:
+                cleanup_log.append(f"err:{type(e).__name__}")
+
+    async def main() -> None:
+        async for x in util.merge(src()):
+            if x == 3:
+                break
+        # No explicit aclose; rely on asyncio.run shutdown.
+
+    asyncio.run(main())
+
+    assert cleanup_log == ["ok"], cleanup_log
