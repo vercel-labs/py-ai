@@ -1,7 +1,6 @@
 """Nested agents: a research tool that is itself an agent streaming through the sink."""
 
 import asyncio
-from collections.abc import AsyncGenerator
 
 import ai
 
@@ -18,11 +17,11 @@ async def get_facts(topic: str) -> str:
     return facts.get(topic.lower(), f"No facts found for {topic}.")
 
 
-# This tool is an async generator — it streams the sub-agent's events
-# through the runtime sink. ``MessageAggregator`` collects the streamed
-# messages and returns the final assistant text as the tool result.
-@ai.tool(aggregator=ai.MessageAggregator)
-async def research(topic: str) -> AsyncGenerator[ai.AgentEvent]:
+# The SubAgentTool alias declares MessageAggregator on the return type:
+# events stream through the runtime sink, the collected messages flow to
+# the consumer, and the final assistant text becomes the tool result.
+@ai.tool
+async def research(topic: str) -> ai.SubAgentTool:
     """Research a topic in depth using a sub-agent."""
     researcher = ai.agent(tools=[get_facts])
 

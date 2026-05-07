@@ -2,18 +2,20 @@
 
 An async generator tool yields values that flow through the runtime
 sink to the consumer in real time as ``PartialToolCallResult`` events.
-The tool's ``aggregator`` decides how the yielded values are combined
-into the final tool result that goes back to the model.
+The tool's aggregator decides how the yielded values are combined into
+the final tool result that goes back to the model.
+
+Here the aggregator is declared via the :data:`ai.StreamingStatusTool`
+return-type alias — equivalent to ``@ai.tool(aggregator=ai.LastAggregator)``.
 """
 
 import asyncio
-from collections.abc import AsyncGenerator
 
 import ai
 
 
-@ai.tool(aggregator=ai.LastAggregator)
-async def talk_to_mothership(question: str) -> AsyncGenerator[str]:
+@ai.tool
+async def talk_to_mothership(question: str) -> ai.StreamingStatusTool[str]:
     """Ask the mothership a question. Streams progress back to the caller."""
     for step in ["Connecting...", "Transmitting...", f"Asking: {question!r}..."]:
         yield step

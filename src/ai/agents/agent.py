@@ -6,8 +6,9 @@ import asyncio
 import contextlib
 import inspect
 import json
+import typing
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
-from typing import Any, Protocol, Self, get_type_hints, overload
+from typing import Annotated, Any, Protocol, Self, get_type_hints, overload
 
 import pydantic
 
@@ -73,6 +74,125 @@ class MessageAggregator(events_.Aggregator[events_.AgentEvent, MessageBundle, st
             if m.role == "assistant" and m.text:
                 return m.text
         return ""
+
+
+class Aggregate:
+    """Marker for declaring an aggregator on a tool's return type.
+
+    Place inside ``Annotated`` metadata to attach an aggregator factory
+    to an async-generator tool::
+
+        type SubAgentTool = Annotated[
+            AsyncGenerator[ai.AgentEvent], Aggregate(MessageAggregator)
+        ]
+
+        @ai.tool
+        async def research(topic: str) -> SubAgentTool:
+            ...
+
+    Extra kwargs are passed to the factory each time it is invoked::
+
+        type Joined = Annotated[
+            AsyncGenerator[str], Aggregate(ConcatAggregator, delim="\\n")
+        ]
+    """
+
+    def __init__(
+        self,
+        factory: Callable[..., events_.Aggregator[Any, Any, Any]],
+        /,
+        **kwargs: Any,
+    ) -> None:
+        self._factory = factory
+        self._kwargs = kwargs
+
+    def __call__(self) -> events_.Aggregator[Any, Any, Any]:
+        return self._factory(**self._kwargs)
+
+    def __repr__(self) -> str:
+        kw = ", ".join(f"{k}={v!r}" for k, v in self._kwargs.items())
+        sep = ", " if kw else ""
+        return f"Aggregate({self._factory.__name__}{sep}{kw})"
+
+
+type StreamingStatusTool[T] = Annotated[AsyncGenerator[T], Aggregate(LastAggregator)]
+"""Async-generator tool whose final yielded value becomes the tool result.
+
+Intermediate yields stream to the consumer as ``PartialToolCallResult``
+events; the last yield is what the model sees::
+
+    @ai.tool
+    async def fetch(url: str) -> StreamingStatusTool[str]:
+        yield "connecting..."
+        yield "downloading..."
+        yield body  # this is the tool result
+"""
+
+
+type SubAgentTool = Annotated[
+    AsyncGenerator[events_.AgentEvent], Aggregate(MessageAggregator)
+]
+"""Async-generator tool that streams a sub-agent's events.
+
+The collected messages flow to the consumer; the final assistant text
+becomes the tool result the parent model sees::
+
+    @ai.tool
+    async def research(topic: str) -> SubAgentTool:
+        sub = ai.agent(tools=[...])
+        async for event in sub.run(model, messages):
+            yield event
+"""
+
+
+type StreamingTextTool = Annotated[AsyncGenerator[str], Aggregate(ConcatAggregator)]
+"""Async-generator tool whose yielded chunks concatenate into the result.
+
+Each yield streams to the consumer as a ``PartialToolCallResult``;
+the model sees the full concatenation as the tool result::
+
+    @ai.tool
+    async def render(prompt: str) -> StreamingTextTool:
+        async for chunk in some_text_stream(prompt):
+            yield chunk
+
+For a custom delimiter, drop down to the marker form:
+``Annotated[AsyncGenerator[str], Aggregate(ConcatAggregator, delim="\\n")]``.
+"""
+
+
+def _aggregate_from_return_type(fn: Callable[..., Any]) -> Aggregate | None:
+    """Find an ``Aggregate`` marker in *fn*'s return-type metadata, if any.
+
+    Handles three shapes:
+
+    * ``Annotated[X, Aggregate(...)]`` directly,
+    * a PEP 695 alias ``type Foo = Annotated[X, Aggregate(...)]``,
+    * a parameterized alias ``type Foo[T] = Annotated[X[T], Aggregate(...)]``.
+    """
+    try:
+        hints = get_type_hints(fn, include_extras=True)
+    except Exception:
+        return None
+    ret = hints.get("return")
+    if ret is None:
+        return None
+
+    if isinstance(ret, typing.TypeAliasType):
+        ret = ret.__value__
+    else:
+        origin = typing.get_origin(ret)
+        if isinstance(origin, typing.TypeAliasType):
+            ret = origin.__value__
+
+    metadata = getattr(ret, "__metadata__", ())
+    matches = [m for m in metadata if isinstance(m, Aggregate)]
+    if len(matches) > 1:
+        raise TypeError(
+            f"Tool {fn.__name__!r} has multiple Aggregate markers in its "
+            "return-type annotation; expected at most one"
+        )
+    return matches[0] if matches else None
 
 
 class Tool[**P, R]:
@@ -151,18 +271,29 @@ def tool[**P, R](fn: Callable[P, Awaitable[R]], /) -> Tool[P, R]: ...
 
 
 @overload
+def tool[**P, T](fn: Callable[P, AsyncGenerator[T]], /) -> Tool[P, Any]: ...
+
+
+@overload
 def tool[**P, T, R](
     *, aggregator: Callable[[], events_.Aggregator[T, Any, R]]
 ) -> Callable[[Callable[P, AsyncGenerator[T]]], Tool[P, R]]: ...
 
 
 def tool[**P, T, R](
-    fn: Callable[P, Awaitable[R]] | None = None,
+    fn: Callable[P, Awaitable[R]] | Callable[P, AsyncGenerator[T]] | None = None,
     /,
     *,
     aggregator: Callable[[], events_.Aggregator[T, Any, R]] | None = None,
 ) -> Callable[[Callable[P, AsyncGenerator[T]]], Tool[P, R]] | Tool[P, R]:
-    """Decorator: turn an async function into a :class:`Tool`."""
+    """Decorator: turn an async function into a :class:`Tool`.
+
+    For async-generator tools, declare the aggregator either via the
+    ``aggregator=`` keyword argument or by annotating the return type
+    with an :class:`Aggregate` marker (e.g. via the :data:`SubAgentTool`
+    or :data:`StreamingStatusTool` aliases).  Specifying both raises
+    ``TypeError``.
+    """
 
     def wrap(fn: Any) -> Tool[P, R]:
         sig = inspect.signature(fn)
@@ -185,12 +316,21 @@ def tool[**P, T, R](
             return_type=hints.get("return", None),
         )
 
+        annotated_aggregate = _aggregate_from_return_type(fn)
+        if annotated_aggregate is not None and aggregator is not None:
+            raise TypeError(
+                f"Tool {fn.__name__!r}: aggregator was declared both via "
+                "the `aggregator=` argument and via an Aggregate marker "
+                "in the return-type annotation; specify only one"
+            )
+        effective_aggregator = aggregator or annotated_aggregate
+
         return Tool(
             fn=fn,
             schema=schema,
             validator=validator,
             is_gen=inspect.isasyncgenfunction(fn),
-            aggregator=aggregator,
+            aggregator=effective_aggregator,
         )
 
     if fn is None:
