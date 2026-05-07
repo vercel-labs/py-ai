@@ -11,7 +11,6 @@ import openai
 import pydantic
 
 from ... import types
-from ...types import tools as tools_
 from .. import core
 from .params import OpenAIChatParams
 
@@ -21,7 +20,7 @@ from .params import OpenAIChatParams
 
 
 def _tools_to_openai(
-    tools: Sequence[types.ToolLike],
+    tools: Sequence[types.tools.Tool],
 ) -> list[dict[str, Any]]:
     """Convert internal Tool objects to OpenAI tool schema format.
 
@@ -30,15 +29,18 @@ def _tools_to_openai(
     """
     result: list[dict[str, Any]] = []
     for tool in tools:
-        if isinstance(tool, tools_.BuiltinTool):
+        if tool.kind == "provider":
             continue
+        args = tool.args
+        if not isinstance(args, types.tools.FunctionToolArgs):
+            raise TypeError(f"function tool {tool.name!r} has invalid args")
         result.append(
             {
                 "type": "function",
                 "function": {
                     "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.param_schema,
+                    "description": args.description or "",
+                    "parameters": args.params,
                 },
             }
         )
@@ -46,7 +48,7 @@ def _tools_to_openai(
 
 
 async def _file_part_to_openai(
-    part: types.FilePart,
+    part: types.messages.FilePart,
 ) -> dict[str, Any]:
     """Convert a :class:`FilePart` to an OpenAI content-array element.
 
@@ -101,7 +103,7 @@ async def _file_part_to_openai(
 
 
 async def _messages_to_openai(
-    messages: list[types.Message],
+    messages: list[types.messages.Message],
     *,
     system_message_mode: str = "system",
 ) -> list[dict[str, Any]]:
@@ -120,11 +122,11 @@ async def _messages_to_openai(
 
                 for part in msg.parts:
                     match part:
-                        case types.ReasoningPart(text=text):
+                        case types.messages.ReasoningPart(text=text):
                             reasoning += text
-                        case types.TextPart(text=text):
+                        case types.messages.TextPart(text=text):
                             content += text
-                        case types.ToolCallPart():
+                        case types.messages.ToolCallPart():
                             tool_calls.append(
                                 {
                                     "id": part.tool_call_id,
@@ -136,7 +138,8 @@ async def _messages_to_openai(
                                 }
                             )
                         case (
-                            types.BuiltinToolCallPart() | types.BuiltinToolReturnPart()
+                            types.messages.BuiltinToolCallPart()
+                            | types.messages.BuiltinToolReturnPart()
                         ):
                             raise NotImplementedError(
                                 "OpenAI chat-completions adapter does not "
@@ -157,7 +160,7 @@ async def _messages_to_openai(
 
             case "tool":
                 for part in msg.parts:
-                    if isinstance(part, types.ToolResultPart):
+                    if isinstance(part, types.messages.ToolResultPart):
                         result.append(
                             {
                                 "role": "tool",
@@ -172,25 +175,29 @@ async def _messages_to_openai(
                 if system_message_mode == "remove":
                     continue
                 content_text = "".join(
-                    p.text for p in msg.parts if isinstance(p, types.TextPart)
+                    p.text for p in msg.parts if isinstance(p, types.messages.TextPart)
                 )
                 role = "developer" if system_message_mode == "developer" else "system"
                 result.append({"role": role, "content": content_text})
 
             case "user":
-                has_files = any(isinstance(p, types.FilePart) for p in msg.parts)
+                has_files = any(
+                    isinstance(p, types.messages.FilePart) for p in msg.parts
+                )
                 if not has_files:
                     text = "".join(
-                        p.text for p in msg.parts if isinstance(p, types.TextPart)
+                        p.text
+                        for p in msg.parts
+                        if isinstance(p, types.messages.TextPart)
                     )
                     result.append({"role": "user", "content": text})
                 else:
                     parts: list[dict[str, Any]] = []
                     for p in msg.parts:
                         match p:
-                            case types.TextPart(text=text):
+                            case types.messages.TextPart(text=text):
                                 parts.append({"type": "text", "text": text})
-                            case types.FilePart():
+                            case types.messages.FilePart():
                                 parts.append(await _file_part_to_openai(p))
                     result.append({"role": "user", "content": parts})
     return result
@@ -241,20 +248,20 @@ def _merge_extra_body(
 async def stream(
     client: core.client.Client,
     model: core.model.Model[Any],
-    messages: list[types.Message],
+    messages: list[types.messages.Message],
     *,
-    tools: Sequence[types.ToolLike] | None = None,
+    tools: Sequence[types.tools.Tool] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
     thinking: bool = False,
     budget_tokens: int | None = None,
     reasoning_effort: str | None = None,
     **kwargs: Any,
-) -> AsyncGenerator[types.Event]:
+) -> AsyncGenerator[types.events.Event]:
     """Stream an LLM response via the OpenAI chat completions API.
 
     Yields :class:`~ai.types.events.Event` objects as the response streams in.
     Pure delta emitter — the :class:`~ai.models.Stream` wrapper aggregates
-    parts into the final :class:`~ai.types.Message`.
+    parts into the final :class:`~ai.types.messages.Message`.
 
     Extra keyword arguments beyond the ``StreamFn`` protocol:
 
@@ -265,7 +272,7 @@ async def stream(
       ``"low"``, ``"medium"``, ``"high"``, ``"xhigh"``
       (mutually exclusive with ``budget_tokens``).
     """
-    if tools and any(isinstance(t, tools_.BuiltinTool) for t in tools):
+    if tools and any(t.kind == "provider" for t in tools):
         raise NotImplementedError(
             "OpenAI built-in tools require the Responses API. "
             "The chat-completions adapter does not support them. "
@@ -363,7 +370,7 @@ async def stream(
         text_started = False
         reasoning_started = False
         tc_state: dict[int, dict[str, Any]] = {}
-        usage: types.Usage | None = None
+        usage: types.usage.Usage | None = None
 
         yield types.events.StreamStart()
 
@@ -378,7 +385,7 @@ async def stream(
                 pd = getattr(chunk.usage, "prompt_tokens_details", None)
                 if pd:
                     cache_read = getattr(pd, "cached_tokens", None)
-                usage = types.Usage(
+                usage = types.usage.Usage(
                     input_tokens=chunk.usage.prompt_tokens or 0,
                     output_tokens=chunk.usage.completion_tokens or 0,
                     reasoning_tokens=reasoning_tokens,

@@ -10,7 +10,7 @@ import pydantic
 import pytest
 
 import ai
-from ai.agents import events as agent_events_
+from ai.types import events as agent_events_
 
 from ..conftest import MOCK_MODEL, mock_llm, text_msg
 
@@ -29,7 +29,7 @@ async def test_resolve_live_future() -> None:
     my_agent = ai.agent()
 
     @my_agent.loop
-    async def custom(context: ai.Context) -> AsyncGenerator[ai.Event]:
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.events.Event]:
         nonlocal resolved_value
         async for event in ai.models.stream(context.model, context.messages):
             yield event
@@ -59,7 +59,7 @@ async def test_cancel_live_hook() -> None:
     my_agent = ai.agent()
 
     @my_agent.loop
-    async def custom(context: ai.Context) -> AsyncGenerator[ai.Event]:
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.events.Event]:
         nonlocal was_cancelled
         async for event in ai.models.stream(context.model, context.messages):
             yield event
@@ -96,7 +96,7 @@ async def test_pre_registered_resolution_consumed() -> None:
     my_agent = ai.agent()
 
     @my_agent.loop
-    async def custom(context: ai.Context) -> AsyncGenerator[ai.Event]:
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.events.Event]:
         nonlocal resolved_value
         async for event in ai.models.stream(context.model, context.messages):
             yield event
@@ -135,14 +135,14 @@ async def test_resolved_hook_emits_message() -> None:
     my_agent = ai.agent()
 
     @my_agent.loop
-    async def custom(context: ai.Context) -> AsyncGenerator[ai.Event]:
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.events.Event]:
         async for event in ai.models.stream(context.model, context.messages):
             yield event
         await ai.hook("emit_test", payload=Confirmation)
 
     mock_llm([[text_msg("OK")]])
 
-    hooks: list[ai.HookPart[Any]] = []
+    hooks: list[ai.messages.HookPart[Any]] = []
     async for event in my_agent.run(MOCK_MODEL, [ai.user_message("go")]):
         if not isinstance(event, agent_events_.HookEvent):
             continue
@@ -162,7 +162,7 @@ async def test_hook_metadata_in_pending() -> None:
     my_agent = ai.agent()
 
     @my_agent.loop
-    async def custom(context: ai.Context) -> AsyncGenerator[ai.Event]:
+    async def custom(context: ai.Context) -> AsyncGenerator[ai.events.Event]:
         async for event in ai.models.stream(context.model, context.messages):
             yield event
         await ai.hook(
@@ -173,7 +173,7 @@ async def test_hook_metadata_in_pending() -> None:
         )
 
     mock_llm([[text_msg("OK")]])
-    hooks: list[ai.HookPart[Any]] = []
+    hooks: list[ai.messages.HookPart[Any]] = []
     async for event in my_agent.run(MOCK_MODEL, [ai.user_message("go")]):
         if isinstance(event, agent_events_.HookEvent):
             hooks.append(event.hook)

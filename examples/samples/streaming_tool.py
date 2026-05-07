@@ -36,9 +36,9 @@ async def main() -> None:
     ]
 
     async for event in my_agent.run(model, messages):
-        if isinstance(event, ai.PartialToolCallResult):
+        if isinstance(event, ai.events.PartialToolCallResult):
             print(f"  [{event.value}]")
-        elif isinstance(event, ai.TextDelta):
+        elif isinstance(event, ai.events.TextDelta):
             print(event.chunk, end="", flush=True)
     print()
 

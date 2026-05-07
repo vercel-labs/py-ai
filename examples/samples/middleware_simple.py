@@ -56,8 +56,8 @@ class PrintMiddleware(ai.Middleware):
     async def wrap_generate(
         self,
         call: ai.middleware.GenerateContext,
-        next: Callable[[ai.middleware.GenerateContext], Awaitable[ai.Message]],
-    ) -> ai.Message:
+        next: Callable[[ai.middleware.GenerateContext], Awaitable[ai.messages.Message]],
+    ) -> ai.messages.Message:
         print(f"\n>>> [generate] calling {call.model.id}")
         print(f"    messages: {len(call.messages)}")
 
@@ -69,8 +69,10 @@ class PrintMiddleware(ai.Middleware):
     async def wrap_tool(
         self,
         call: ai.middleware.ToolContext,
-        next: Callable[[ai.middleware.ToolContext], Awaitable[ai.ToolCallResult]],
-    ) -> ai.ToolCallResult:
+        next: Callable[
+            [ai.middleware.ToolContext], Awaitable[ai.events.ToolCallResult]
+        ],
+    ) -> ai.events.ToolCallResult:
         print(f"\n>>> [tool] {call.tool_name}({call.kwargs})")
 
         result = await next(call)
@@ -119,7 +121,7 @@ async def main() -> None:
 
     print("--- starting agent run ---\n")
     async for event in my_agent.run(model, messages, middleware=[PrintMiddleware()]):
-        if isinstance(event, ai.TextDelta):
+        if isinstance(event, ai.events.TextDelta):
             print(event.chunk, end="", flush=True)
     print("\n\n--- done ---")
 

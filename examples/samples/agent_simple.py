@@ -22,9 +22,9 @@ async def main() -> None:
     ]
 
     async for event in my_agent.run(model, messages):
-        if isinstance(event, ai.TextDelta):
+        if isinstance(event, ai.events.TextDelta):
             print(event.chunk, end="", flush=True)
-        if isinstance(event, ai.StreamEnd):
+        if isinstance(event, ai.events.StreamEnd):
             print()
     print()
 

@@ -33,7 +33,7 @@ async def main() -> None:
     @my_agent.loop
     async def with_approval(
         context: ai.Context,
-    ) -> AsyncGenerator[ai.AgentEvent]:
+    ) -> AsyncGenerator[ai.events.AgentEvent]:
         while True:
             s = ai.models.stream(context.model, context.messages, tools=context.tools)
             async for event in s:
@@ -45,7 +45,7 @@ async def main() -> None:
             if not tool_calls:
                 return
 
-            results: list[ai.ToolCallResult] = []
+            results: list[ai.events.ToolCallResult] = []
             for tc in tool_calls:
                 if tc.name == "contact_mothership":
                     # Suspends until resolved from outside the loop.
@@ -78,12 +78,12 @@ async def main() -> None:
     ]
 
     async for event in my_agent.run(model, messages):
-        if isinstance(event, ai.TextDelta):
+        if isinstance(event, ai.events.TextDelta):
             print(event.chunk, end="", flush=True)
             continue
 
         # Hook signals arrive as HookEvent events.
-        if isinstance(event, ai.HookEvent) and event.hook.status == "pending":
+        if isinstance(event, ai.events.HookEvent) and event.hook.status == "pending":
             hook_part = event.hook
             answer = input(f"Approve {hook_part.hook_id}? [y/n] ")
             ai.resolve_hook(

@@ -71,14 +71,14 @@ MODEL = ai.ai_gateway("anthropic/claude-sonnet-4")
 
 
 def _gated_agent(
-    tools: list[ai.Tool[..., Any]],
+    tools: list[ai.AgentTool],
     approval_tool: str,
     label: str,
 ) -> ai.Agent:
     gated = ai.agent(tools=tools)
 
     @gated.loop
-    async def gated_loop(context: ai.Context) -> AsyncGenerator[ai.AgentEvent]:
+    async def gated_loop(context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
         while True:
             s = ai.stream(context.model, context.messages, tools=context.tools)
             async for event in s:
@@ -89,7 +89,7 @@ def _gated_agent(
             if not tool_calls:
                 break
 
-            results: list[ai.ToolCallResult] = []
+            results: list[ai.events.ToolCallResult] = []
             for tc in tool_calls:
                 if tc.name == approval_tool:
                     approval = await ai.hook(
@@ -138,7 +138,7 @@ orchestrator = ai.agent()
 
 
 @orchestrator.loop
-async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.AgentEvent]:
+async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
     """Run two gated agents in parallel, then summarise their results."""
     query = context.messages[-1].text
 
@@ -254,7 +254,7 @@ async def ws_endpoint(websocket: fastapi.WebSocket) -> None:
             data = _normalise_event(event.model_dump())
             await websocket.send_json(data)
 
-            if isinstance(event, ai.HookEvent):
+            if isinstance(event, ai.events.HookEvent):
                 print(f"  Hook {event.hook.status}: {event.hook.hook_id}")
     finally:
         reader.cancel()

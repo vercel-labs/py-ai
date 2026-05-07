@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
-from ai.agents import events as agent_events_
 from ai.agents.ui.ai_sdk import protocol, to_stream
+from ai.types import events as agent_events_
 from ai.types import events as events_
 from ai.types import messages as messages_
 

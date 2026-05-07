@@ -110,11 +110,11 @@ class MultiAgentApp(textual.app.App[None]):
 
     def __init__(self) -> None:
         super().__init__()
-        self._hook_queue: asyncio.Queue[ai.HookPart[Any]] = asyncio.Queue()
-        self._current_hook: ai.HookPart[Any] | None = None
+        self._hook_queue: asyncio.Queue[ai.messages.HookPart[Any]] = asyncio.Queue()
+        self._current_hook: ai.messages.HookPart[Any] | None = None
         self._ws: websockets.ClientConnection | None = None
-        self._event_adapter: pydantic.TypeAdapter[ai.AgentEvent] = pydantic.TypeAdapter(
-            ai.AgentEvent
+        self._event_adapter: pydantic.TypeAdapter[ai.events.AgentEvent] = (
+            pydantic.TypeAdapter(ai.events.AgentEvent)
         )
 
     def compose(self) -> textual.app.ComposeResult:
@@ -171,41 +171,41 @@ class MultiAgentApp(textual.app.App[None]):
     # are routed to the "summary" panel by default.
     # ------------------------------------------------------------------
 
-    def _handle_event(self, event: ai.AgentEvent) -> None:
-        if isinstance(event, ai.PartialToolCallResult):
+    def _handle_event(self, event: ai.events.AgentEvent) -> None:
+        if isinstance(event, ai.events.PartialToolCallResult):
             label = str(event.label) if event.label is not None else "summary"
             inner = self._event_adapter.validate_python(event.value)
             self._render(label, inner)
         else:
             self._render("summary", event)
 
-    def _render(self, label: str, event: ai.AgentEvent) -> None:
-        if isinstance(event, ai.ToolCallResult):
+    def _render(self, label: str, event: ai.events.AgentEvent) -> None:
+        if isinstance(event, ai.events.ToolCallResult):
             panel = self._get_panel(label)
             if panel is not None:
                 for part in event.message.parts:
                     match part:
-                        case ai.ToolCallPart(tool_name=name, tool_args=args):
+                        case ai.messages.ToolCallPart(tool_name=name, tool_args=args):
                             panel.append_line(f"> {name}({args})")
-                        case ai.ToolResultPart(tool_name=name, result=result):
+                        case ai.messages.ToolResultPart(tool_name=name, result=result):
                             panel.append_line(f"< {name} = {result}")
             return
 
-        if isinstance(event, ai.HookEvent):
+        if isinstance(event, ai.events.HookEvent):
             if event.hook.status == "pending":
                 self._on_hook_pending(event.hook)
             elif event.hook.status == "resolved":
                 self._on_hook_resolved(event.hook)
             return
 
-        if isinstance(event, ai.TextDelta):
+        if isinstance(event, ai.events.TextDelta):
             panel = self._get_panel(label)
             if panel is not None:
                 panel.append_text(event.chunk)
                 if panel.status == "idle":
                     panel.status = "streaming..."
 
-        elif isinstance(event, ai.ReasoningDelta | ai.ToolDelta):
+        elif isinstance(event, ai.events.ReasoningDelta | ai.events.ToolDelta):
             panel = self._get_panel(label)
             if panel is not None:
                 panel.append_text(event.chunk, style="dim")
@@ -214,7 +214,7 @@ class MultiAgentApp(textual.app.App[None]):
     # Hook lifecycle
     # ------------------------------------------------------------------
 
-    def _on_hook_pending(self, hook_part: ai.HookPart[Any]) -> None:
+    def _on_hook_pending(self, hook_part: ai.messages.HookPart[Any]) -> None:
         branch = hook_part.metadata.get("branch", "unknown")
         tool = hook_part.metadata.get("tool", "?")
 
@@ -226,7 +226,7 @@ class MultiAgentApp(textual.app.App[None]):
         self._hook_queue.put_nowait(hook_part)
         self._maybe_activate_next_hook()
 
-    def _on_hook_resolved(self, hook_part: ai.HookPart[Any]) -> None:
+    def _on_hook_resolved(self, hook_part: ai.messages.HookPart[Any]) -> None:
         branch = hook_part.metadata.get("branch", "unknown")
         granted = hook_part.resolution and hook_part.resolution.get("granted")
         tag = "approved" if granted else "denied"

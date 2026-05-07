@@ -46,7 +46,7 @@ async def main() -> None:
     @my_agent.loop
     async def with_confirmation(
         context: ai.Context,
-    ) -> AsyncGenerator[ai.AgentEvent]:
+    ) -> AsyncGenerator[ai.events.AgentEvent]:
         while True:
             # HACK: If there isn't anything to do, it's because we hit
             # a hook and bailed out. Skip running the stream in that
@@ -65,7 +65,7 @@ async def main() -> None:
             if not tool_calls:
                 return
 
-            results: list[ai.ToolCallResult] = []
+            results: list[ai.events.ToolCallResult] = []
             for tc in tool_calls:
                 try:
                     confirmation = await ai.hook(
@@ -104,12 +104,12 @@ async def main() -> None:
     async for event in my_agent.run(model, messages):
         # HACK?: When we get a complete assistant message, add it to
         # messages so it can get replayed easily.
-        if isinstance(event, ai.StreamEnd):
+        if isinstance(event, ai.events.StreamEnd):
             messages.append(event.message)
 
-        if isinstance(event, ai.TextDelta):
+        if isinstance(event, ai.events.TextDelta):
             print(event.chunk, end="", flush=True)
-        elif isinstance(event, ai.HookEvent) and event.hook.status == "pending":
+        elif isinstance(event, ai.events.HookEvent) and event.hook.status == "pending":
             hook_part = event.hook
             pending_hook_labels.append(hook_part.hook_id)
             print(
@@ -124,9 +124,9 @@ async def main() -> None:
         ai.resolve_hook(label, Confirmation(approved=True, reason="user approved"))
 
     async for event in my_agent.run(model, messages):
-        if isinstance(event, ai.TextDelta):
+        if isinstance(event, ai.events.TextDelta):
             print(event.chunk, end="", flush=True)
-        elif isinstance(event, ai.HookEvent):
+        elif isinstance(event, ai.events.HookEvent):
             print(f"  Hook {event.hook.status}: {event.hook.hook_id}")
     print()
 

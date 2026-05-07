@@ -21,7 +21,7 @@ async def main() -> None:
     ]
     async with ai.stream(model, messages, params=params) as stream:
         async for event in stream:
-            if isinstance(event, ai.TextDelta):
+            if isinstance(event, ai.events.TextDelta):
                 print(event.chunk, end="", flush=True)
     print()
 

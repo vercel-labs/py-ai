@@ -1,8 +1,9 @@
 """AI Gateway request-scoped routing options.
 
-Only the gateway-unique routing/BYOK params live here. Provider-specific
+Only the gateway-unique routing/BYOK params live here. Typed provider-specific
 options (OpenAI, Anthropic) are imported from the native ``openai`` /
-``anthropic`` packages and reused as-is — see :data:`GatewayStreamParams`.
+``anthropic`` packages and reused as-is. Untyped options for providers without
+local params use :class:`ProviderOptions` — see :data:`GatewayStreamParams`.
 
 The native modules import only ``pydantic`` + stdlib + internal types,
 so referencing them here does not pull in the ``openai`` / ``anthropic``
@@ -99,12 +100,26 @@ class GatewayParams(pydantic.BaseModel):
     )
 
 
+class ProviderOptions(pydantic.BaseModel):
+    """Untyped providerOptions bucket for Gateway providers without typed params."""
+
+    model_config = _PARAMS_CONFIG
+
+    provider: str = pydantic.Field(min_length=1)
+    options: dict[str, Any]
+
+
 type GatewayStreamParams = (
-    GatewayParams | OpenAIChatParams | OpenAIResponsesParams | AnthropicParams
+    GatewayParams
+    | ProviderOptions
+    | OpenAIChatParams
+    | OpenAIResponsesParams
+    | AnthropicParams
 )
 
 GATEWAY_STREAM_PARAMS_TYPES = (
     GatewayParams,
+    ProviderOptions,
     OpenAIChatParams,
     OpenAIResponsesParams,
     AnthropicParams,

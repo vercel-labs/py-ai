@@ -22,8 +22,8 @@ from typing import TYPE_CHECKING, Any
 
 import pydantic
 
-from .types import messages as messages_
-from .types.proto import ToolLike
+from ..types import messages as messages_
+from ..types.tools import Tool
 
 # Compat shim: ``StreamResultLike`` was removed from ``ai.types.proto`` when
 # the model layer was reworked.  Middleware is dead code under the new
@@ -43,9 +43,9 @@ type StreamResultLike = Any
 # ---------------------------------------------------------------------------
 
 if TYPE_CHECKING:
-    from .agents.agent import Tool
-    from .agents.events import ToolCallResult
-    from .models.core.model import Model
+    from ..models.core.model import Model
+    from ..types import events as events_
+    from .agent import AgentTool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -54,7 +54,7 @@ class ModelContext:
 
     model: Model[Any]
     messages: list[messages_.Message]
-    tools: Sequence[ToolLike] | None
+    tools: Sequence[Tool] | None
     output_type: type[pydantic.BaseModel] | None
     kwargs: dict[str, Any]
 
@@ -108,7 +108,7 @@ class AgentRunContext:
 
     model: Model[Any]
     messages: list[messages_.Message]
-    tools: list[Tool[..., Any]]
+    tools: list[AgentTool]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "messages", list(self.messages))
@@ -191,8 +191,8 @@ class Middleware:
     async def wrap_tool(
         self,
         call: ToolContext,
-        next: Callable[[ToolContext], Awaitable[ToolCallResult]],
-    ) -> ToolCallResult:
+        next: Callable[[ToolContext], Awaitable[events_.ToolCallResult]],
+    ) -> events_.ToolCallResult:
         """Wrap a tool execution.
 
         ``next(call)`` returns a :class:`ToolCallResult`.
@@ -298,8 +298,8 @@ def _build_generate_chain(
 
 
 def _build_tool_chain(
-    real: Callable[[ToolContext], Awaitable[ToolCallResult]],
-) -> Callable[[ToolContext], Awaitable[ToolCallResult]]:
+    real: Callable[[ToolContext], Awaitable[events_.ToolCallResult]],
+) -> Callable[[ToolContext], Awaitable[events_.ToolCallResult]]:
     mw = get()
     if not mw:
         return real
@@ -308,9 +308,10 @@ def _build_tool_chain(
     for m in reversed(mw):
 
         def _make(
-            m: Middleware, nxt: Callable[[ToolContext], Awaitable[ToolCallResult]]
-        ) -> Callable[[ToolContext], Awaitable[ToolCallResult]]:
-            async def _wrapped(call: ToolContext) -> ToolCallResult:
+            m: Middleware,
+            nxt: Callable[[ToolContext], Awaitable[events_.ToolCallResult]],
+        ) -> Callable[[ToolContext], Awaitable[events_.ToolCallResult]]:
+            async def _wrapped(call: ToolContext) -> events_.ToolCallResult:
                 return await m.wrap_tool(call, nxt)
 
             return _wrapped

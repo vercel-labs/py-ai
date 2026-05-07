@@ -114,8 +114,15 @@ class LLMResult:
 async def llm_call_activity(params: LLMParams) -> LLMResult:
     """Call the LLM, drain the stream, return the final message."""
     model = ai.ai_gateway("anthropic/claude-sonnet-4")
-    messages = [ai.Message.model_validate(m) for m in params.messages]
-    tools = [ai.ToolSchema(return_type=None, **t) for t in params.tool_schemas]
+    messages = [ai.messages.Message.model_validate(m) for m in params.messages]
+    tools = [
+        ai.Tool(
+            kind="function",
+            name=t["name"],
+            args=ai.tools.FunctionToolArgs.model_validate(t["args"]),
+        )
+        for t in params.tool_schemas
+    ]
 
     s = ai.models.stream(model, messages, tools=tools)
     async for _event in s:
@@ -125,7 +132,9 @@ async def llm_call_activity(params: LLMParams) -> LLMResult:
     return LLMResult(message=s.message.model_dump())
 
 
-async def _replay_as_stream(msg: ai.Message) -> AsyncGenerator[ai.Event]:
+async def _replay_as_stream(
+    msg: ai.messages.Message,
+) -> AsyncGenerator[ai.events.Event]:
     """Replay a complete message as streaming events for ``ai.Stream``.
 
     TODO: This exists because wrap_model must return a Stream, and Stream
@@ -134,19 +143,23 @@ async def _replay_as_stream(msg: ai.Message) -> AsyncGenerator[ai.Event]:
     middleware contract should support returning a complete Message
     directly.
     """
-    yield ai.StreamStart()
+    yield ai.events.StreamStart()
     for i, part in enumerate(msg.parts):
-        if isinstance(part, ai.TextPart) and part.text:
+        if isinstance(part, ai.messages.TextPart) and part.text:
             bid = f"text-{i}"
-            yield ai.TextStart(block_id=bid)
-            yield ai.TextDelta(block_id=bid, chunk=part.text)
-            yield ai.TextEnd(block_id=bid)
-        elif isinstance(part, ai.ToolCallPart):
-            yield ai.ToolStart(tool_call_id=part.tool_call_id, tool_name=part.tool_name)
+            yield ai.events.TextStart(block_id=bid)
+            yield ai.events.TextDelta(block_id=bid, chunk=part.text)
+            yield ai.events.TextEnd(block_id=bid)
+        elif isinstance(part, ai.messages.ToolCallPart):
+            yield ai.events.ToolStart(
+                tool_call_id=part.tool_call_id, tool_name=part.tool_name
+            )
             if part.tool_args:
-                yield ai.ToolDelta(tool_call_id=part.tool_call_id, chunk=part.tool_args)
-            yield ai.ToolEnd(tool_call_id=part.tool_call_id, tool_call=part)
-    yield ai.StreamEnd()
+                yield ai.events.ToolDelta(
+                    tool_call_id=part.tool_call_id, chunk=part.tool_args
+                )
+            yield ai.events.ToolEnd(tool_call_id=part.tool_call_id, tool_call=part)
+    yield ai.events.StreamEnd()
 
 
 # ── Middleware ───────────────────────────────────────────────────
@@ -182,14 +195,14 @@ class TemporalMiddleware(ai.Middleware):
             start_to_close_timeout=datetime.timedelta(minutes=5),
             retry_policy=temporalio.common.RetryPolicy(maximum_attempts=3),
         )
-        msg = ai.Message.model_validate(result.message)
+        msg = ai.messages.Message.model_validate(result.message)
         return ai.Stream(_replay_as_stream(msg))
 
     async def wrap_tool(
         self,
         call: ai.middleware.ToolContext,
         next: Any,
-    ) -> ai.ToolCallResult:
+    ) -> ai.events.ToolCallResult:
         """Tool execution → Temporal activity."""
         result = await temporalio.workflow.execute_activity(
             tool_dispatch_activity,
@@ -220,7 +233,7 @@ class WeatherWorkflow:
     @temporalio.workflow.run
     async def run(self, user_query: str) -> str:
         model = ai.ai_gateway("anthropic/claude-sonnet-4")
-        messages: list[ai.Message] = [
+        messages: list[ai.messages.Message] = [
             ai.system_message(
                 "Answer questions using the weather and population tools."
             ),
@@ -230,8 +243,7 @@ class WeatherWorkflow:
         tool_schemas = [
             {
                 "name": t.name,
-                "description": t.description,
-                "param_schema": t.param_schema,
+                "args": t.tool.args.model_dump(mode="json"),
             }
             for t in weather_agent.tools
         ]
@@ -239,7 +251,7 @@ class WeatherWorkflow:
 
         final_text = ""
         async for event in weather_agent.run(model, messages, middleware=[mw]):
-            if isinstance(event, ai.TerminalEvent):
+            if isinstance(event, ai.events.TerminalEvent):
                 final_text = event.message.text
         return final_text
 

@@ -40,34 +40,38 @@ def format(value: object) -> str:
 async def main() -> None:
     print("anthropic web search")
     async with ai.stream(
-        model, messages, tools=[ai.anthropic.tools.web_search(max_uses=3)]
+        model,
+        messages,
+        tools=[ai.anthropic.tools.web_search(max_uses=3)],
     ) as s:
         async for event in s:
             match event:
-                case ai.TextDelta():
+                case ai.events.TextDelta():
                     print(event.chunk, end="", flush=True)
-                case ai.types.BuiltinToolEnd():
+                case ai.events.BuiltinToolEnd():
                     args = json.loads(event.tool_call.tool_args or "{}")
                     print(f"\n[{event.tool_call.tool_name}] input:")
                     print(format(args))
-                case ai.types.BuiltinToolResult():
+                case ai.events.BuiltinToolResult():
                     print(f"\n[{event.result.tool_name}] result:")
                     print(format(event.result.result))
         print()
 
     print("perplexity web search")
     async with ai.stream(
-        model, messages, tools=[ai.ai_gateway.tools.perplexity_search(max_results=5)]
+        model,
+        messages,
+        tools=[ai.ai_gateway.tools.perplexity_search(max_results=5)],
     ) as s:
         async for event in s:
             match event:
-                case ai.TextDelta():
+                case ai.events.TextDelta():
                     print(event.chunk, end="", flush=True)
-                case ai.types.BuiltinToolEnd():
+                case ai.events.BuiltinToolEnd():
                     args = json.loads(event.tool_call.tool_args or "{}")
                     print(f"\n[{event.tool_call.tool_name}] input:")
                     print(format(args))
-                case ai.types.BuiltinToolResult():
+                case ai.events.BuiltinToolResult():
                     print(f"\n[{event.result.tool_name}] result:")
                     print(format(event.result.result))
         print()

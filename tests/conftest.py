@@ -7,8 +7,8 @@ import pydantic
 
 import ai
 from ai import models
-from ai.agents import events as agent_events_
 from ai.types import builders
+from ai.types import events as agent_events_
 from ai.types import events as events_
 from ai.types import messages as messages_
 from ai.types import usage as usage_
@@ -165,7 +165,7 @@ class MockAdapter:
         model: models.Model[pydantic.BaseModel],
         messages: list[messages_.Message],
         *,
-        tools: Sequence[ai.ToolLike] | None = None,
+        tools: Sequence[ai.tools.Tool] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[events_.Event]:

@@ -342,6 +342,10 @@ class TestRequest:
                 extra_body={"futureGatewayField": True},
                 extra_headers={"x-gateway-feature": "enabled"},
             ),
+            params_.ProviderOptions(
+                provider="google",
+                options={"thinkingConfig": {"budgetTokens": 1024}},
+            ),
             AnthropicParams(
                 speed="fast",
                 extra_body={"futureAnthropicField": True},
@@ -365,6 +369,9 @@ class TestRequest:
                 "speed": "fast",
                 "futureAnthropicField": True,
             },
+            "google": {
+                "thinkingConfig": {"budgetTokens": 1024},
+            },
         }
         assert captured_body["futureGatewayField"] is True
         assert captured_headers["x-gateway-feature"] == "enabled"
@@ -378,6 +385,29 @@ class TestRequest:
         model = ai_gateway("openai/gpt-5.4", client=client)
         request_params: list[params_.GatewayStreamParams] = [
             OpenAIChatParams(service_tier="auto"),
+            OpenAIResponsesParams(previous_response_id="resp_123"),
+        ]
+        stream = models.stream(
+            model,
+            [user_msg("Hi")],
+            params=request_params,
+        )
+
+        with pytest.raises(ValueError, match="duplicate provider params for 'openai'"):
+            async for _ in stream:
+                pass
+
+    async def test_gateway_rejects_provider_options_duplicate_key(self) -> None:
+        def handler(req: httpx.Request) -> httpx.Response:
+            raise AssertionError("request should not be sent")
+
+        client = mock_client(httpx.MockTransport(handler))
+        model = ai_gateway("openai/gpt-5.4", client=client)
+        request_params: list[params_.GatewayStreamParams] = [
+            params_.ProviderOptions(
+                provider="openai",
+                options={"futureOpenAIField": True},
+            ),
             OpenAIResponsesParams(previous_response_id="resp_123"),
         ]
         stream = models.stream(
@@ -411,7 +441,7 @@ class TestRequest:
         await _collect(
             mock_client(httpx.MockTransport(handler)),
             [user_msg("find something")],
-            tools=[lookup],
+            tools=[lookup.tool],
         )
 
         assert "tools" in captured_body

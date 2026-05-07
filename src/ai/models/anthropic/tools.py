@@ -1,43 +1,25 @@
-"""Anthropic provider-executed (built-in) tools.
-
-Each class subclasses :class:`ai.types.BuiltinTool` with typed
-configuration fields. The adapter dispatches on subclass identity
-(``isinstance``) to convert each instance to Anthropic wire format.
-
-Usage::
-
-    from ai.models import anthropic
-
-    tools = [
-        anthropic.tools.web_search(max_uses=5),
-        anthropic.tools.code_execution(),
-    ]
-    s = ai.stream(model, msgs, tools=tools)
-
-We ship the latest stable variants of each tool. Older versions can be
-added on demand. The version is captured in the ``type_`` ClassVar
-on each subclass; adapters read these — users don't.
-"""
+"""Anthropic provider-executed tools."""
 
 from __future__ import annotations
 
 from typing import ClassVar, Literal
 
 import pydantic
+from pydantic.alias_generators import to_camel
 
-from ...types import tools as tools_
+from ... import types
 
-# ---------------------------------------------------------------------------
-# Shared sub-types
-# ---------------------------------------------------------------------------
+_CONFIG_MODEL = pydantic.ConfigDict(
+    frozen=True,
+    populate_by_name=True,
+    alias_generator=to_camel,
+)
 
 
-class UserLocation(tools_.BuiltinToolConfig):
-    """Approximate user location for geographically relevant search results.
+class UserLocation(pydantic.BaseModel):
+    """Approximate user location for geographically relevant search results."""
 
-    The ``type`` field defaults to ``"approximate"`` which is the only value
-    the Anthropic API currently accepts.  Users can omit it.
-    """
+    model_config = _CONFIG_MODEL
 
     type: Literal["approximate"] = "approximate"
     city: str | None = None
@@ -46,65 +28,40 @@ class UserLocation(tools_.BuiltinToolConfig):
     timezone: str | None = None
 
 
-class Citations(tools_.BuiltinToolConfig):
+class Citations(pydantic.BaseModel):
     """Citation configuration for web fetch."""
+
+    model_config = _CONFIG_MODEL
 
     enabled: bool
 
 
-# ---------------------------------------------------------------------------
-# Tool classes
-# ---------------------------------------------------------------------------
+class AnthropicProviderArgs(pydantic.BaseModel):
+    """Base for Anthropic provider-executed tool args."""
+
+    model_config = _CONFIG_MODEL
+
+    anthropic_type: ClassVar[str]
+    anthropic_beta: ClassVar[str | None] = None
 
 
-class _AnthropicBuiltin(tools_.BuiltinTool):
-    """Internal base for Anthropic built-ins.
+class WebSearchArgs(AnthropicProviderArgs):
+    anthropic_type: ClassVar[str] = "web_search_20260209"
+    anthropic_beta: ClassVar[str | None] = "code-execution-web-tools-2026-02-09"
 
-    Each subclass declares the wire metadata used by ``anthropic/adapter.py``.
-    """
-
-    # Anthropic beta feature flag required to enable this tool, if any.
-    beta: ClassVar[str | None] = None
-    # The ``"type"`` field sent to the API (e.g. ``"web_search_20260209"``).
-    # Trailing underscore avoids shadowing the ``type`` builtin.
-    type_: ClassVar[str] = ""
-    # The ``"name"`` field sent to the API (e.g. ``"web_search"``).
-    # Trailing underscore avoids shadowing the ``name`` property on the base.
-    name_: ClassVar[str] = ""
-
-    @property
-    def name(self) -> str:
-        return self.name_
-
-
-class WebSearch(_AnthropicBuiltin):
-    """Web search.
-
-    Domain filters are mutually exclusive — pass only one of
-    ``allowed_domains`` / ``blocked_domains``.
-    """
+    model_config = _CONFIG_MODEL
 
     max_uses: int | None = None
     allowed_domains: list[str] | None = None
     blocked_domains: list[str] | None = None
     user_location: UserLocation | None = None
 
-    beta: ClassVar[str | None] = "code-execution-web-tools-2026-02-09"
-    type_: ClassVar[str] = "web_search_20260209"
-    name_: ClassVar[str] = "web_search"
 
-    @pydantic.model_validator(mode="after")
-    def _check_domains(self) -> WebSearch:
-        if self.allowed_domains and self.blocked_domains:
-            raise ValueError(
-                "anthropic.web_search: pass only one of "
-                "`allowed_domains` or `blocked_domains`"
-            )
-        return self
+class WebFetchArgs(AnthropicProviderArgs):
+    anthropic_type: ClassVar[str] = "web_fetch_20260209"
+    anthropic_beta: ClassVar[str | None] = "code-execution-web-tools-2026-02-09"
 
-
-class WebFetch(_AnthropicBuiltin):
-    """Web fetch."""
+    model_config = _CONFIG_MODEL
 
     max_uses: int | None = None
     allowed_domains: list[str] | None = None
@@ -112,70 +69,57 @@ class WebFetch(_AnthropicBuiltin):
     citations: Citations | None = None
     max_content_tokens: int | None = None
 
-    beta: ClassVar[str | None] = "code-execution-web-tools-2026-02-09"
-    type_: ClassVar[str] = "web_fetch_20260209"
-    name_: ClassVar[str] = "web_fetch"
 
-    @pydantic.model_validator(mode="after")
-    def _check_domains(self) -> WebFetch:
-        if self.allowed_domains and self.blocked_domains:
-            raise ValueError(
-                "anthropic.web_fetch: pass only one of "
-                "`allowed_domains` or `blocked_domains`"
-            )
-        return self
+class CodeExecutionArgs(AnthropicProviderArgs):
+    anthropic_type: ClassVar[str] = "code_execution_20260120"
+
+    model_config = _CONFIG_MODEL
 
 
-class CodeExecution(_AnthropicBuiltin):
-    """Code execution sandbox."""
+class ComputerUseArgs(AnthropicProviderArgs):
+    anthropic_type: ClassVar[str] = "computer_20251124"
+    anthropic_beta: ClassVar[str | None] = "computer-use-2025-11-24"
 
-    beta: ClassVar[str | None] = None
-    type_: ClassVar[str] = "code_execution_20260120"
-    name_: ClassVar[str] = "code_execution"
-
-
-class ComputerUse(_AnthropicBuiltin):
-    """Computer-use control."""
+    model_config = _CONFIG_MODEL
 
     display_width_px: int
     display_height_px: int
     display_number: int | None = None
     enable_zoom: bool | None = None
 
-    beta: ClassVar[str | None] = "computer-use-2025-11-24"
-    type_: ClassVar[str] = "computer_20251124"
-    name_: ClassVar[str] = "computer"
 
+class TextEditorArgs(AnthropicProviderArgs):
+    anthropic_type: ClassVar[str] = "text_editor_20250728"
 
-class TextEditor(_AnthropicBuiltin):
-    """Text editor."""
+    model_config = _CONFIG_MODEL
 
     max_characters: int | None = None
 
-    beta: ClassVar[str | None] = None
-    type_: ClassVar[str] = "text_editor_20250728"
-    name_: ClassVar[str] = "str_replace_based_edit_tool"
+
+class BashArgs(AnthropicProviderArgs):
+    anthropic_type: ClassVar[str] = "bash_20250124"
+    anthropic_beta: ClassVar[str | None] = "computer-use-2025-01-24"
+
+    model_config = _CONFIG_MODEL
 
 
-class Bash(_AnthropicBuiltin):
-    """Bash shell."""
+class MemoryArgs(AnthropicProviderArgs):
+    anthropic_type: ClassVar[str] = "memory_20250818"
+    anthropic_beta: ClassVar[str | None] = "context-management-2025-06-27"
 
-    beta: ClassVar[str | None] = "computer-use-2025-01-24"
-    type_: ClassVar[str] = "bash_20250124"
-    name_: ClassVar[str] = "bash"
-
-
-class Memory(_AnthropicBuiltin):
-    """Persistent memory tool."""
-
-    beta: ClassVar[str | None] = "context-management-2025-06-27"
-    type_: ClassVar[str] = "memory_20250818"
-    name_: ClassVar[str] = "memory"
+    model_config = _CONFIG_MODEL
 
 
-# ---------------------------------------------------------------------------
-# Factory functions — convenient call-site syntax
-# ---------------------------------------------------------------------------
+def _check_domains(
+    tool_name: str,
+    allowed_domains: list[str] | None,
+    blocked_domains: list[str] | None,
+) -> None:
+    if allowed_domains and blocked_domains:
+        raise ValueError(
+            f"anthropic.{tool_name}: pass only one of "
+            "`allowed_domains` or `blocked_domains`"
+        )
 
 
 def web_search(
@@ -184,12 +128,18 @@ def web_search(
     allowed_domains: list[str] | None = None,
     blocked_domains: list[str] | None = None,
     user_location: UserLocation | None = None,
-) -> WebSearch:
-    return WebSearch(
+) -> types.tools.Tool:
+    args = WebSearchArgs(
         max_uses=max_uses,
         allowed_domains=allowed_domains,
         blocked_domains=blocked_domains,
         user_location=user_location,
+    )
+    _check_domains("web_search", args.allowed_domains, args.blocked_domains)
+    return types.tools.Tool(
+        kind="provider",
+        name="web_search",
+        args=args,
     )
 
 
@@ -200,21 +150,30 @@ def web_fetch(
     blocked_domains: list[str] | None = None,
     citations: Citations | bool | None = None,
     max_content_tokens: int | None = None,
-) -> WebFetch:
-    cit: Citations | None = (
-        Citations(enabled=citations) if isinstance(citations, bool) else citations
-    )
-    return WebFetch(
+) -> types.tools.Tool:
+    args = WebFetchArgs(
         max_uses=max_uses,
         allowed_domains=allowed_domains,
         blocked_domains=blocked_domains,
-        citations=cit,
+        citations=Citations(enabled=citations)
+        if isinstance(citations, bool)
+        else citations,
         max_content_tokens=max_content_tokens,
+    )
+    _check_domains("web_fetch", args.allowed_domains, args.blocked_domains)
+    return types.tools.Tool(
+        kind="provider",
+        name="web_fetch",
+        args=args,
     )
 
 
-def code_execution() -> CodeExecution:
-    return CodeExecution()
+def code_execution() -> types.tools.Tool:
+    return types.tools.Tool(
+        kind="provider",
+        name="code_execution",
+        args=CodeExecutionArgs(),
+    )
 
 
 def computer_use(
@@ -223,37 +182,54 @@ def computer_use(
     display_height_px: int,
     display_number: int | None = None,
     enable_zoom: bool | None = None,
-) -> ComputerUse:
-    return ComputerUse(
-        display_width_px=display_width_px,
-        display_height_px=display_height_px,
-        display_number=display_number,
-        enable_zoom=enable_zoom,
+) -> types.tools.Tool:
+    return types.tools.Tool(
+        kind="provider",
+        name="computer",
+        args=ComputerUseArgs(
+            display_width_px=display_width_px,
+            display_height_px=display_height_px,
+            display_number=display_number,
+            enable_zoom=enable_zoom,
+        ),
     )
 
 
-def text_editor(*, max_characters: int | None = None) -> TextEditor:
-    return TextEditor(max_characters=max_characters)
+def text_editor(*, max_characters: int | None = None) -> types.tools.Tool:
+    return types.tools.Tool(
+        kind="provider",
+        name="str_replace_based_edit_tool",
+        args=TextEditorArgs(max_characters=max_characters),
+    )
 
 
-def bash() -> Bash:
-    return Bash()
+def bash() -> types.tools.Tool:
+    return types.tools.Tool(
+        kind="provider",
+        name="bash",
+        args=BashArgs(),
+    )
 
 
-def memory() -> Memory:
-    return Memory()
+def memory() -> types.tools.Tool:
+    return types.tools.Tool(
+        kind="provider",
+        name="memory",
+        args=MemoryArgs(),
+    )
 
 
 __all__ = [
-    "Bash",
+    "AnthropicProviderArgs",
+    "BashArgs",
     "Citations",
-    "CodeExecution",
-    "ComputerUse",
-    "Memory",
-    "TextEditor",
+    "CodeExecutionArgs",
+    "ComputerUseArgs",
+    "MemoryArgs",
+    "TextEditorArgs",
     "UserLocation",
-    "WebFetch",
-    "WebSearch",
+    "WebFetchArgs",
+    "WebSearchArgs",
     "bash",
     "code_execution",
     "computer_use",

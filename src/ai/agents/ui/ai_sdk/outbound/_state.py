@@ -6,7 +6,6 @@ from typing import Any
 
 from .....types import events as events_
 from .....types import messages as messages_
-from ....events import HookEvent, PartialToolCallResult, ToolCallResult
 from .. import _approvals, protocol
 
 
@@ -164,7 +163,7 @@ class _StreamState:
     # -- phase: tool results ------------------------------------------------
 
     def on_tool_result(
-        self, event: ToolCallResult
+        self, event: events_.ToolCallResult
     ) -> list[protocol.UIMessageStreamPart]:
         """Handle a ``ToolCallResult`` — emit tool input/output parts."""
         msg = event.message
@@ -218,14 +217,14 @@ class _StreamState:
         return out
 
     def on_partial_tool_result(
-        self, event: PartialToolCallResult
+        self, event: events_.PartialToolCallResult
     ) -> list[protocol.UIMessageStreamPart]:
         # TODO: Emit something!
         return []
 
     # -- phase: hooks -------------------------------------------------------
 
-    def on_hook(self, event: HookEvent) -> list[protocol.UIMessageStreamPart]:
+    def on_hook(self, event: events_.HookEvent) -> list[protocol.UIMessageStreamPart]:
         """Handle a ``HookEvent`` — emit approval parts."""
         hook_part = event.hook
         out: list[protocol.UIMessageStreamPart] = []

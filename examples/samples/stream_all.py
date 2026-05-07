@@ -29,7 +29,7 @@ async def _run(name: str, provider: ai.Provider[Any], model_id: str) -> None:
     try:
         async with ai.stream(model, messages) as s:
             async for event in s:
-                if isinstance(event, ai.TextDelta):
+                if isinstance(event, ai.events.TextDelta):
                     print(event.chunk, end="", flush=True)
         print()
     except Exception as exc:

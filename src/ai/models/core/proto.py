@@ -102,12 +102,12 @@ class StreamFn(Protocol):
         self,
         client: Client,
         model: Model[Any],
-        messages: list[types.Message],
+        messages: list[types.messages.Message],
         *,
-        tools: Sequence[types.ToolLike] | None = None,
+        tools: Sequence[types.tools.Tool] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         **kwargs: Any,
-    ) -> AsyncGenerator[types.Event]: ...
+    ) -> AsyncGenerator[types.events.Event]: ...
 
 
 @runtime_checkable
@@ -123,9 +123,9 @@ class GenerateFn(Protocol):
         self,
         client: Client,
         model: Model[Any],
-        messages: list[types.Message],
+        messages: list[types.messages.Message],
         params: Any,
-    ) -> types.Message: ...
+    ) -> types.messages.Message: ...
 
 
 @runtime_checkable

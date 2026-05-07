@@ -30,12 +30,13 @@ for sandboxed runtimes (e.g. Temporal workflow workers).
 """
 
 from . import errors, tools
-from .params import GatewayParams, GatewayStreamParams
+from .params import GatewayParams, GatewayStreamParams, ProviderOptions
 from .provider import ai_gateway
 
 __all__ = [
     "GatewayParams",
     "GatewayStreamParams",
+    "ProviderOptions",
     "ai_gateway",
     "errors",
     "tools",

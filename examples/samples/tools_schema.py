@@ -6,18 +6,20 @@ import ai
 
 model = ai.ai_gateway("anthropic/claude-sonnet-4")
 
-# Define a tool schema — anything matching the ToolLike protocol works.
-get_weather = ai.ToolSchema(
+# Define a schema-only tool.
+get_weather = ai.Tool(
+    kind="function",
     name="get_weather",
-    description="Get the current weather for a city.",
-    param_schema={
-        "type": "object",
-        "properties": {
-            "city": {"type": "string", "description": "The city name"},
+    args=ai.tools.FunctionToolArgs(
+        description="Get the current weather for a city.",
+        params={
+            "type": "object",
+            "properties": {
+                "city": {"type": "string", "description": "The city name"},
+            },
+            "required": ["city"],
         },
-        "required": ["city"],
-    },
-    return_type=str,
+    ),
 )
 
 messages = [ai.user_message("What's the weather in Tokyo?")]
@@ -27,7 +29,7 @@ async def main() -> None:
     # Stream with tools — the model may emit tool calls.
     async with ai.stream(model, messages, tools=[get_weather]) as s:
         async for event in s:
-            if isinstance(event, ai.TextDelta):
+            if isinstance(event, ai.events.TextDelta):
                 print(event.chunk, end="", flush=True)
     print()
 

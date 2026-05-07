@@ -21,7 +21,9 @@ async def get_population(city: str) -> int:
 
 
 class CustomAgent(ai.Agent):
-    async def default_loop(self, context: ai.Context) -> AsyncGenerator[ai.AgentEvent]:
+    async def default_loop(
+        self, context: ai.Context
+    ) -> AsyncGenerator[ai.events.AgentEvent]:
         """Stream, execute tools with logging, repeat."""
         while context.keep_running():
             async with (
@@ -33,7 +35,7 @@ class CustomAgent(ai.Agent):
                 async for event in ai.util.merge(stream, tr.events()):
                     yield event
 
-                    if isinstance(event, ai.ToolEnd):
+                    if isinstance(event, ai.events.ToolEnd):
                         call = event.tool_call
                         print(f"Launching tool {call.tool_name}({call.tool_args})")
                         tool = context.resolve(call)
@@ -56,7 +58,7 @@ async def main() -> None:
         model,
         [ai.user_message("Compare the weather and population of New York and Tokyo.")],
     ):
-        if isinstance(event, ai.StreamEnd) and event.message.role == "assistant":
+        if isinstance(event, ai.events.StreamEnd) and event.message.role == "assistant":
             print("====", event.message.text, flush=True)
 
     print()

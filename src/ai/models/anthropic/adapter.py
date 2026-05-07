@@ -14,7 +14,6 @@ import pydantic
 from ... import types
 from ...types import events
 from ...types import messages as messages_
-from ...types import tools as tools_
 from .. import core
 from . import tools as anthropic_tools
 from .params import (
@@ -45,13 +44,13 @@ _TOOL_RESULT_BLOCK_TYPES: frozenset[str] = frozenset(
 
 
 def _split_tools(
-    tools: Sequence[types.ToolLike],
-) -> tuple[list[types.ToolSchemaLike], list[tools_.BuiltinTool]]:
-    """Split ``tools`` into custom (host-executed) and built-in (provider-executed)."""
-    custom: list[types.ToolSchemaLike] = []
-    builtin: list[tools_.BuiltinTool] = []
+    tools: Sequence[types.tools.Tool],
+) -> tuple[list[types.tools.Tool], list[types.tools.Tool]]:
+    """Split ``tools`` into host-executed and provider-executed declarations."""
+    custom: list[types.tools.Tool] = []
+    builtin: list[types.tools.Tool] = []
     for t in tools:
-        if isinstance(t, tools_.BuiltinTool):
+        if t.kind == "provider":
             builtin.append(t)
         else:
             custom.append(t)
@@ -59,52 +58,59 @@ def _split_tools(
 
 
 def _custom_tools_to_anthropic(
-    tools: Sequence[types.ToolSchemaLike],
+    tools: Sequence[types.tools.Tool],
 ) -> list[dict[str, Any]]:
     """Convert custom (host-executed) Tool objects to Anthropic tool schema format."""
-    return [
-        {
-            "name": tool.name,
-            "description": tool.description,
-            "input_schema": tool.param_schema,
-        }
-        for tool in tools
-    ]
+    result: list[dict[str, Any]] = []
+    for tool in tools:
+        args = tool.args
+        if not isinstance(args, types.tools.FunctionToolArgs):
+            raise TypeError(f"function tool {tool.name!r} has invalid args")
+        result.append(
+            {
+                "name": tool.name,
+                "description": args.description or "",
+                "input_schema": args.params,
+            }
+        )
+    return result
 
 
 def _builtin_tools_to_anthropic(
-    builtin: Sequence[tools_.BuiltinTool],
+    builtin: Sequence[types.tools.Tool],
 ) -> tuple[list[dict[str, Any]], set[str]]:
     """Convert built-in tools to Anthropic wire format.
 
     Returns ``(wire_tools, beta_headers)``. Beta headers are merged into
     the ``anthropic-beta`` request header by the caller.
 
-    Each tool's pydantic ``model_dump()`` produces the snake_case fields that
-    the Anthropic API expects.  The ``type`` and ``name`` wire fields come
-    from ClassVars on the tool subclass.
+    Provider tool schemas keep args in the snake_case shape the native
+    Anthropic API expects.
     """
     wire: list[dict[str, Any]] = []
     betas: set[str] = set()
     for tool in builtin:
-        if not isinstance(tool, anthropic_tools._AnthropicBuiltin):
+        args_model = tool.args
+        if not isinstance(args_model, anthropic_tools.AnthropicProviderArgs):
             raise ValueError(
-                f"AnthropicModel does not support built-in tool {type(tool).__name__}"
+                "AnthropicModel does not support provider args "
+                f"{type(args_model).__name__}"
             )
+        args = args_model.model_dump(mode="json", exclude_none=True)
         block: dict[str, Any] = {
-            "type": tool.type_,
-            "name": tool.name_,
-            **tool.model_dump(mode="json", exclude_none=True),
+            "type": args_model.anthropic_type,
+            "name": tool.name,
+            **args,
         }
         wire.append(block)
-        if tool.beta is not None:
-            betas.add(tool.beta)
+        if args_model.anthropic_beta is not None:
+            betas.add(args_model.anthropic_beta)
 
     return wire, betas
 
 
 def _file_part_to_anthropic(
-    part: types.FilePart,
+    part: types.messages.FilePart,
 ) -> dict[str, Any]:
     """Convert a :class:`FilePart` to an Anthropic content block.
 
@@ -171,7 +177,7 @@ def _file_part_to_anthropic(
 
 
 async def _messages_to_anthropic(
-    messages: list[types.Message],
+    messages: list[types.messages.Message],
     *,
     send_reasoning: bool = True,
 ) -> tuple[str | None, list[dict[str, Any]]]:
@@ -188,13 +194,15 @@ async def _messages_to_anthropic(
         match msg.role:
             case "system":
                 system_prompt = "".join(
-                    p.text for p in msg.parts if isinstance(p, types.TextPart)
+                    p.text for p in msg.parts if isinstance(p, types.messages.TextPart)
                 )
             case "assistant":
                 content: list[dict[str, Any]] = []
                 for part in msg.parts:
                     match part:
-                        case types.ReasoningPart(text=text, signature=signature):
+                        case types.messages.ReasoningPart(
+                            text=text, signature=signature
+                        ):
                             if send_reasoning and signature:
                                 content.append(
                                     {
@@ -203,9 +211,9 @@ async def _messages_to_anthropic(
                                         "signature": signature,
                                     }
                                 )
-                        case types.TextPart(text=text):
+                        case types.messages.TextPart(text=text):
                             content.append({"type": "text", "text": text})
-                        case types.ToolCallPart():
+                        case types.messages.ToolCallPart():
                             tool_input = (
                                 json.loads(part.tool_args) if part.tool_args else {}
                             )
@@ -217,7 +225,7 @@ async def _messages_to_anthropic(
                                     "input": tool_input,
                                 }
                             )
-                        case types.BuiltinToolCallPart():
+                        case types.messages.BuiltinToolCallPart():
                             btc_input = (
                                 json.loads(part.tool_args) if part.tool_args else {}
                             )
@@ -229,7 +237,7 @@ async def _messages_to_anthropic(
                                     "input": btc_input,
                                 }
                             )
-                        case types.BuiltinToolReturnPart():
+                        case types.messages.BuiltinToolReturnPart():
                             # Result block type comes from the original wire
                             # event ("web_search_tool_result", etc.); stored
                             # in provider_details when emitted.
@@ -251,7 +259,7 @@ async def _messages_to_anthropic(
             case "tool":
                 tool_results: list[dict[str, Any]] = []
                 for part in msg.parts:
-                    if isinstance(part, types.ToolResultPart):
+                    if isinstance(part, types.messages.ToolResultPart):
                         entry: dict[str, Any] = {
                             "type": "tool_result",
                             "tool_use_id": part.tool_call_id,
@@ -266,19 +274,23 @@ async def _messages_to_anthropic(
                     result.append({"role": "user", "content": tool_results})
 
             case "user":
-                has_files = any(isinstance(p, types.FilePart) for p in msg.parts)
+                has_files = any(
+                    isinstance(p, types.messages.FilePart) for p in msg.parts
+                )
                 if not has_files:
                     content_text = "".join(
-                        p.text for p in msg.parts if isinstance(p, types.TextPart)
+                        p.text
+                        for p in msg.parts
+                        if isinstance(p, types.messages.TextPart)
                     )
                     result.append({"role": "user", "content": content_text})
                 else:
                     user_content: list[dict[str, Any]] = []
                     for p in msg.parts:
                         match p:
-                            case types.TextPart(text=text):
+                            case types.messages.TextPart(text=text):
                                 user_content.append({"type": "text", "text": text})
-                            case types.FilePart():
+                            case types.messages.FilePart():
                                 user_content.append(_file_part_to_anthropic(p))
                     result.append({"role": "user", "content": user_content})
 
@@ -410,9 +422,9 @@ def _result_block_content(block: Any) -> Any:
 async def stream(
     client: core.client.Client,
     model: core.model.Model[Any],
-    messages: list[types.Message],
+    messages: list[types.messages.Message],
     *,
-    tools: Sequence[types.ToolLike] | None = None,
+    tools: Sequence[types.tools.Tool] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
     thinking: bool = False,
     budget_tokens: int = 10000,
@@ -422,7 +434,7 @@ async def stream(
 
     Yields :class:`~ai.types.events.Event` objects as the response streams in.
     Pure delta emitter — the :class:`~ai.models.Stream` wrapper aggregates
-    parts into the final :class:`~ai.types.Message`.
+    parts into the final :class:`~ai.types.messages.Message`.
 
     Extra keyword arguments beyond the ``StreamFn`` protocol:
 
@@ -663,7 +675,7 @@ async def stream(
 
             snapshot = sdk_stream.current_message_snapshot
             sdk_usage = snapshot.usage
-            usage = types.Usage(
+            usage = types.usage.Usage(
                 input_tokens=sdk_usage.input_tokens or 0,
                 output_tokens=sdk_usage.output_tokens or 0,
                 cache_read_tokens=getattr(sdk_usage, "cache_read_input_tokens", None),

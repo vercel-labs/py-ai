@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..agents import events as events_
+    from . import events as events_
 
 from .messages import (
     FilePart,
