@@ -15,6 +15,7 @@ from .agents import (
     SubAgentTool,
     Tool,
     ToolCall,
+    ToolCallLike,
     ToolRunner,
     agent,
     cancel_hook,
@@ -97,6 +98,7 @@ __all__ = [
     # Agents — tools
     "Tool",
     "ToolCall",
+    "ToolCallLike",
     "ToolRunner",
     "tool",
     # Agents — aggregators
