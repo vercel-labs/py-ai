@@ -215,21 +215,10 @@ def _tool_to_v3(tool: types.tools.Tool) -> dict[str, Any]:
 
 
 def _provider_tool_id(tool: types.tools.Tool) -> str:
+    if isinstance(tool.args, anthropic_tools.AnthropicProviderArgs):
+        return f"anthropic.{tool.args.anthropic_type}"
+
     match tool.args:
-        case anthropic_tools.WebSearchArgs():
-            return "anthropic.web_search_20260209"
-        case anthropic_tools.WebFetchArgs():
-            return "anthropic.web_fetch_20260209"
-        case anthropic_tools.CodeExecutionArgs():
-            return "anthropic.code_execution_20260120"
-        case anthropic_tools.ComputerUseArgs():
-            return "anthropic.computer_20251124"
-        case anthropic_tools.TextEditorArgs():
-            return "anthropic.text_editor_20250728"
-        case anthropic_tools.BashArgs():
-            return "anthropic.bash_20250124"
-        case anthropic_tools.MemoryArgs():
-            return "anthropic.memory_20250818"
         case openai_tools.WebSearchArgs():
             return "openai.web_search"
         case openai_tools.WebSearchPreviewArgs():

@@ -76,28 +76,6 @@ def _custom_tools_to_anthropic(
     return result
 
 
-def _anthropic_provider_type(args: pydantic.BaseModel) -> tuple[str, str | None]:
-    match args:
-        case anthropic_tools.WebSearchArgs():
-            return "web_search_20260209", "code-execution-web-tools-2026-02-09"
-        case anthropic_tools.WebFetchArgs():
-            return "web_fetch_20260209", "code-execution-web-tools-2026-02-09"
-        case anthropic_tools.CodeExecutionArgs():
-            return "code_execution_20260120", None
-        case anthropic_tools.ComputerUseArgs():
-            return "computer_20251124", "computer-use-2025-11-24"
-        case anthropic_tools.TextEditorArgs():
-            return "text_editor_20250728", None
-        case anthropic_tools.BashArgs():
-            return "bash_20250124", "computer-use-2025-01-24"
-        case anthropic_tools.MemoryArgs():
-            return "memory_20250818", "context-management-2025-06-27"
-        case _:
-            raise ValueError(
-                f"AnthropicModel does not support provider args {type(args).__name__}"
-            )
-
-
 def _builtin_tools_to_anthropic(
     builtin: Sequence[types.tools.Tool],
 ) -> tuple[list[dict[str, Any]], set[str]]:
@@ -112,16 +90,21 @@ def _builtin_tools_to_anthropic(
     wire: list[dict[str, Any]] = []
     betas: set[str] = set()
     for tool in builtin:
-        wire_type, beta = _anthropic_provider_type(tool.args)
-        args = tool.args.model_dump(mode="json", exclude_none=True)
+        args_model = tool.args
+        if not isinstance(args_model, anthropic_tools.AnthropicProviderArgs):
+            raise ValueError(
+                "AnthropicModel does not support provider args "
+                f"{type(args_model).__name__}"
+            )
+        args = args_model.model_dump(mode="json", exclude_none=True)
         block: dict[str, Any] = {
-            "type": wire_type,
+            "type": args_model.anthropic_type,
             "name": tool.name,
             **args,
         }
         wire.append(block)
-        if isinstance(beta, str):
-            betas.add(beta)
+        if args_model.anthropic_beta is not None:
+            betas.add(args_model.anthropic_beta)
 
     return wire, betas
 

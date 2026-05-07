@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import ClassVar, Literal
 
 import pydantic
 from pydantic.alias_generators import to_camel
@@ -36,7 +36,19 @@ class Citations(pydantic.BaseModel):
     enabled: bool
 
 
-class WebSearchArgs(pydantic.BaseModel):
+class AnthropicProviderArgs(pydantic.BaseModel):
+    """Base for Anthropic provider-executed tool args."""
+
+    model_config = _CONFIG_MODEL
+
+    anthropic_type: ClassVar[str]
+    anthropic_beta: ClassVar[str | None] = None
+
+
+class WebSearchArgs(AnthropicProviderArgs):
+    anthropic_type: ClassVar[str] = "web_search_20260209"
+    anthropic_beta: ClassVar[str | None] = "code-execution-web-tools-2026-02-09"
+
     model_config = _CONFIG_MODEL
 
     max_uses: int | None = None
@@ -45,7 +57,10 @@ class WebSearchArgs(pydantic.BaseModel):
     user_location: UserLocation | None = None
 
 
-class WebFetchArgs(pydantic.BaseModel):
+class WebFetchArgs(AnthropicProviderArgs):
+    anthropic_type: ClassVar[str] = "web_fetch_20260209"
+    anthropic_beta: ClassVar[str | None] = "code-execution-web-tools-2026-02-09"
+
     model_config = _CONFIG_MODEL
 
     max_uses: int | None = None
@@ -55,11 +70,16 @@ class WebFetchArgs(pydantic.BaseModel):
     max_content_tokens: int | None = None
 
 
-class CodeExecutionArgs(pydantic.BaseModel):
+class CodeExecutionArgs(AnthropicProviderArgs):
+    anthropic_type: ClassVar[str] = "code_execution_20260120"
+
     model_config = _CONFIG_MODEL
 
 
-class ComputerUseArgs(pydantic.BaseModel):
+class ComputerUseArgs(AnthropicProviderArgs):
+    anthropic_type: ClassVar[str] = "computer_20251124"
+    anthropic_beta: ClassVar[str | None] = "computer-use-2025-11-24"
+
     model_config = _CONFIG_MODEL
 
     display_width_px: int
@@ -68,17 +88,25 @@ class ComputerUseArgs(pydantic.BaseModel):
     enable_zoom: bool | None = None
 
 
-class TextEditorArgs(pydantic.BaseModel):
+class TextEditorArgs(AnthropicProviderArgs):
+    anthropic_type: ClassVar[str] = "text_editor_20250728"
+
     model_config = _CONFIG_MODEL
 
     max_characters: int | None = None
 
 
-class BashArgs(pydantic.BaseModel):
+class BashArgs(AnthropicProviderArgs):
+    anthropic_type: ClassVar[str] = "bash_20250124"
+    anthropic_beta: ClassVar[str | None] = "computer-use-2025-01-24"
+
     model_config = _CONFIG_MODEL
 
 
-class MemoryArgs(pydantic.BaseModel):
+class MemoryArgs(AnthropicProviderArgs):
+    anthropic_type: ClassVar[str] = "memory_20250818"
+    anthropic_beta: ClassVar[str | None] = "context-management-2025-06-27"
+
     model_config = _CONFIG_MODEL
 
 
@@ -192,6 +220,7 @@ def memory() -> types.tools.Tool:
 
 
 __all__ = [
+    "AnthropicProviderArgs",
     "BashArgs",
     "Citations",
     "CodeExecutionArgs",
