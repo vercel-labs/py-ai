@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import json
-from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable, Sequence
-from typing import Any, Protocol, Self, get_type_hints, overload
+import typing
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
+from typing import Annotated, Any, Protocol, Self, get_type_hints, overload
 
 import pydantic
 
@@ -15,6 +17,182 @@ from .. import models, types, util
 from ..types import builders
 from . import events as events_
 from . import runtime
+
+
+class SimpleAggregator[Item, Result](events_.Aggregator[Item, Result, Result]):
+    def to_model_output(self) -> Result:
+        return self.snapshot()
+
+
+class ConcatAggregator(SimpleAggregator[str, str]):
+    def __init__(self, *, delim: str = "") -> None:
+        self._parts: list[str] = []
+        self._delim = delim
+
+    def feed(self, item: str) -> None:
+        self._parts.append(item)
+
+    def snapshot(self) -> str:
+        return self._delim.join(self._parts)
+
+
+class LastAggregator[T](SimpleAggregator[T, T | None]):
+    def __init__(self) -> None:
+        self._val: T | None = None
+
+    def feed(self, item: T) -> None:
+        self._val = item
+
+    def snapshot(self) -> T | None:
+        return self._val
+
+
+class MessageBundle(pydantic.BaseModel):
+    messages: tuple[types.Message, ...]
+
+
+class MessageAggregator(events_.Aggregator[events_.AgentEvent, MessageBundle, str]):
+    def __init__(self) -> None:
+        self._messages: list[types.Message] = []
+
+    def feed(self, item: events_.AgentEvent) -> None:
+        if isinstance(item, events_.PartialToolCallResult):
+            return
+        msg = item.message
+        if msg is None:
+            return
+        if self._messages and self._messages[-1].id == msg.id:
+            self._messages[-1] = msg
+        else:
+            self._messages.append(msg)
+
+    def snapshot(self) -> MessageBundle:
+        return MessageBundle(messages=tuple(self._messages))
+
+    def to_model_output(self) -> str:
+        for m in reversed(self._messages):
+            if m.role == "assistant" and m.text:
+                return m.text
+        return ""
+
+
+class Aggregate:
+    """Marker for declaring an aggregator on a tool's return type.
+
+    Place inside ``Annotated`` metadata to attach an aggregator factory
+    to an async-generator tool::
+
+        type SubAgentTool = Annotated[
+            AsyncGenerator[ai.AgentEvent], Aggregate(MessageAggregator)
+        ]
+
+        @ai.tool
+        async def research(topic: str) -> SubAgentTool:
+            ...
+
+    Extra kwargs are passed to the factory each time it is invoked::
+
+        type Joined = Annotated[
+            AsyncGenerator[str], Aggregate(ConcatAggregator, delim="\\n")
+        ]
+    """
+
+    def __init__(
+        self,
+        factory: Callable[..., events_.Aggregator[Any, Any, Any]],
+        /,
+        **kwargs: Any,
+    ) -> None:
+        self._factory = factory
+        self._kwargs = kwargs
+
+    def __call__(self) -> events_.Aggregator[Any, Any, Any]:
+        return self._factory(**self._kwargs)
+
+    def __repr__(self) -> str:
+        kw = ", ".join(f"{k}={v!r}" for k, v in self._kwargs.items())
+        sep = ", " if kw else ""
+        return f"Aggregate({self._factory.__name__}{sep}{kw})"
+
+
+type StreamingStatusTool[T] = Annotated[AsyncGenerator[T], Aggregate(LastAggregator)]
+"""Async-generator tool whose final yielded value becomes the tool result.
+
+Intermediate yields stream to the consumer as ``PartialToolCallResult``
+events; the last yield is what the model sees::
+
+    @ai.tool
+    async def fetch(url: str) -> StreamingStatusTool[str]:
+        yield "connecting..."
+        yield "downloading..."
+        yield body  # this is the tool result
+"""
+
+
+type SubAgentTool = Annotated[
+    AsyncGenerator[events_.AgentEvent], Aggregate(MessageAggregator)
+]
+"""Async-generator tool that streams a sub-agent's events.
+
+The collected messages flow to the consumer; the final assistant text
+becomes the tool result the parent model sees::
+
+    @ai.tool
+    async def research(topic: str) -> SubAgentTool:
+        sub = ai.agent(tools=[...])
+        async for event in sub.run(model, messages):
+            yield event
+"""
+
+
+type StreamingTextTool = Annotated[AsyncGenerator[str], Aggregate(ConcatAggregator)]
+"""Async-generator tool whose yielded chunks concatenate into the result.
+
+Each yield streams to the consumer as a ``PartialToolCallResult``;
+the model sees the full concatenation as the tool result::
+
+    @ai.tool
+    async def render(prompt: str) -> StreamingTextTool:
+        async for chunk in some_text_stream(prompt):
+            yield chunk
+
+For a custom delimiter, drop down to the marker form:
+``Annotated[AsyncGenerator[str], Aggregate(ConcatAggregator, delim="\\n")]``.
+"""
+
+
+def _aggregate_from_return_type(fn: Callable[..., Any]) -> Aggregate | None:
+    """Find an ``Aggregate`` marker in *fn*'s return-type metadata, if any.
+
+    Handles three shapes:
+
+    * ``Annotated[X, Aggregate(...)]`` directly,
+    * a PEP 695 alias ``type Foo = Annotated[X, Aggregate(...)]``,
+    * a parameterized alias ``type Foo[T] = Annotated[X[T], Aggregate(...)]``.
+    """
+    try:
+        hints = get_type_hints(fn, include_extras=True)
+    except Exception:
+        return None
+    ret = hints.get("return")
+    if ret is None:
+        return None
+
+    if isinstance(ret, typing.TypeAliasType):
+        ret = ret.__value__
+    else:
+        origin = typing.get_origin(ret)
+        if isinstance(origin, typing.TypeAliasType):
+            ret = origin.__value__
+
+    metadata = getattr(ret, "__metadata__", ())
+    matches = [m for m in metadata if isinstance(m, Aggregate)]
+    if len(matches) > 1:
+        raise TypeError(
+            f"Tool {fn.__name__!r} has multiple Aggregate markers in its "
+            "return-type annotation; expected at most one"
+        )
+    return matches[0] if matches else None
 
 
 class Tool[**P, R]:
@@ -27,11 +205,13 @@ class Tool[**P, R]:
         validator: type[pydantic.BaseModel] | None = None,
         *,
         is_gen: bool = False,
+        aggregator: Callable[[], events_.Aggregator[Any, Any, R]] | None = None,
     ) -> None:
         self._fn = fn
         self._validator = validator
         self._is_gen = is_gen
         self.schema = schema
+        self._aggregator = aggregator
 
     def parse_args(self, json_args: str) -> dict[str, Any]:
         """Parse and validate JSON args into Python kwargs."""
@@ -60,10 +240,13 @@ class Tool[**P, R]:
         # Generator tool (e.g. agent-as-a-tool): drain the async
         # generator, forward each yielded message to the runtime for
         # real-time streaming, and return the final text as the result.
-        return await yield_from(  # type: ignore[return-value]
-            self._fn(**kwargs),  # type: ignore[arg-type,call-arg]
+        assert self._aggregator
+        stream = self._fn(**kwargs)  # type: ignore[call-arg]
+        return await yield_from(
+            stream,  # type: ignore[arg-type]
             tool_name=tool_name,
             tool_call_id=tool_call_id,
+            aggregator=self._aggregator,
         )
 
     @property
@@ -83,34 +266,77 @@ class Tool[**P, R]:
         return self._fn
 
 
-def tool[**P, R](fn: Callable[P, Awaitable[R]]) -> Tool[P, R]:
-    """Decorator: turn an async function into a :class:`Tool`."""
-    sig = inspect.signature(fn)
-    hints = get_type_hints(fn) if hasattr(fn, "__annotations__") else {}
+@overload
+def tool[**P, R](fn: Callable[P, Awaitable[R]], /) -> Tool[P, R]: ...
 
-    fields: dict[str, Any] = {}
-    for param_name, param in sig.parameters.items():
-        param_type = hints.get(param_name, str)
-        if param.default is inspect.Parameter.empty:
-            fields[param_name] = (param_type, ...)
-        else:
-            fields[param_name] = (param_type, param.default)
 
-    validator = pydantic.create_model(f"{fn.__name__}_Args", **fields)
+@overload
+def tool[**P, T](fn: Callable[P, AsyncGenerator[T]], /) -> Tool[P, Any]: ...
 
-    schema = types.ToolSchema(
-        name=fn.__name__,
-        description=inspect.getdoc(fn) or "",
-        param_schema=validator.model_json_schema(),
-        return_type=hints.get("return", None),
-    )
 
-    return Tool(
-        fn=fn,
-        schema=schema,
-        validator=validator,
-        is_gen=inspect.isasyncgenfunction(fn),
-    )
+@overload
+def tool[**P, T, R](
+    *, aggregator: Callable[[], events_.Aggregator[T, Any, R]]
+) -> Callable[[Callable[P, AsyncGenerator[T]]], Tool[P, R]]: ...
+
+
+def tool[**P, T, R](
+    fn: Callable[P, Awaitable[R]] | Callable[P, AsyncGenerator[T]] | None = None,
+    /,
+    *,
+    aggregator: Callable[[], events_.Aggregator[T, Any, R]] | None = None,
+) -> Callable[[Callable[P, AsyncGenerator[T]]], Tool[P, R]] | Tool[P, R]:
+    """Decorator: turn an async function into a :class:`Tool`.
+
+    For async-generator tools, declare the aggregator either via the
+    ``aggregator=`` keyword argument or by annotating the return type
+    with an :class:`Aggregate` marker (e.g. via the :data:`SubAgentTool`
+    or :data:`StreamingStatusTool` aliases).  Specifying both raises
+    ``TypeError``.
+    """
+
+    def wrap(fn: Any) -> Tool[P, R]:
+        sig = inspect.signature(fn)
+        hints = get_type_hints(fn) if hasattr(fn, "__annotations__") else {}
+
+        fields: dict[str, Any] = {}
+        for param_name, param in sig.parameters.items():
+            param_type = hints.get(param_name, str)
+            if param.default is inspect.Parameter.empty:
+                fields[param_name] = (param_type, ...)
+            else:
+                fields[param_name] = (param_type, param.default)
+
+        validator = pydantic.create_model(f"{fn.__name__}_Args", **fields)
+
+        schema = types.ToolSchema(
+            name=fn.__name__,
+            description=inspect.getdoc(fn) or "",
+            param_schema=validator.model_json_schema(),
+            return_type=hints.get("return", None),
+        )
+
+        annotated_aggregate = _aggregate_from_return_type(fn)
+        if annotated_aggregate is not None and aggregator is not None:
+            raise TypeError(
+                f"Tool {fn.__name__!r}: aggregator was declared both via "
+                "the `aggregator=` argument and via an Aggregate marker "
+                "in the return-type annotation; specify only one"
+            )
+        effective_aggregator = aggregator or annotated_aggregate
+
+        return Tool(
+            fn=fn,
+            schema=schema,
+            validator=validator,
+            is_gen=inspect.isasyncgenfunction(fn),
+            aggregator=effective_aggregator,
+        )
+
+    if fn is None:
+        return wrap
+    else:
+        return wrap(fn)
 
 
 class ToolCall:
@@ -339,14 +565,15 @@ def tool_result(
     return events_.ToolCallResult(message=msg, results=msg.tool_results)
 
 
-async def yield_from(
-    source: AsyncIterable[events_.AgentEvent],
+async def yield_from[T, R](
+    source: AsyncGenerator[T],
     *,
+    aggregator: Callable[[], events_.Aggregator[T, object, R]],
     # TODO: is this what we really want for labelling?
     tool_name: str | None = None,
     tool_call_id: str | None = None,
     label: object = None,
-) -> str:
+) -> R:
     """Drain *source*, forwarding each event to the current runtime.
 
     Use inside a custom loop to stream messages from a sub-agent to the
@@ -367,23 +594,22 @@ async def yield_from(
 
     Returns the final message's text (empty string if no messages).
     """
+    agg = aggregator()
+
     rt = runtime.get_runtime()
-    last: types.Message | None = None
-    async for item in source:
-        if isinstance(item, types.Message):
-            last = item
-            continue
-        await rt.put_event(
-            events_.PartialToolCallResult(
-                tool_call_id=tool_call_id,
-                tool_name=tool_name,
-                label=label,
-                value=item,
+    async with contextlib.aclosing(source) as src:
+        async for item in src:
+            agg.feed(item)
+            await rt.put_event(
+                events_.PartialToolCallResult(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    label=label,
+                    value=item,
+                    aggregator_factory=aggregator,
+                )
             )
-        )
-        if isinstance(item, events_.TerminalEvent):
-            last = item.message
-    return last.text if last else ""
+    return agg.to_model_output()
 
 
 class Agent:

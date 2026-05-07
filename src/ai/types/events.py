@@ -148,7 +148,7 @@ class HookResolution(BaseEvent):
     kind: Literal["hook_resolution"] = "hook_resolution"
 
 
-Event = Annotated[
+Event = (
     StreamStart
     | StreamEnd
     | TextStart
@@ -166,6 +166,10 @@ Event = Annotated[
     | BuiltinToolResult
     | FileEvent
     | HookSuspension
-    | HookResolution,
+    | HookResolution
+)
+
+DiscriminatedEvent = Annotated[
+    Event,
     pydantic.Field(discriminator="kind"),
 ]

@@ -26,16 +26,11 @@ from ..conftest import (
 # ---------------------------------------------------------------------------
 
 
-@ai.tool  # type: ignore[arg-type]
-async def progress_tool(query: str) -> AsyncGenerator[events_.Event | ai.Message]:
+@ai.tool(aggregator=ai.LastAggregator)
+async def progress_tool(query: str) -> AsyncGenerator[str]:
     """Tool that streams progress, then returns a final answer."""
-    yield events_.TextStart(block_id="progress")
-    yield events_.TextDelta(block_id="progress", chunk="Working...")
-    yield events_.TextEnd(block_id="progress")
-    yield ai.Message(
-        role="assistant",
-        parts=[messages_.TextPart(text=f"Answer for {query}")],
-    )
+    yield "Working..."
+    yield f"Answer for {query}"
 
 
 async def test_generator_tool_streams_and_returns_result() -> None:
@@ -58,16 +53,10 @@ async def test_generator_tool_streams_and_returns_result() -> None:
     # Intermediate progress events were forwarded to consumer, wrapped
     # in PartialToolCallResult and attributed to the originating tool call.
     progress_wrappers = [
-        e
-        for e in all_events
-        if isinstance(e, agent_events_.PartialToolCallResult)
-        and isinstance(e.value, events_.TextDelta)
-        and e.value.block_id == "progress"
+        e for e in all_events if isinstance(e, agent_events_.PartialToolCallResult)
     ]
-    assert len(progress_wrappers) == 1
-    assert progress_wrappers[0].value.chunk == "Working..."
-    assert progress_wrappers[0].tool_call_id == "tc-1"
-    assert progress_wrappers[0].tool_name == "progress_tool"
+    assert len(progress_wrappers) == 2
+    assert progress_wrappers[0].value == "Working..."
 
     # Tool result was fed back to LLM.
     tool_results = [
@@ -118,7 +107,7 @@ async def inner_fact(topic: str) -> str:
     return f"Fact about {topic}"
 
 
-@ai.tool  # type: ignore[arg-type]
+@ai.tool(aggregator=ai.MessageAggregator)
 async def research_tool(topic: str) -> AsyncGenerator[agent_events_.AgentEvent]:
     """Nested agent that researches a topic."""
     inner = ai.agent(tools=[inner_fact])

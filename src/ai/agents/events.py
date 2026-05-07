@@ -11,12 +11,24 @@ event vocabulary.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import abc
+from collections.abc import Callable, Sequence
 from typing import Any, Literal
 
 import pydantic
 
 from .. import types
+
+
+class Aggregator[Item, Result, ModelResult]:
+    @abc.abstractmethod
+    def feed(self, item: Item) -> None: ...
+
+    @abc.abstractmethod
+    def snapshot(self) -> Result: ...
+
+    @abc.abstractmethod
+    def to_model_output(self) -> ModelResult: ...
 
 
 class PartialToolCallResult(pydantic.BaseModel):
@@ -27,6 +39,13 @@ class PartialToolCallResult(pydantic.BaseModel):
     tool_name: str | None = None
     label: object = None
     value: Any = None
+
+    def key(self) -> object:
+        return (self.tool_call_id, self.label)
+
+    aggregator_factory: Callable[[], Aggregator[Any, Any, Any]] | None = pydantic.Field(
+        default=None, exclude=True, repr=False
+    )
 
     kind: Literal["partial_tool_call_result"] = "partial_tool_call_result"
 
@@ -50,6 +69,8 @@ class HookEvent(pydantic.BaseModel):
 
     kind: Literal["hook"] = "hook"
 
+
+AgentMessageEvent = types.Event | ToolCallResult | HookEvent
 
 AgentEvent = types.Event | ToolCallResult | HookEvent | PartialToolCallResult
 

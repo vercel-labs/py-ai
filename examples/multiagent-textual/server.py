@@ -158,6 +158,7 @@ async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.AgentEvent]:
                 ],
             ),
             label="mothership",
+            aggregator=ai.MessageAggregator,
         ),
         ai.yield_from(
             data_centers_agent.run(
@@ -171,6 +172,7 @@ async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.AgentEvent]:
                 ],
             ),
             label="data_centers",
+            aggregator=ai.MessageAggregator,
         ),
     )
 

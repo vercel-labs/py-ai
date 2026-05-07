@@ -1,0 +1,144 @@
+"""Aggregate marker — declaring an aggregator via the return-type annotation."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncGenerator
+from typing import Annotated
+
+import pytest
+
+import ai
+from ai.agents import events as agent_events_
+
+from ..conftest import (
+    MOCK_MODEL,
+    mock_llm,
+    text_msg,
+    tool_call_msg,
+)
+
+
+def _factory(t: ai.Tool[..., object]) -> object:
+    factory = t._aggregator
+    assert factory is not None
+    return factory()
+
+
+def test_aggregate_marker_extracted_from_direct_annotated() -> None:
+    """Bare ``Annotated[..., Aggregate(...)]`` on the return type."""
+
+    @ai.tool
+    async def t() -> Annotated[AsyncGenerator[str], ai.Aggregate(ai.LastAggregator)]:
+        yield "x"
+
+    assert isinstance(_factory(t), ai.LastAggregator)
+
+
+def test_aggregate_marker_extracted_from_alias() -> None:
+    """``StreamingStatusTool[T]`` carries the marker through a generic alias."""
+
+    @ai.tool
+    async def t() -> ai.StreamingStatusTool[str]:
+        yield "x"
+
+    assert isinstance(_factory(t), ai.LastAggregator)
+
+
+def test_sub_agent_tool_alias_extracted() -> None:
+    """``SubAgentTool`` (bare alias) carries MessageAggregator."""
+
+    @ai.tool
+    async def t() -> ai.SubAgentTool:
+        yield ai.StreamStart()
+
+    assert isinstance(_factory(t), ai.MessageAggregator)
+
+
+def test_streaming_text_tool_alias_extracted() -> None:
+    """``StreamingTextTool`` (bare alias) carries ConcatAggregator."""
+
+    @ai.tool
+    async def t() -> ai.StreamingTextTool:
+        yield "hello"
+        yield "world"
+
+    agg = _factory(t)
+    assert isinstance(agg, ai.ConcatAggregator)
+    agg.feed("hello")
+    agg.feed("world")
+    assert agg.snapshot() == "helloworld"
+
+
+def test_aggregate_kwarg_passed_to_factory() -> None:
+    """Extra kwargs on Aggregate flow through to the factory."""
+
+    @ai.tool
+    async def t() -> Annotated[
+        AsyncGenerator[str], ai.Aggregate(ai.ConcatAggregator, delim="|")
+    ]:
+        yield "a"
+        yield "b"
+
+    agg = _factory(t)
+    assert isinstance(agg, ai.ConcatAggregator)
+    agg.feed("a")
+    agg.feed("b")
+    assert agg.snapshot() == "a|b"
+
+
+def test_kwarg_and_marker_conflict_raises() -> None:
+    """Specifying both ``aggregator=`` and an Aggregate marker is an error."""
+    with pytest.raises(TypeError, match="aggregator"):
+
+        @ai.tool(aggregator=ai.LastAggregator)
+        async def t() -> ai.StreamingStatusTool[str]:
+            yield "x"
+
+
+def test_multiple_aggregate_markers_raise() -> None:
+    """More than one Aggregate marker in the metadata is rejected."""
+    with pytest.raises(TypeError, match="multiple Aggregate markers"):
+
+        @ai.tool
+        async def t() -> Annotated[
+            AsyncGenerator[str],
+            ai.Aggregate(ai.LastAggregator),
+            ai.Aggregate(ai.ConcatAggregator),
+        ]:
+            yield "x"
+
+
+@ai.tool
+async def alias_progress_tool(query: str) -> ai.StreamingStatusTool[str]:
+    """Smoke test: alias-declared tool runs end-to-end through an agent."""
+    yield "Working..."
+    yield f"Answer for {query}"
+
+
+async def test_alias_declared_tool_runs_end_to_end() -> None:
+    """An alias-declared streaming tool behaves identically to the kwarg form."""
+    my_agent = ai.agent(tools=[alias_progress_tool])
+
+    call = [
+        tool_call_msg(
+            tc_id="tc-1", name="alias_progress_tool", args='{"query": "test"}'
+        )
+    ]
+    reply = [text_msg("Done!", id="msg-2")]
+    llm = mock_llm([call, reply])
+
+    all_events: list[agent_events_.AgentEvent] = []
+    async for event in my_agent.run(MOCK_MODEL, [ai.user_message("Go")]):
+        all_events.append(event)
+
+    assert llm.call_count == 2
+
+    progress = [
+        e for e in all_events if isinstance(e, agent_events_.PartialToolCallResult)
+    ]
+    assert [p.value for p in progress] == ["Working...", "Answer for test"]
+
+    tool_results = [
+        e for e in all_events if isinstance(e, agent_events_.ToolCallResult)
+    ]
+    assert tool_results[0].results[0].result == "Answer for test"
