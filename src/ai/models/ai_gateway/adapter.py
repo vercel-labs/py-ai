@@ -19,7 +19,7 @@ from ..openai import tools as openai_tools
 from ..openai.params import OpenAIChatParams, OpenAIResponsesParams
 from . import errors, sdk
 from . import tools as gateway_tools
-from .params import GATEWAY_STREAM_PARAMS_TYPES, GatewayParams
+from .params import GATEWAY_STREAM_PARAMS_TYPES, GatewayParams, ProviderOptions
 
 # ---------------------------------------------------------------------------
 # Shared request helpers
@@ -236,10 +236,10 @@ async def _build_request_body(
     messages: list[types.messages.Message],
     tools: Sequence[types.tools.Tool] | None = None,
     output_type: type[Any] | None = None,
-    **kwargs: Any,
+    params: Any = None,
 ) -> dict[str, Any]:
     """Build the ``LanguageModelV3CallOptions`` request body."""
-    stream_params = _normalize_gateway_params(kwargs.get("params"))
+    stream_params = _normalize_gateway_params(params)
     body: dict[str, Any] = {
         "prompt": await _messages_to_prompt(messages),
     }
@@ -251,10 +251,7 @@ async def _build_request_body(
             "schema": output_type.model_json_schema(),
             "name": output_type.__name__,
         }
-    provider_options = _merge_provider_options(
-        kwargs.get("provider_options"),
-        _provider_options_from_params(stream_params),
-    )
+    provider_options = _provider_options_from_params(stream_params)
     if provider_options:
         body["providerOptions"] = provider_options
     extra_body = _gateway_body_from_params(stream_params)
@@ -292,8 +289,8 @@ def _normalize_gateway_params(value: Any) -> list[pydantic.BaseModel]:
     for item in raw_items:
         if not isinstance(item, GATEWAY_STREAM_PARAMS_TYPES):
             raise TypeError(
-                "ai-gateway streams accept GatewayParams, OpenAIChatParams, "
-                "OpenAIResponsesParams, or AnthropicParams"
+                "ai-gateway streams accept GatewayParams, ProviderOptions, "
+                "OpenAIChatParams, OpenAIResponsesParams, or AnthropicParams"
             )
         result.append(item)
     return result
@@ -303,6 +300,8 @@ def _gateway_provider_options_key(param: pydantic.BaseModel) -> str:
     """Return the providerOptions bucket name for one Gateway param wrapper."""
     if isinstance(param, GatewayParams):
         return "gateway"
+    if isinstance(param, ProviderOptions):
+        return param.provider
     if isinstance(param, OpenAIChatParams | OpenAIResponsesParams):
         return "openai"
     if isinstance(param, AnthropicParams):
@@ -312,6 +311,9 @@ def _gateway_provider_options_key(param: pydantic.BaseModel) -> str:
 
 def _provider_options_payload(param: pydantic.BaseModel) -> dict[str, Any]:
     """Dump typed providerOptions and merge forwarded provider raw body fields."""
+    if isinstance(param, ProviderOptions):
+        return dict(param.options)
+
     payload = param.model_dump(by_alias=True, exclude_none=True)
     if not isinstance(param, GatewayParams):
         extra_body = getattr(param, "extra_body", None)
@@ -341,24 +343,6 @@ def _extra_headers_from_params(
         if extra_headers:
             headers.update(extra_headers)
     return headers or None
-
-
-def _merge_provider_options(
-    existing: dict[str, Any] | None,
-    generated: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    """Combine legacy provider_options with typed params without overwriting."""
-    if not existing:
-        return generated
-    if not generated:
-        return dict(existing)
-
-    result = dict(existing)
-    for key, value in generated.items():
-        if key in result:
-            raise ValueError(f"duplicate provider params for {key!r}")
-        result[key] = value
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -584,7 +568,7 @@ async def stream(
         messages,
         tools=tools,
         output_type=output_type,
-        **{**kwargs, "params": stream_params},
+        params=stream_params,
     )
     extra_headers = _extra_headers_from_params(stream_params)
     gateway = sdk.GatewayClient(client, model)

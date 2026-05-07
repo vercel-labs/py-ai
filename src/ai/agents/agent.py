@@ -195,6 +195,7 @@ def _aggregate_from_return_type(fn: Callable[..., Any]) -> Aggregate | None:
         )
     return matches[0] if matches else None
 
+
 Tool = types.tools.Tool
 
 
