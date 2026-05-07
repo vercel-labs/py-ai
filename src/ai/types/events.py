@@ -216,10 +216,20 @@ class PartialToolCallResult(pydantic.BaseModel):
 
 
 class ToolCallResult(pydantic.BaseModel):
-    """Emitted after tool calls execute -- carries the result message."""
+    """Emitted after tool calls execute — carries the result message.
+
+    When the framework auto-catches an exception raised by the tool,
+    ``exception`` carries the real ``BaseException`` (with traceback /
+    ``__cause__`` intact) so loops can log it richly.  The wire-bound
+    ``ToolResultPart.result`` still has ``str(exc)`` for the LLM.
+    The ``exception`` field is excluded from serialization.
+    """
 
     message: messages.Message
     results: Sequence[messages.ToolResultPart]
+    exception: BaseException | None = pydantic.Field(
+        default=None, exclude=True, repr=False
+    )
 
     model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
 
