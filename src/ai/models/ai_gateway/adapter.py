@@ -217,28 +217,10 @@ def _tool_to_v3(tool: types.tools.Tool) -> dict[str, Any]:
 def _provider_tool_id(tool: types.tools.Tool) -> str:
     if isinstance(tool.args, anthropic_tools.AnthropicProviderArgs):
         return f"anthropic.{tool.args.anthropic_type}"
+    if isinstance(tool.args, openai_tools.OpenAIProviderArgs):
+        return tool.args.openai_id
 
     match tool.args:
-        case openai_tools.WebSearchArgs():
-            return "openai.web_search"
-        case openai_tools.WebSearchPreviewArgs():
-            return "openai.web_search_preview"
-        case openai_tools.FileSearchArgs():
-            return "openai.file_search"
-        case openai_tools.CodeInterpreterArgs():
-            return "openai.code_interpreter"
-        case openai_tools.ImageGenerationArgs():
-            return "openai.image_generation"
-        case openai_tools.LocalShellArgs():
-            return "openai.local_shell"
-        case openai_tools.ShellArgs():
-            return "openai.shell"
-        case openai_tools.ApplyPatchArgs():
-            return "openai.apply_patch"
-        case openai_tools.McpArgs():
-            return "openai.mcp"
-        case openai_tools.ToolSearchArgs():
-            return "openai.tool_search"
         case gateway_tools.PerplexitySearchArgs():
             return "gateway.perplexity_search"
         case gateway_tools.ParallelSearchArgs():

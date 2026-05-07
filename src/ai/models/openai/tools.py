@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 import pydantic
 from pydantic.alias_generators import to_camel
@@ -50,7 +50,17 @@ class CodeInterpreterContainer(pydantic.BaseModel):
     file_ids: list[str] | None = None
 
 
-class WebSearchArgs(pydantic.BaseModel):
+class OpenAIProviderArgs(pydantic.BaseModel):
+    """Base for OpenAI provider-executed tool args."""
+
+    model_config = _CONFIG_MODEL
+
+    openai_id: ClassVar[str]
+
+
+class WebSearchArgs(OpenAIProviderArgs):
+    openai_id: ClassVar[str] = "openai.web_search"
+
     model_config = _CONFIG_MODEL
 
     external_web_access: bool | None = None
@@ -59,14 +69,18 @@ class WebSearchArgs(pydantic.BaseModel):
     user_location: WebSearchUserLocation | None = None
 
 
-class WebSearchPreviewArgs(pydantic.BaseModel):
+class WebSearchPreviewArgs(OpenAIProviderArgs):
+    openai_id: ClassVar[str] = "openai.web_search_preview"
+
     model_config = _CONFIG_MODEL
 
     search_context_size: Literal["low", "medium", "high"] | None = None
     user_location: WebSearchUserLocation | None = None
 
 
-class FileSearchArgs(pydantic.BaseModel):
+class FileSearchArgs(OpenAIProviderArgs):
+    openai_id: ClassVar[str] = "openai.file_search"
+
     model_config = _CONFIG_MODEL
 
     vector_store_ids: list[str]
@@ -75,13 +89,17 @@ class FileSearchArgs(pydantic.BaseModel):
     filters: dict[str, Any] | None = None
 
 
-class CodeInterpreterArgs(pydantic.BaseModel):
+class CodeInterpreterArgs(OpenAIProviderArgs):
+    openai_id: ClassVar[str] = "openai.code_interpreter"
+
     model_config = _CONFIG_MODEL
 
     container: CodeInterpreterContainer | str | None = None
 
 
-class ImageGenerationArgs(pydantic.BaseModel):
+class ImageGenerationArgs(OpenAIProviderArgs):
+    openai_id: ClassVar[str] = "openai.image_generation"
+
     model_config = _CONFIG_MODEL
 
     background: Literal["transparent", "opaque", "auto"] | None = None
@@ -95,21 +113,29 @@ class ImageGenerationArgs(pydantic.BaseModel):
     size: str | None = None
 
 
-class LocalShellArgs(pydantic.BaseModel):
+class LocalShellArgs(OpenAIProviderArgs):
+    openai_id: ClassVar[str] = "openai.local_shell"
+
     model_config = _CONFIG_MODEL
 
 
-class ShellArgs(pydantic.BaseModel):
+class ShellArgs(OpenAIProviderArgs):
+    openai_id: ClassVar[str] = "openai.shell"
+
     model_config = _CONFIG_MODEL
 
     environment: str | None = None
 
 
-class ApplyPatchArgs(pydantic.BaseModel):
+class ApplyPatchArgs(OpenAIProviderArgs):
+    openai_id: ClassVar[str] = "openai.apply_patch"
+
     model_config = _CONFIG_MODEL
 
 
-class McpArgs(pydantic.BaseModel):
+class McpArgs(OpenAIProviderArgs):
+    openai_id: ClassVar[str] = "openai.mcp"
+
     model_config = _CONFIG_MODEL
 
     server_label: str
@@ -121,7 +147,9 @@ class McpArgs(pydantic.BaseModel):
     server_description: str | None = None
 
 
-class ToolSearchArgs(pydantic.BaseModel):
+class ToolSearchArgs(OpenAIProviderArgs):
+    openai_id: ClassVar[str] = "openai.tool_search"
+
     model_config = _CONFIG_MODEL
 
     description: str | None = None
@@ -293,6 +321,7 @@ __all__ = [
     "ImageGenerationArgs",
     "LocalShellArgs",
     "McpArgs",
+    "OpenAIProviderArgs",
     "ShellArgs",
     "ToolSearchArgs",
     "WebSearchArgs",
