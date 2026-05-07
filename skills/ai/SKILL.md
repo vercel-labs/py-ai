@@ -64,6 +64,41 @@ Key properties on streamed messages:
 
 Serialize: `msg.model_dump()`. Restore: `ai.Message.model_validate(data)`.
 
+## Streaming tools
+
+A regular `@ai.tool` returns the tool result directly. An async-generator tool yields intermediate values that stream to the consumer as `ai.PartialToolCallResult` events; an *aggregator* decides what the model sees as the final result.
+
+Declare the aggregator via the return-type annotation:
+
+```python
+@ai.tool
+async def fetch(url: str) -> ai.StreamingStatusTool[str]:
+    yield "connecting..."
+    yield "downloading..."
+    yield body              # last yield = tool result; earlier yields = status
+
+@ai.tool
+async def render(prompt: str) -> ai.StreamingTextTool:
+    async for chunk in stream:
+        yield chunk         # all chunks concatenated into the tool result
+
+@ai.tool
+async def research(topic: str) -> ai.SubAgentTool:
+    sub = ai.agent(tools=[...])
+    async for event in sub.run(model, msgs):
+        yield event         # final assistant text becomes the tool result
+```
+
+These aliases expand to `Annotated[AsyncGenerator[T], ai.Aggregate(Aggregator)]`. For a parameterized aggregator, write the marker directly:
+
+```python
+type Joined = Annotated[AsyncGenerator[str], ai.Aggregate(ai.ConcatAggregator, delim="\n")]
+```
+
+Or pass the factory as a keyword argument: `@ai.tool(aggregator=ai.LastAggregator)`. Specifying both an annotation marker and the kwarg raises `TypeError`.
+
+Built-in aggregators: `ai.ConcatAggregator`, `ai.LastAggregator`, `ai.MessageAggregator`. Subclass `ai.SimpleAggregator[Item, Result]` (in/out same type) or `ai.Aggregator[Item, Result, ModelResult]` (separate model output) for custom ones.
+
 ## Custom agent loops
 
 Override the default loop when you need approval gates, routing, or batching.
@@ -128,8 +163,16 @@ async def multi(model: ai.Model, query: str) -> str:
     analyst = ai.agent(tools=[t2])
 
     r1, r2 = await asyncio.gather(
-        ai.yield_from(researcher.run(model, msgs1), label="researcher"),
-        ai.yield_from(analyst.run(model, msgs2), label="analyst"),
+        ai.yield_from(
+            researcher.run(model, msgs1),
+            label="researcher",
+            aggregator=ai.MessageAggregator,
+        ),
+        ai.yield_from(
+            analyst.run(model, msgs2),
+            label="analyst",
+            aggregator=ai.MessageAggregator,
+        ),
     )
     return f"{r1}\n{r2}"
 ```
