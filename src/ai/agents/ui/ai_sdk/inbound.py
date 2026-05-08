@@ -256,7 +256,7 @@ def _parse(
                 case ui_message.UITextPart(text=text) if text:
                     assistant_parts.append(messages_.TextPart(text=text))
 
-                case ui_message.UIReasoningPart(reasoning=reasoning):
+                case ui_message.UIReasoningPart(text=reasoning) if reasoning:
                     assistant_parts.append(messages_.ReasoningPart(text=reasoning))
 
                 case ui_message.UIToolInvocationPart() as inv:

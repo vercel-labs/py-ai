@@ -17,7 +17,7 @@ def test_to_ui_parts_text_and_reasoning() -> None:
     ]
     ui_parts = _parts.to_ui_parts(parts)
     assert isinstance(ui_parts[0], UIReasoningPart)
-    assert ui_parts[0].reasoning == "thinking"
+    assert ui_parts[0].text == "thinking"
     assert isinstance(ui_parts[1], UITextPart)
     assert ui_parts[1].text == "hi"
 

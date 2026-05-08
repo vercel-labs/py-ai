@@ -51,10 +51,14 @@ const approveBtn = page.getByRole("button", { name: "Approve" });
 await approveBtn.waitFor({ state: "visible", timeout: 10000 });
 await approveBtn.click();
 
-// Wait for the assistant's final reply to render. The Mothership tool
-// returns "Soon." so the model usually echoes that back.
+// Wait for the tool to reach the "Completed" state — i.e. the sub-agent
+// finished streaming and the tool transitioned from approval-responded
+// to output-available.  Don't match on specific reply text: the
+// mothership model is non-deterministic.
 try {
-  await page.getByText(/Soon\./i).waitFor({ state: "visible", timeout: 30000 });
+  await toolToggle
+    .getByText("Completed", { exact: true })
+    .waitFor({ state: "visible", timeout: 30000 });
 } catch (e) {
   console.error("\n=== TIMEOUT — dumping diagnostics ===");
   console.error("REQUEST COUNT:", requests.length);

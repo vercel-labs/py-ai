@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import AsyncGenerator
 
 import agent as agent_
 import fastapi
+import fastapi.exceptions
 import fastapi.middleware.cors
 import fastapi.responses
 import pydantic
@@ -24,6 +26,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(fastapi.exceptions.RequestValidationError)
+async def log_validation_errors(
+    request: fastapi.Request, exc: fastapi.exceptions.RequestValidationError
+) -> fastapi.responses.JSONResponse:
+    """Log pydantic validation failures so 422s aren't silent in dev."""
+    print(
+        f"[422] {request.method} {request.url.path}: {exc.errors()}",
+        file=sys.stderr,
+        flush=True,
+    )
+    return fastapi.responses.JSONResponse({"detail": exc.errors()}, status_code=422)
 
 
 @app.get("/health")
