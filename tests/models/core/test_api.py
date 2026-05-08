@@ -10,6 +10,7 @@ import ai
 from ai import models
 from ai.models.openai import openai
 from ai.types import events as events_
+from ai.types import metadata as metadata_
 from ai.types import messages as messages_
 
 from ...conftest import MOCK_MODEL, MOCK_PROVIDER, MockProvider, mock_llm, text_msg
@@ -17,6 +18,17 @@ from ...conftest import MOCK_MODEL, MOCK_PROVIDER, MockProvider, mock_llm, text_
 
 class _MockStreamParams(pydantic.BaseModel):
     value: str
+
+
+class _TestProviderMetadata(metadata_.ProviderMetadata):
+    marker: str
+
+
+def _provider_metadata_marker(
+    provider_metadata: metadata_.ProviderMetadata | None,
+) -> str:
+    assert isinstance(provider_metadata, _TestProviderMetadata)
+    return provider_metadata.marker
 
 
 async def test_stream_aggregates_registered_adapter_events() -> None:
@@ -66,6 +78,91 @@ async def test_stream_tool_end_includes_aggregated_tool_call() -> None:
     assert tool_end.tool_call.tool_name == "weather"
     assert tool_end.tool_call.tool_args == '{"city":"SF"}'
     assert stream.tool_calls == [tool_end.tool_call]
+
+
+async def test_stream_accumulates_provider_metadata_latest_wins() -> None:
+    async def _metadata_stream() -> AsyncGenerator[events_.Event]:
+        yield events_.StreamStart()
+        yield events_.TextStart(
+            block_id="text",
+            provider_metadata=_TestProviderMetadata(marker="text-start"),
+        )
+        yield events_.TextDelta(block_id="text", chunk="hello")
+        yield events_.TextDelta(
+            block_id="text",
+            chunk=" world",
+            provider_metadata=_TestProviderMetadata(marker="text-delta"),
+        )
+        yield events_.TextEnd(
+            block_id="text",
+            provider_metadata=_TestProviderMetadata(marker="text-end"),
+        )
+        yield events_.ReasoningStart(
+            block_id="reasoning",
+            provider_metadata=_TestProviderMetadata(marker="reasoning-start"),
+        )
+        yield events_.ReasoningDelta(
+            block_id="reasoning",
+            chunk="thinking",
+            provider_metadata=_TestProviderMetadata(marker="reasoning-delta"),
+        )
+        yield events_.ReasoningEnd(
+            block_id="reasoning",
+            signature="sig-1",
+            provider_metadata=_TestProviderMetadata(marker="reasoning-end"),
+        )
+        yield events_.ToolStart(
+            tool_call_id="tc-1",
+            tool_name="weather",
+            provider_metadata=_TestProviderMetadata(marker="tool-start"),
+        )
+        yield events_.ToolDelta(tool_call_id="tc-1", chunk='{"city"')
+        yield events_.ToolDelta(
+            tool_call_id="tc-1",
+            chunk=':"SF"}',
+            provider_metadata=_TestProviderMetadata(marker="tool-delta"),
+        )
+        yield events_.ToolEnd(
+            tool_call_id="tc-1",
+            tool_call=messages_.DUMMY_TOOL_CALL,
+            provider_metadata=_TestProviderMetadata(marker="tool-end"),
+        )
+        yield events_.FileEvent(
+            block_id="file",
+            media_type="image/png",
+            data="base64-data",
+            provider_metadata=_TestProviderMetadata(marker="file"),
+        )
+        yield events_.StreamEnd(
+            provider_metadata=_TestProviderMetadata(marker="message"),
+        )
+
+    stream = models.Stream(_metadata_stream())
+    async for _ in stream:
+        pass
+
+    assert _provider_metadata_marker(stream.message.provider_metadata) == "message"
+
+    text = stream.message.parts[0]
+    assert isinstance(text, messages_.TextPart)
+    assert text.text == "hello world"
+    assert _provider_metadata_marker(text.provider_metadata) == "text-end"
+
+    reasoning = stream.message.parts[1]
+    assert isinstance(reasoning, messages_.ReasoningPart)
+    assert reasoning.text == "thinking"
+    assert reasoning.signature == "sig-1"
+    assert _provider_metadata_marker(reasoning.provider_metadata) == "reasoning-end"
+
+    tool_call = stream.message.parts[2]
+    assert isinstance(tool_call, messages_.ToolCallPart)
+    assert tool_call.tool_args == '{"city":"SF"}'
+    assert _provider_metadata_marker(tool_call.provider_metadata) == "tool-end"
+
+    file = stream.message.parts[3]
+    assert isinstance(file, messages_.FilePart)
+    assert file.data == "base64-data"
+    assert _provider_metadata_marker(file.provider_metadata) == "file"
 
 
 async def test_stream_uses_explicit_model_client() -> None:
