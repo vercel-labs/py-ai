@@ -8,7 +8,7 @@ import dataclasses
 import inspect
 import json
 import typing
-from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Sequence
 from typing import Annotated, Any, Protocol, Self, get_type_hints, overload
 
 import pydantic
@@ -421,6 +421,17 @@ class ToolCall:
         return await chain(call)
 
 
+class ToolCallLike(Protocol):
+    """Anything ``ToolRunner.schedule`` can accept.
+
+    Satisfied by :class:`ToolCall` and by any zero-arg callable returning
+    a coroutine that resolves to a :class:`~ai.agents.events.ToolCallResult`
+    — e.g. an inline closure that gates the tool behind an approval hook.
+    """
+
+    def __call__(self) -> Coroutine[Any, Any, events_.ToolCallResult]: ...
+
+
 class ToolRunner:
     def __init__(self, stream: models.Stream) -> None:
         self._stream = stream
@@ -431,12 +442,14 @@ class ToolRunner:
         # A future that gets signalled when we add a new tool, so that
         # asyncio.wait gets woken up and cycles around in the loop to
         # wait on the new thing as well.
+        # Also used when add_result is called, to signal that
         self._sched_waiter: asyncio.Future[None] = (
             asyncio.get_running_loop().create_future()
         )
         self._active: set[
             asyncio.Future[events_.ToolCallResult] | asyncio.Future[None]
         ] = {self._finish_future}
+        self._new_results: list[events_.ToolCallResult] = []
         self._tool_results: list[events_.ToolCallResult] = []
         self._tg_base = asyncio.TaskGroup()
 
@@ -450,8 +463,23 @@ class ToolRunner:
     def events(self) -> AsyncGenerator[events_.ToolCallResult]:
         return self._iterate()
 
-    def schedule(self, tc: ToolCall) -> None:
+    def schedule(self, tc: ToolCallLike) -> None:
+        """Schedule a tool call (or any callable producing a ToolCallResult).
+
+        See :class:`ToolCallLike` — accepts both :class:`ToolCall` and
+        any zero-arg callable returning a coroutine that resolves to a
+        :class:`ToolCallResult`.  The latter lets you wrap a ``ToolCall``
+        in custom logic (e.g. an approval hook await) and still ride the
+        runner's merge-and-iterate flow.
+        """
         self._active.add(self._tg.create_task(tc()))
+        self._sched_waiter.set_result(None)
+
+    def add_result(self, res: events_.ToolCallResult) -> None:
+        self._tool_results.append(res)
+
+        # Also add to _new_results and signal sched_waiter to return them
+        self._new_results.append(res)
         self._sched_waiter.set_result(None)
 
     def get_tool_message(self) -> types.messages.Message | None:
@@ -471,6 +499,11 @@ class ToolRunner:
                     t.result()
                 elif t is self._sched_waiter:
                     t.result()
+
+                    new = self._new_results
+                    self._new_results = []
+                    for n in new:
+                        yield n
                     self._sched_waiter = asyncio.get_running_loop().create_future()
                 else:
                     res = t.result()

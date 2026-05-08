@@ -41,6 +41,7 @@ TEXT_SAMPLES = [
     Sample("multimodal_input.py"),
     Sample("check_connection.py"),
     Sample("agent_hooks.py", stdin="y\n"),
+    Sample("agent_hooks_inline.py", stdin="y\n"),
     Sample("agent_hooks_serverless.py"),
     Sample("mcp_tools.py"),
     Sample("builtin_web_search.py"),
@@ -89,6 +90,19 @@ def run_sample(sample: Sample) -> bool:
     print()
     sys.stdout.flush()
     return result.returncode == 0
+
+
+def print_summary(results: list[tuple[str, bool]]) -> bool:
+    print("=" * 60)
+    print("Summary:")
+    any_failed = False
+    for name, ok in results:
+        status = "PASS" if ok else "FAIL"
+        print(f"  {status}  {name}")
+        if not ok:
+            any_failed = True
+    print()
+    return any_failed
 
 
 def run_sample_quiet(sample: Sample) -> tuple[str, bool, str]:
@@ -155,8 +169,7 @@ def main() -> None:
                 print(outputs[name].rstrip())
             print()
 
-        if failed:
-            sys.exit(1)
+        results.sort(key=lambda r: (not r[1], r[0]))
     else:
         for sample in samples:
             try:
@@ -166,18 +179,8 @@ def main() -> None:
                 ok = False
             results.append((sample.name, ok))
 
-        print("=" * 60)
-        print("Summary:")
-        any_failed = False
-        for name, ok in results:
-            status = "PASS" if ok else "FAIL"
-            print(f"  {status}  {name}")
-            if not ok:
-                any_failed = True
-        print()
-
-        if any_failed:
-            sys.exit(1)
+    if print_summary(results):
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -1,15 +1,19 @@
-"""Human-in-the-loop approval hooks.
+"""Human-in-the-loop approval hooks (inline gating variant).
 
 Demonstrates the function-based hook API:
   - await hook("label", payload=Model) to suspend inside the loop
   - resolve_hook("label", data) to unblock from outside
   - Hook signals arrive as HookEvent events
 
-The custom loop uses the concurrent ``ToolRunner`` flow: tools are
-scheduled and run concurrently as the model emits them.  The approval
-hook is awaited inside a ``ToolCall``-shaped wrapper that is scheduled
-in place of the bare tool call, so gating composes naturally with the
-runner's merge-and-iterate behaviour.
+The custom loop uses the concurrent ``ToolRunner`` flow.  The approval
+hook is awaited inline inside the merge loop: on grant, the original
+``ToolCall`` is scheduled normally; on denial, a synthetic
+``ToolCallResult`` is fed straight into the runner via
+``ToolRunner.add_result``.
+
+This version uses a fully inline approach, with no external wrapper
+class.
+
 """
 
 import asyncio
@@ -31,34 +35,6 @@ async def contact_mothership(query: str) -> str:
     return "Soon."
 
 
-class GatedCall:
-    """ToolCall-shaped wrapper that awaits an approval hook before executing.
-
-    ``ToolRunner.schedule`` only consumes the ``__call__`` shape of
-    ``ToolCall``; this wrapper supplies the same shape while inserting
-    the hook await + denial path before the underlying tool runs.
-    """
-
-    def __init__(self, tc: ai.ToolCall) -> None:
-        self._tc = tc
-
-    async def __call__(self) -> ai.events.ToolCallResult:
-        tc = self._tc
-        approval = await ai.hook(
-            f"approve_{tc.id}",
-            payload=Approval,
-            metadata={"tool": tc.name, "kwargs": tc.kwargs},
-        )
-        if approval.granted:
-            return await tc()
-        return ai.tool_result(
-            tool_call_id=tc.id,
-            tool_name=tc.name,
-            result=f"Rejected: {approval.reason}",
-            is_error=True,
-        )
-
-
 async def main() -> None:
     model = ai.ai_gateway("anthropic/claude-sonnet-4")
 
@@ -75,12 +51,28 @@ async def main() -> None:
             ):
                 async for event in ai.util.merge(s, tr.events()):
                     yield event
-                    if isinstance(event, ai.events.ToolEnd):
-                        tc = context.resolve(event.tool_call)
-                        if tc.name == "contact_mothership":
-                            tr.schedule(GatedCall(tc))
-                        else:
-                            tr.schedule(tc)
+                    if not isinstance(event, ai.events.ToolEnd):
+                        continue
+
+                    tc = context.resolve(event.tool_call)
+                    if tc.name == "contact_mothership":
+                        approval = await ai.hook(
+                            f"approve_{tc.id}",
+                            payload=Approval,
+                            metadata={"tool": tc.name, "kwargs": tc.kwargs},
+                        )
+                        if not approval.granted:
+                            tr.add_result(
+                                ai.tool_result(
+                                    tool_call_id=tc.id,
+                                    tool_name=tc.name,
+                                    result=f"Rejected: {approval.reason}",
+                                    is_error=True,
+                                )
+                            )
+                            continue
+
+                    tr.schedule(tc)
 
                 context.add(s.message)
                 context.add(tr.get_tool_message())

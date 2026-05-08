@@ -70,6 +70,35 @@ MODEL = ai.ai_gateway("anthropic/claude-sonnet-4")
 # ---------------------------------------------------------------------------
 
 
+class GatedCall:
+    """ToolCall-shaped wrapper that awaits a per-branch approval hook.
+
+    ``ToolRunner.schedule`` accepts any zero-arg callable returning a
+    ``ToolCallResult``; this wrapper inserts the hook await + denial
+    path before the underlying tool runs.
+    """
+
+    def __init__(self, tc: ai.ToolCall, label: str) -> None:
+        self._tc = tc
+        self._label = label
+
+    async def __call__(self) -> ai.events.ToolCallResult:
+        tc = self._tc
+        approval = await ai.hook(
+            f"{self._label}_{tc.id}",
+            payload=Approval,
+            metadata={"branch": self._label, "tool": tc.name},
+        )
+        if approval.granted:
+            return await tc()
+        return ai.tool_result(
+            tool_call_id=tc.id,
+            tool_name=tc.name,
+            result=f"Denied: {approval.reason}",
+            is_error=True,
+        )
+
+
 def _gated_agent(
     tools: list[ai.AgentTool],
     approval_tool: str,
@@ -79,40 +108,22 @@ def _gated_agent(
 
     @gated.loop
     async def gated_loop(context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
-        while True:
-            s = ai.stream(context.model, context.messages, tools=context.tools)
-            async for event in s:
-                yield event
-            context.add(s.message)
+        while context.keep_running():
+            async with (
+                ai.stream(context.model, context.messages, tools=context.tools) as s,
+                ai.agents.ToolRunner(s) as tr,
+            ):
+                async for event in ai.util.merge(s, tr.events()):
+                    yield event
+                    if isinstance(event, ai.events.ToolEnd):
+                        tc = context.resolve(event.tool_call)
+                        if tc.name == approval_tool:
+                            tr.schedule(GatedCall(tc, label))
+                        else:
+                            tr.schedule(tc)
 
-            tool_calls = context.resolve(s.tool_calls)
-            if not tool_calls:
-                break
-
-            results: list[ai.events.ToolCallResult] = []
-            for tc in tool_calls:
-                if tc.name == approval_tool:
-                    approval = await ai.hook(
-                        f"{label}_{tc.id}",
-                        payload=Approval,
-                        metadata={"branch": label, "tool": tc.name},
-                    )
-                    if approval.granted:
-                        results.append(await tc())
-                    else:
-                        results.append(
-                            ai.tool_result(
-                                tool_call_id=tc.id,
-                                tool_name=tc.name,
-                                result=f"Denied: {approval.reason}",
-                                is_error=True,
-                            )
-                        )
-                else:
-                    results.append(await tc())
-                yield results[-1]
-
-            context.add(ai.tool_message(*results))
+                context.add(s.message)
+                context.add(tr.get_tool_message())
 
     return gated
 
