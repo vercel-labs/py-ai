@@ -458,7 +458,7 @@ class ToolRunner:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
-        await self._tg_base.__aexit__(*args)
+        return await self._tg_base.__aexit__(*args)
 
     def events(self) -> AsyncGenerator[events_.ToolCallResult]:
         return self._iterate()
@@ -530,9 +530,13 @@ class Context(pydantic.BaseModel):
 
     def keep_running(self) -> bool:
         """Call at top of an agent loop to see whether to keep running."""
-        return bool(
-            self.messages and self.messages[-1].role not in ("assistant", "internal")
-        )
+        if not self.messages:
+            return False
+
+        last_message = self.messages[-1]
+        if last_message.role == "assistant":
+            return bool(last_message.tool_calls)
+        return last_message.role != "internal"
 
     @overload
     def resolve(self, tool_part: types.messages.ToolCallPart) -> ToolCall: ...
@@ -558,12 +562,23 @@ class Context(pydantic.BaseModel):
     def add(
         self, message: types.messages.Message | Sequence[types.messages.Message] | None
     ) -> None:
+        """Append message(s) to the context, skipping any flagged ``replay``.
+
+        Replay-flagged messages come from ``models.stream`` short-
+        circuiting an existing assistant turn (resume-after-approval).
+        The default loop calls ``context.add(stream.message)`` after
+        every stream — the flag lets that be a no-op on replay rather
+        than producing a duplicate turn.
+        """
         if message is None:
             return
-        if isinstance(message, types.messages.Message):
-            self.messages.append(message)
-        else:
-            self.messages.extend(message)
+        msgs = (
+            [message] if isinstance(message, types.messages.Message) else list(message)
+        )
+        for msg in msgs:
+            if msg.replay:
+                continue
+            self.messages.append(msg)
 
 
 class LoopFn(Protocol):
@@ -751,6 +766,12 @@ class Agent:
             context._agent_tools_by_name = {tool.name: tool for tool in call.tools}
             source = loop_fn(context)
             async for event in runtime.run(source):
+                # Drop replay-flagged events: they're a control-flow
+                # signal for the loop's tool dispatcher (which already
+                # ran by the time we see the event here), not user-
+                # facing output.
+                if isinstance(event, events_.BaseEvent) and event.replay:
+                    continue
                 yield event
 
         # Activate middleware for this run (and everything it calls).

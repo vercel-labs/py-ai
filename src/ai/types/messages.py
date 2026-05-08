@@ -229,6 +229,14 @@ class Message(pydantic.BaseModel):
     turn_id: str | None = None
     usage: usage_.Usage | None = None
 
+    # Set on the seeded message that ``models.stream`` returns when
+    # short-circuiting an existing assistant turn (resume-after-approval
+    # flows).  ``Context.add`` skips replay-flagged messages so the loop
+    # can call ``context.add(stream.message)`` unconditionally without
+    # producing a duplicate turn.  Excluded from JSON: control flag,
+    # not data.
+    replay: bool = pydantic.Field(default=False, exclude=True, repr=False)
+
     @property
     def text(self) -> str:
         """Concatenated text parts."""

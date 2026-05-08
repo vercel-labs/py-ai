@@ -198,47 +198,34 @@ def _normalize_ui_messages(
 
 def to_messages(
     ui_messages: list[ui_message.UIMessage],
-    *,
-    apply_approvals_: bool = True,
-) -> list[messages_.Message]:
-    """Parse a UI request into runtime messages.
+) -> tuple[list[messages_.Message], list[ApprovalResponse]]:
+    """Parse a UI request into runtime messages + extracted approvals.
 
-    Pipeline:
+    Pure: normalizes stale tool states, extracts approval responses,
+    parses UIMessages into an ``ai.messages.Message`` list (split at
+    tool boundaries), and drops the internal tombstones for approval
+    responses.
 
-    1. normalize stale tool states (``call`` → ``input-available``, etc.)
-    2. extract approval responses
-    3. parse UIMessages into ``ai.messages.Message`` list, splitting at tool boundaries
-    4. if *apply_approvals_* is True, pre-register resolutions via ``resolve_hook``
-    5. strip trailing assistant message when approval responses are present
+    Returns ``(messages, approvals)``.  The caller is responsible for
+    pre-registering resolutions via :func:`apply_approvals` before
+    calling :meth:`Agent.run` if the run should resume from a hook.
     """
     normalized = _normalize_ui_messages(ui_messages)
     approvals = extract_approvals(normalized)
-    messages = _parse(normalized)
+    messages = [m for m in _parse(normalized) if not _is_approval_response(m)]
+    return messages, approvals
 
-    if apply_approvals_:
-        apply_approvals(approvals)
 
-    # TODO: Stripping the trailing assistant message broke the approval
-    # replay flow — the loop needs that message (with the original
-    # tool_call_ids) to match the pre-registered hook resolutions.
-    # Without it, the loop re-calls the LLM, gets new tool_call_ids,
-    # and the resolutions never match. Loops should instead check
-    # `context.keep_running()` and skip the model call when the last
-    # message is already an assistant turn.
-    #
-    # if approvals and messages:
-    #     # The assistant message that originated the approval-responded tool
-    #     # call would re-send the duplicate tool-use to the LLM on replay.
-    #     # Walk past any trailing internal (hook) messages and drop the
-    #     # assistant message beneath them.
-    #     idx = len(messages) - 1
-    #     while idx >= 0 and messages[idx].role == "internal":
-    #         idx -= 1
-    #     if idx >= 0 and messages[idx].role == "assistant":
-    #         logger.info("Stripping assistant message originating responded approvals")
-    #         messages = messages[:idx] + messages[idx + 1 :]
-
-    return messages
+def _is_approval_response(msg: messages_.Message) -> bool:
+    """Internal message that records a resolved tool-approval hook."""
+    if msg.role != "internal" or len(msg.parts) != 1:
+        return False
+    part = msg.parts[0]
+    return (
+        isinstance(part, messages_.HookPart)
+        and part.hook_type == "ToolApproval"
+        and part.status == "resolved"
+    )
 
 
 def _parse(
