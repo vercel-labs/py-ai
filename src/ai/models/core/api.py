@@ -291,6 +291,8 @@ class Stream:
                     if pm is not None:
                         existing_btc.provider_metadata = pm
             case types.events.BuiltinToolResult(result=res, provider_metadata=pm):
+                if pm is not None:
+                    res = res.model_copy(update={"provider_metadata": pm})
                 self._message.parts.append(res)
             case types.events.FileEvent(
                 block_id=bid,
