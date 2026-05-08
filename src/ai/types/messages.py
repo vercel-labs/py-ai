@@ -60,7 +60,6 @@ class BuiltinToolCallPart(pydantic.BaseModel):
     tool_call_id: str
     tool_name: str
     tool_args: str = ""
-    provider_name: str | None = None  # TODO replace with provider_metadata
     provider_metadata: pydantic.SerializeAsAny[metadata.ProviderMetadata] | None = None
 
     kind: Literal["builtin_tool_call"] = "builtin_tool_call"
@@ -74,10 +73,6 @@ class BuiltinToolReturnPart(pydantic.BaseModel):
     tool_name: str
     result: Any = None
     is_error: bool = False
-    provider_name: str | None = None
-    provider_details: dict[str, Any] | None = (
-        None  # TODO replace with provider_metadata
-    )
     provider_metadata: pydantic.SerializeAsAny[metadata.ProviderMetadata] | None = None
 
     kind: Literal["builtin_tool_return"] = "builtin_tool_return"
@@ -87,9 +82,6 @@ class BuiltinToolReturnPart(pydantic.BaseModel):
 class ReasoningPart(pydantic.BaseModel):
     id: str = pydantic.Field(default_factory=generate_id)
     text: str
-    # Anthropic's thinking blocks include a signature for cache/verification.
-    # This must be preserved and sent back in multi-turn conversations.
-    signature: str | None = None  # TODO replace with provider_metadata
     provider_metadata: pydantic.SerializeAsAny[metadata.ProviderMetadata] | None = None
 
     kind: Literal["reasoning"] = "reasoning"

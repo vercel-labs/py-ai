@@ -224,15 +224,13 @@ class Stream:
                     existing_reasoning.text += c
                     if pm is not None:
                         existing_reasoning.provider_metadata = pm
-            case types.events.ReasoningEnd(
-                block_id=bid, signature=sig, provider_metadata=pm
-            ):
+            case types.events.ReasoningEnd(block_id=bid, provider_metadata=pm):
                 existing_reasoning = self._parts.get(bid)
-                if isinstance(existing_reasoning, types.messages.ReasoningPart):
-                    if sig is not None:
-                        existing_reasoning.signature = sig
-                    if pm is not None:
-                        existing_reasoning.provider_metadata = pm
+                if (
+                    isinstance(existing_reasoning, types.messages.ReasoningPart)
+                    and pm is not None
+                ):
+                    existing_reasoning.provider_metadata = pm
             case types.events.ToolStart(
                 tool_call_id=tcid, tool_name=name, provider_metadata=pm
             ):
@@ -263,7 +261,6 @@ class Stream:
             case types.events.BuiltinToolStart(
                 tool_call_id=tcid,
                 tool_name=name,
-                provider_name=pname,
                 provider_metadata=pm,
             ):
                 btcp = types.messages.BuiltinToolCallPart(
@@ -271,7 +268,6 @@ class Stream:
                     tool_call_id=tcid,
                     tool_name=name,
                     tool_args="",
-                    provider_name=pname,
                     provider_metadata=pm,
                 )
                 self._message.parts.append(btcp)

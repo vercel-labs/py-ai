@@ -507,13 +507,11 @@ class TestRequest:
             tool_call_id="srvtoolu_1",
             tool_name="web_search",
             tool_args='{"q":"weather"}',
-            provider_name="anthropic",
         )
         ret = messages.BuiltinToolReturnPart(
             tool_call_id="srvtoolu_1",
             tool_name="web_search",
             result=[{"title": "Forecast"}],
-            provider_name="anthropic",
         )
         convo = [
             user_msg("weather?"),

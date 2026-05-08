@@ -82,7 +82,6 @@ class ReasoningDelta(BaseEvent):
 
 class ReasoningEnd(BaseEvent):
     block_id: str = ""
-    signature: str | None = None
 
     kind: Literal["reasoning_end"] = "reasoning_end"
 
@@ -111,7 +110,6 @@ class ToolEnd(BaseEvent):
 class BuiltinToolStart(BaseEvent):
     tool_call_id: str = ""
     tool_name: str = ""
-    provider_name: str | None = None
 
     kind: Literal["builtin_tool_start"] = "builtin_tool_start"
 

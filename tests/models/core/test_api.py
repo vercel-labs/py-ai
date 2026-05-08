@@ -10,8 +10,8 @@ import ai
 from ai import models
 from ai.models.openai import openai
 from ai.types import events as events_
-from ai.types import metadata as metadata_
 from ai.types import messages as messages_
+from ai.types import metadata as metadata_
 
 from ...conftest import MOCK_MODEL, MOCK_PROVIDER, MockProvider, mock_llm, text_msg
 
@@ -108,7 +108,6 @@ async def test_stream_accumulates_provider_metadata_latest_wins() -> None:
         )
         yield events_.ReasoningEnd(
             block_id="reasoning",
-            signature="sig-1",
             provider_metadata=_TestProviderMetadata(marker="reasoning-end"),
         )
         yield events_.ToolStart(
@@ -151,7 +150,6 @@ async def test_stream_accumulates_provider_metadata_latest_wins() -> None:
     reasoning = stream.message.parts[1]
     assert isinstance(reasoning, messages_.ReasoningPart)
     assert reasoning.text == "thinking"
-    assert reasoning.signature == "sig-1"
     assert _provider_metadata_marker(reasoning.provider_metadata) == "reasoning-end"
 
     tool_call = stream.message.parts[2]

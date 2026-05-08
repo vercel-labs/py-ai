@@ -122,7 +122,10 @@ async def emit_events_for_messages(
                 yield events_.ReasoningStart(block_id=bid)
                 if part.text:
                     yield events_.ReasoningDelta(block_id=bid, chunk=part.text)
-                yield events_.ReasoningEnd(block_id=bid, signature=part.signature)
+                yield events_.ReasoningEnd(
+                    block_id=bid,
+                    provider_metadata=part.provider_metadata,
+                )
 
             elif isinstance(part, messages_.ToolCallPart):
                 yield events_.ToolStart(
