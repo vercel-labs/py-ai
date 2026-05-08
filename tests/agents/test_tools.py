@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pydantic
@@ -120,6 +121,43 @@ async def test_tool_call_catches_errors() -> None:
 
     assert result.results[0].is_error
     assert "boom" in str(result.results[0].result)
+    # The real exception is preserved on the event for richer logging.
+    assert isinstance(result.exception, ValueError)
+    assert str(result.exception) == "boom"
+
+
+async def test_tool_call_unwraps_singleton_exceptiongroup() -> None:
+    """When a tool's body raises an ExceptionGroup wrapping a single
+    exception (typical when it runs an asyncio TaskGroup internally),
+    the auto-catch surfaces the underlying error — not the group."""
+
+    class BoomError(RuntimeError):
+        pass
+
+    @ai.tool
+    async def fail_via_group(x: int) -> int:
+        """Fails inside a TaskGroup."""
+
+        async def _inner() -> None:
+            raise BoomError("kaboom")
+
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(_inner())
+        return x  # unreachable
+
+    part = ai.messages.ToolCallPart(
+        tool_call_id="tc-grp",
+        tool_name="fail_via_group",
+        tool_args='{"x": 1}',
+    )
+    tc = ai.ToolCall(part=part, tool=fail_via_group)
+    result = await tc()
+
+    assert result.results[0].is_error
+    # Result text reflects the unwrapped exception type, not BaseExceptionGroup.
+    assert "BoomError" in str(result.results[0].result)
+    assert "kaboom" in str(result.results[0].result)
+    assert isinstance(result.exception, BoomError)
 
 
 async def test_tool_call_allows_kwarg_overrides() -> None:

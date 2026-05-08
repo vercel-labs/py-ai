@@ -20,6 +20,21 @@ from . import middleware as middleware_
 from . import runtime
 
 
+def _unwrap_singleton_group(exc: BaseException) -> BaseException:
+    """Collapse nested singleton ``BaseExceptionGroup``s to the inner exception.
+
+    A failing task inside an ``asyncio.TaskGroup`` is always re-raised
+    inside an ``ExceptionGroup`` even when there's only one — which
+    obscures the real type and message.  When the group has exactly
+    one child we unwrap so the original exception, traceback, and
+    ``__cause__`` survive.  Multi-error groups stay intact (they
+    really do represent concurrent failures).
+    """
+    while isinstance(exc, BaseExceptionGroup) and len(exc.exceptions) == 1:
+        exc = exc.exceptions[0]
+    return exc
+
+
 class SimpleAggregator[Item, Result](events_.Aggregator[Item, Result, Result]):
     def to_model_output(self) -> Result:
         return self.snapshot()
@@ -380,13 +395,19 @@ class ToolCall:
                 else:
                     result = await tool.fn(**kwargs)
             except Exception as exc:
+                # A nested runtime (e.g. a sub-agent run inside this
+                # tool) raises errors wrapped in a singleton TaskGroup
+                # ExceptionGroup — collapse it so the surfaced type and
+                # message reflect the actual failure.
+                unwrapped = _unwrap_singleton_group(exc)
                 return tool_result(
                     types.messages.ToolResultPart(
                         tool_call_id=call.tool_call_id,
                         tool_name=call.tool_name,
-                        result=str(exc),
+                        result=f"{type(unwrapped).__name__}: {unwrapped}",
                         is_error=True,
-                    )
+                    ),
+                    exception=unwrapped,
                 )
             return tool_result(
                 types.messages.ToolResultPart(
@@ -525,6 +546,7 @@ def tool_result(
     result: Any = None,
     tool_name: str = "",
     is_error: bool = False,
+    exception: BaseException | None = None,
 ) -> events_.ToolCallResult:
     """Create a :class:`ToolCallResult` from tool messages, parts, or kwargs.
 
@@ -534,6 +556,10 @@ def tool_result(
 
         yield ai.tool_result(*(t.result() for t in tasks))
         ai.tool_result(tool_call_id="tc-1", result="denied", is_error=True)
+
+    Pass ``exception=`` to attach the raised :class:`BaseException` to
+    the returned event for richer logging downstream — the wire-bound
+    ``ToolResultPart`` only carries ``str(exc)``.
     """
     if tool_call_id is not None:
         msg = builders.tool_message(
@@ -542,7 +568,9 @@ def tool_result(
             tool_name=tool_name,
             is_error=is_error,
         )
-        return events_.ToolCallResult(message=msg, results=msg.tool_results)
+        return events_.ToolCallResult(
+            message=msg, results=msg.tool_results, exception=exception
+        )
 
     unwrapped: list[types.messages.Message | types.messages.ToolResultPart] = []
     for item in items:
@@ -553,7 +581,9 @@ def tool_result(
         else:
             unwrapped.append(item)
     msg = builders.tool_message(*unwrapped)
-    return events_.ToolCallResult(message=msg, results=msg.tool_results)
+    return events_.ToolCallResult(
+        message=msg, results=msg.tool_results, exception=exception
+    )
 
 
 async def yield_from[T, R](
