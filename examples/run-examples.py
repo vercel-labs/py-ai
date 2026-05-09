@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Run example samples and report results.
+"""Run examples and report results.
 
 Usage (from repo root):
-    uv run examples/run-samples.py           # text-only samples
-    uv run examples/run-samples.py --image   # also run image samples
-    uv run examples/run-samples.py --video   # also run video samples
-    uv run examples/run-samples.py --e2e     # also run e2e test scripts
-    uv run examples/run-samples.py --all       # run everything
-    uv run examples/run-samples.py --parallel  # run in parallel
+    uv run examples/run-examples.py             # text-only samples
+    uv run examples/run-examples.py --image     # also run image samples
+    uv run examples/run-examples.py --video     # also run video samples
+    uv run examples/run-examples.py --e2e       # also run e2e test scripts
+    uv run examples/run-examples.py --all       # run everything
+    uv run examples/run-examples.py --parallel  # run in parallel
 """
 
 import argparse
