@@ -115,12 +115,35 @@ async def decouple[T](
             await task
 
 
-async def merge[T](*aiterables: AsyncIterable[T]) -> AsyncIterator[T]:
+async def merge[T](
+    *aiterables: AsyncIterable[T], restart: bool = True
+) -> AsyncIterator[T]:
+    """Produce a stream that yields elements from async iterables as they arrive.
+
+    Additionally, if `restart` is True (the default), attempt to *restart*
+    finished iterables when other iterables produce elements.
+
+    This allows supporting interacting streams, where the processing
+    loop might trigger work in one stream based on results from
+    another.
+
+    Restarts are only attempted for iterables that are not their own
+    iterators (importantly, this means that async generators are not
+    restarted).
+    """
+
     # We use unwrap_generator_exit() to keep a GeneratorExit that gets
     # packaged in an ExceptionGroup from causing grief. But maybe we
     # ought to not use a TaskGroup?
     async with unwrap_generator_exit(), asyncio.TaskGroup() as tg:
-        aiters = [decouple(iter, task_group=tg) for iter in aiterables]
+        raw_aiters = [aiter(iter) for iter in aiterables]
+        aiters = [decouple(iter, task_group=tg) for iter in raw_aiters]
+        # We consider anything that doesn't __aiter__ to itself to be
+        # potentially restartable.
+        restartable = [
+            aiterable is not aiterator
+            for aiterable, aiterator in zip(aiterables, raw_aiters, strict=True)
+        ]
 
         # Launch a task doing anext on every iterator
         tasks: list[asyncio.Future[T] | None] = [
@@ -133,6 +156,7 @@ async def merge[T](*aiterables: AsyncIterable[T]) -> AsyncIterator[T]:
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
+            fired = []
             for t in done:
                 idx = tasks.index(t)
                 val = t.result()
@@ -140,6 +164,17 @@ async def merge[T](*aiterables: AsyncIterable[T]) -> AsyncIterator[T]:
                     tasks[idx] = None
                 else:
                     # Fire off a new task for the relevant iterator
+                    fired.append(idx)
                     iter = aiters[idx]
                     tasks[idx] = tg.create_task(anext(iter, _EMPTY))
                     yield val
+
+            if restart and fired:
+                # Also, we try *restarting* other stopped streams
+                # that may have more to do now.
+                # N.B: We do this *after* the yield...
+                for idx, (ok, otask) in enumerate(zip(restartable, tasks, strict=True)):
+                    if ok and otask is None and idx not in fired:
+                        niter = decouple(aiterables[idx], task_group=tg)
+                        aiters[idx] = niter
+                        tasks[idx] = tg.create_task(anext(niter, _EMPTY))
