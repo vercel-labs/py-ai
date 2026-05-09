@@ -534,9 +534,7 @@ class Context(pydantic.BaseModel):
             return False
 
         last_message = self.messages[-1]
-        if last_message.role == "assistant":
-            return bool(last_message.tool_calls)
-        return last_message.role != "internal"
+        return last_message.replay or last_message.role not in ("assistant", "internal")
 
     @overload
     def resolve(self, tool_part: types.messages.ToolCallPart) -> ToolCall: ...
@@ -764,6 +762,19 @@ class Agent:
                 tools=[tool.tool for tool in call.tools],
             )
             context._agent_tools_by_name = {tool.name: tool for tool in call.tools}
+            # If the final message is an assistant call with tool
+            # calls, then probably the situation is that we bailed out
+            # earlier due to unresolved hooks, and we need to arrange
+            # to replay the message now.
+            if (
+                context.messages
+                and context.messages[-1].role == "assistant"
+                and context.messages[-1].tool_calls
+            ):
+                context.messages[-1] = context.messages[-1].model_copy(
+                    update={"replay": True}
+                )
+
             source = loop_fn(context)
             async for event in runtime.run(source):
                 # Drop replay-flagged events: they're a control-flow

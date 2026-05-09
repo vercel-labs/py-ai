@@ -206,9 +206,9 @@ def to_messages(
     tool boundaries), and drops the internal tombstones for approval
     responses.
 
-    Returns ``(messages, approvals)``.  The caller is responsible for
-    pre-registering resolutions via :func:`apply_approvals` before
-    calling :meth:`Agent.run` if the run should resume from a hook.
+    Returns ``(messages, approvals)``.  The caller can pre-register
+    resolutions via :func:`apply_approvals` before calling
+    :meth:`Agent.run` if the run should resume from a hook.
     """
     normalized = _normalize_ui_messages(ui_messages)
     approvals = extract_approvals(normalized)

@@ -121,18 +121,19 @@ class Stream:
         self,
         gen: AsyncGenerator[types.events.Event],
         *,
-        message: types.messages.Message | None = None,
+        seed_message: types.messages.Message | None = None,
     ) -> None:
         """Wrap an event generator.
 
-        ``message`` seeds the in-progress assistant message — pass a
-        copy of an existing turn when replaying so ``stream.message``
-        ends up identical to that turn instead of being rebuilt from
-        synthetic events.  When ``None`` (default), an empty assistant
-        message is created and rebuilt from the incoming events.
+        ``seed_message`` seeds the in-progress assistant message. Pass
+        a copy of an existing turn when replaying so
+        ``stream.message`` ends up identical to that turn instead of
+        being rebuilt from synthetic events.  When ``None`` (default),
+        an empty assistant message is created and rebuilt from the
+        incoming events.
         """
         self._gen = gen
-        self._message: types.messages.Message = message or types.messages.Message(
+        self._message: types.messages.Message = seed_message or types.messages.Message(
             role="assistant", parts=[]
         )
         self._parts: dict[str, types.messages.Part] = {}
@@ -288,14 +289,12 @@ async def _replay_tool_calls(
     """Replay an assistant turn's tool calls as ``replay``-flagged ``ToolEnd``.
 
     Used by :func:`stream` to short-circuit when the last message is
-    already an assistant turn — letting resume flows (e.g. post-hook
+    already marked for replay — letting resume flows (e.g. post-hook
     re-entry) re-dispatch the existing tool calls without hitting the
     LLM and without re-streaming the original text/reasoning to the
     consumer.  The wrapping :class:`Stream`'s ``message`` is seeded
     with the original turn so callers see the same parts they would
-    have without replay.  ``Agent.run`` drops these flagged events
-    from the consumer-facing stream while still using them to schedule
-    tool execution.
+    have without replay.
     """
     for part in msg.tool_calls:
         yield types.events.ToolEnd(
@@ -316,17 +315,12 @@ def stream[ProviderParamsT: pydantic.BaseModel](
 ) -> Stream:
     """Stream an LLM response.
 
-    If the last message is an assistant turn with tool calls, replay
-    that turn as synthetic stream events instead of calling the model
-    — useful for resume-after-approval flows where the assistant turn
-    is already in history and re-asking would give a different answer.
+    If the last message is marked ``replay=True``, replay that turn as
+    synthetic stream events instead of calling the model.
     """
-    # Check replay before integrity normalization so the orphaned
-    # assistant tool call doesn't get a synthetic tool result appended.
-    if messages and messages[-1].role == "assistant" and messages[-1].tool_calls:
+    if messages and messages[-1].replay:
         last = messages[-1]
-        seeded = last.model_copy(deep=True, update={"replay": True})
-        return Stream(_replay_tool_calls(last), message=seeded)
+        return Stream(_replay_tool_calls(last), seed_message=last.model_copy(deep=True))
 
     messages = integrity.prepare_messages(messages)
     stream_params = _normalize_stream_params(model, params)

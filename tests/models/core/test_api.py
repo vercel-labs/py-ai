@@ -207,8 +207,8 @@ async def test_check_connection_delegates_to_model_provider() -> None:
     assert provider.received_client is explicit
 
 
-async def test_stream_replays_last_assistant_with_tool_calls() -> None:
-    """If the last message is an assistant turn with tool calls, no LLM call."""
+async def test_stream_replays_marked_last_assistant_with_tool_calls() -> None:
+    """If the last message is marked replay, no LLM call."""
     called = False
 
     async def _spy_stream(
@@ -241,7 +241,7 @@ async def test_stream_replays_last_assistant_with_tool_calls() -> None:
 
     stream = models.stream(
         MOCK_MODEL,
-        [ai.user_message("Hi"), assistant_msg],
+        [ai.user_message("Hi"), assistant_msg.model_copy(update={"replay": True})],
     )
     events: list[events_.Event] = [event async for event in stream]
 
@@ -275,7 +275,7 @@ def test_tool_end_replay_flag_excluded_from_json() -> None:
     assert "replay" not in dumped_json
 
 
-async def test_stream_does_not_replay_when_assistant_has_no_tool_calls() -> None:
+async def test_stream_does_not_replay_when_assistant_is_unmarked() -> None:
     """Bare assistant text doesn't trigger replay — fall through to LLM."""
     called = False
 
