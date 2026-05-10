@@ -66,9 +66,11 @@ BROKEN_SAMPLES = [
 ]
 
 # E2E tests pick non-default ports so they don't collide with a running
-# dev server on 8000/5173.
-_E2E_BACKEND_PORT = "18000"
-_E2E_FRONTEND_PORT = "15173"
+# dev server on 8000/5173. Each test gets its own ports so that --parallel
+# doesn't make them collide with each other either.
+_MULTIAGENT_SERVER_PORT = "18000"
+_FASTAPI_BACKEND_PORT = "18001"
+_FASTAPI_FRONTEND_PORT = "15173"
 
 E2E_TESTS = [
     Sample(
@@ -82,7 +84,7 @@ E2E_TESTS = [
             "python",
             str(REPO / "examples" / "multiagent-textual" / "test-e2e.py"),
         ],
-        extra_env={"SERVER_PORT": _E2E_BACKEND_PORT},
+        extra_env={"SERVER_PORT": _MULTIAGENT_SERVER_PORT},
         timeout=300.0,
     ),
     Sample(
@@ -92,9 +94,24 @@ E2E_TESTS = [
             str(REPO / "examples" / "fastapi-vite" / "e2e-test" / "run.sh"),
         ],
         extra_env={
-            "BACKEND_PORT": _E2E_BACKEND_PORT,
-            "FRONTEND_PORT": _E2E_FRONTEND_PORT,
+            "BACKEND_PORT": _FASTAPI_BACKEND_PORT,
+            "FRONTEND_PORT": _FASTAPI_FRONTEND_PORT,
         },
+        timeout=300.0,
+    ),
+    Sample(
+        "temporal-direct/test_durability.py",
+        cmd=[
+            "uv",
+            "run",
+            "--frozen",
+            "--directory",
+            str(REPO / "examples" / "temporal-direct"),
+            "--with-editable",
+            str(REPO),
+            "python",
+            "test_durability.py",
+        ],
         timeout=300.0,
     ),
 ]
