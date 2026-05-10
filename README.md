@@ -107,7 +107,11 @@ Override the default loop when you need approval gates, routing, or custom orche
 @agent.loop
 async def custom(context: ai.Context):
     while True:
-        async with ai.stream(context.model, context.messages, tools=context.tools) as s:
+        async with ai.stream(
+            model=context.model,
+            messages=context.messages,
+            tools=context.tools,
+        ) as s:
             async for event in s:
                 yield event
             context.add(s.message)

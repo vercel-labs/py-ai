@@ -9,7 +9,8 @@ Usage::
 
     # built-in tools
     async with ai.stream(
-        model, msgs,
+        model=model,
+        messages=msgs,
         tools=[anthropic.tools.web_search(max_uses=5)],
     ) as s:
         ...

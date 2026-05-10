@@ -107,7 +107,7 @@ async def llm_call_activity(params: LLMParams) -> LLMResult:
         for t in params.tool_schemas
     ]
 
-    async with ai.models.stream(model, messages, tools=tools) as s:
+    async with ai.models.stream(model=model, messages=messages, tools=tools) as s:
         async for _event in s:
             pass
         if s.message is None:

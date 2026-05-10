@@ -19,7 +19,7 @@ messages = [ai.user_message("Hello!")]
 
 async def main() -> None:
     try:
-        async with ai.stream(model, messages) as s:
+        async with ai.stream(model=model, messages=messages) as s:
             async for event in s:
                 if isinstance(event, ai.events.TextDelta):
                     print(event.chunk, end="", flush=True)

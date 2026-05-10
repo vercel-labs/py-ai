@@ -35,7 +35,9 @@ async def test_stream_aggregates_registered_adapter_events() -> None:
     mock = mock_llm([[text_msg("Hello world")]])
 
     deltas: list[str] = []
-    async with models.stream(MOCK_MODEL, [ai.user_message("Hi")]) as stream:
+    async with models.stream(
+        model=MOCK_MODEL, messages=[ai.user_message("Hi")]
+    ) as stream:
         async for event in stream:
             if isinstance(event, events_.TextDelta):
                 deltas.append(event.chunk)
@@ -68,7 +70,9 @@ async def test_stream_tool_end_includes_aggregated_tool_call() -> None:
     models.register_stream("mock", _tool_stream)
 
     tool_end: events_.ToolEnd | None = None
-    async with models.stream(MOCK_MODEL, [ai.user_message("Check weather")]) as stream:
+    async with models.stream(
+        model=MOCK_MODEL, messages=[ai.user_message("Check weather")]
+    ) as stream:
         async for event in stream:
             if isinstance(event, events_.ToolEnd):
                 tool_end = event
@@ -188,7 +192,7 @@ async def test_stream_uses_explicit_model_client() -> None:
         provider=MOCK_PROVIDER,
         client=explicit,
     )
-    async with models.stream(model, [ai.user_message("Hi")]) as stream:
+    async with models.stream(model=model, messages=[ai.user_message("Hi")]) as stream:
         async for _ in stream:
             pass
 
@@ -220,8 +224,8 @@ async def test_stream_forwards_output_type_and_request_params() -> None:
 
     params = _MockStreamParams(value="ok")
     async with models.stream(
-        MOCK_MODEL,
-        [ai.user_message("Hi")],
+        model=MOCK_MODEL,
+        messages=[ai.user_message("Hi")],
         output_type=Answer,
         params=params,
     ) as stream:
@@ -236,8 +240,8 @@ async def test_normalize_params_rejects_non_pydantic_value() -> None:
     """``stream(...)`` rejects raw dicts (and anything not a BaseModel)."""
     with pytest.raises(TypeError, match="pydantic BaseModel"):
         async with models.stream(
-            openai("gpt-5.4"),
-            [ai.user_message("Hi")],
+            model=openai("gpt-5.4"),
+            messages=[ai.user_message("Hi")],
             params=cast(Any, {"reasoning_effort": "high"}),
         ):
             pass
@@ -336,8 +340,11 @@ async def test_stream_replays_marked_last_assistant_with_tool_calls() -> None:
     )
 
     async with models.stream(
-        MOCK_MODEL,
-        [ai.user_message("Hi"), assistant_msg.model_copy(update={"replay": True})],
+        model=MOCK_MODEL,
+        messages=[
+            ai.user_message("Hi"),
+            assistant_msg.model_copy(update={"replay": True}),
+        ],
     ) as stream:
         events: list[events_.Event] = [event async for event in stream]
 
@@ -396,7 +403,9 @@ async def test_stream_does_not_replay_when_assistant_is_unmarked() -> None:
         parts=[messages_.TextPart(text="just talking")],
     )
 
-    async with models.stream(MOCK_MODEL, [assistant_text_only]) as stream:
+    async with models.stream(
+        model=MOCK_MODEL, messages=[assistant_text_only]
+    ) as stream:
         async for _ in stream:
             pass
 

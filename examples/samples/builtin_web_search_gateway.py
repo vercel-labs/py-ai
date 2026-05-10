@@ -40,8 +40,8 @@ def format(value: object) -> str:
 async def main() -> None:
     print("anthropic web search")
     async with ai.stream(
-        model,
-        messages,
+        model=model,
+        messages=messages,
         tools=[ai.anthropic.tools.web_search(max_uses=3)],
     ) as s:
         async for event in s:
@@ -59,8 +59,8 @@ async def main() -> None:
 
     print("perplexity web search")
     async with ai.stream(
-        model,
-        messages,
+        model=model,
+        messages=messages,
         tools=[ai.ai_gateway.tools.perplexity_search(max_results=5)],
     ) as s:
         async for event in s:

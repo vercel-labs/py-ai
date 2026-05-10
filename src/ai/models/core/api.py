@@ -331,9 +331,9 @@ async def _replay_tool_calls(
 
 @contextlib.asynccontextmanager
 async def stream[ProviderParamsT: pydantic.BaseModel](
+    *,
     model: model_.Model[ProviderParamsT],
     messages: list[types.messages.Message],
-    *,
     tools: Sequence[types.tools.Tool] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
     params: params_.StreamParams[ProviderParamsT] | None = None,
@@ -343,7 +343,7 @@ async def stream[ProviderParamsT: pydantic.BaseModel](
 
     Used as an async context manager whose value is the :class:`Stream`::
 
-        async with ai.stream(model, messages) as s:
+        async with ai.stream(model=model, messages=messages) as s:
             async for event in s:
                 ...
             print(s.message)

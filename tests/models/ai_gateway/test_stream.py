@@ -353,8 +353,8 @@ class TestRequest:
             ),
         ]
         async with models.stream(
-            model,
-            [user_msg("Hi")],
+            model=model,
+            messages=[user_msg("Hi")],
             params=request_params,
         ) as stream:
             async for _ in stream:
@@ -389,8 +389,8 @@ class TestRequest:
         ]
         with pytest.raises(ValueError, match="duplicate provider params for 'openai'"):
             async with models.stream(
-                model,
-                [user_msg("Hi")],
+                model=model,
+                messages=[user_msg("Hi")],
                 params=request_params,
             ) as stream:
                 async for _ in stream:
@@ -411,8 +411,8 @@ class TestRequest:
         ]
         with pytest.raises(ValueError, match="duplicate provider params for 'openai'"):
             async with models.stream(
-                model,
-                [user_msg("Hi")],
+                model=model,
+                messages=[user_msg("Hi")],
                 params=request_params,
             ) as stream:
                 async for _ in stream:

@@ -19,7 +19,7 @@ async def main() -> None:
         GatewayParams(sort="cost"),
         AnthropicParams(speed="fast"),
     ]
-    async with ai.stream(model, messages, params=params) as stream:
+    async with ai.stream(model=model, messages=messages, params=params) as stream:
         async for event in stream:
             if isinstance(event, ai.events.TextDelta):
                 print(event.chunk, end="", flush=True)

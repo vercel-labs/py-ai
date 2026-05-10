@@ -57,7 +57,9 @@ async def graph(context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
     """
     while context.keep_running():
         async with ai.models.stream(
-            context.model, context.messages, tools=context.tools
+            model=context.model,
+            messages=context.messages,
+            tools=context.tools,
         ) as s:
             async for event in s:
                 yield event

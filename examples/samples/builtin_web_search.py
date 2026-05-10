@@ -48,7 +48,7 @@ def format(value: object) -> str:
 
 
 async def main() -> None:
-    async with ai.stream(model, messages, tools=tools) as s:
+    async with ai.stream(model=model, messages=messages, tools=tools) as s:
         async for event in s:
             match event:
                 case ai.events.TextDelta():

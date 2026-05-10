@@ -27,7 +27,7 @@ async def _run(name: str, provider: ai.Provider[Any], model_id: str) -> None:
     model = provider(model_id)
 
     try:
-        async with ai.stream(model, messages) as s:
+        async with ai.stream(model=model, messages=messages) as s:
             async for event in s:
                 if isinstance(event, ai.events.TextDelta):
                     print(event.chunk, end="", flush=True)

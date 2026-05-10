@@ -722,7 +722,9 @@ class Agent:
         while context.keep_running():
             async with (
                 models.stream(
-                    context.model, context.messages, tools=context.tools
+                    model=context.model,
+                    messages=context.messages,
+                    tools=context.tools,
                 ) as stream,
                 ToolRunner() as tr,
             ):

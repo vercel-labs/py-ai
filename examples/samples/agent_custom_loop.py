@@ -28,7 +28,9 @@ class CustomAgent(ai.Agent):
         while context.keep_running():
             async with (
                 ai.models.stream(
-                    context.model, context.messages, tools=context.tools
+                    model=context.model,
+                    messages=context.messages,
+                    tools=context.tools,
                 ) as stream,
                 ai.ToolRunner() as tr,
             ):

@@ -10,8 +10,8 @@ Usage::
     # Provider-specific request options and built-in tools come from the
     # native packages and are forwarded through the gateway transparently.
     async with ai.stream(
-        model,
-        msgs,
+        model=model,
+        messages=msgs,
         params=[anthropic.AnthropicParams(speed="fast")],
         tools=[anthropic.tools.web_search(max_uses=5)],
     ) as s:
@@ -20,8 +20,8 @@ Usage::
     # The gateway also exposes its own provider-executed tools that work
     # with any gateway-routed model regardless of the underlying provider.
     async with ai.stream(
-        model,
-        msgs,
+        model=model,
+        messages=msgs,
         tools=[ai_gateway.tools.perplexity_search(max_results=5)],
     ) as s:
         ...
