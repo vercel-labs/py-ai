@@ -124,12 +124,12 @@ async def llm_call_activity(params: LLMParams) -> LLMResult:
         for t in params.tool_schemas
     ]
 
-    s = ai.models.stream(model, messages, tools=tools)
-    async for _event in s:
-        pass
-    if s.message is None:
-        raise RuntimeError("LLM stream ended without a final message")
-    return LLMResult(message=s.message.model_dump())
+    async with ai.models.stream(model, messages, tools=tools) as s:
+        async for _event in s:
+            pass
+        if s.message is None:
+            raise RuntimeError("LLM stream ended without a final message")
+        return LLMResult(message=s.message.model_dump())
 
 
 async def _replay_as_stream(

@@ -352,13 +352,13 @@ class TestRequest:
                 extra_headers={"x-forwarded-provider-feature": "enabled"},
             ),
         ]
-        stream = models.stream(
+        async with models.stream(
             model,
             [user_msg("Hi")],
             params=request_params,
-        )
-        async for _ in stream:
-            pass
+        ) as stream:
+            async for _ in stream:
+                pass
 
         assert captured_body["providerOptions"] == {
             "gateway": {
@@ -387,15 +387,14 @@ class TestRequest:
             OpenAIChatParams(service_tier="auto"),
             OpenAIResponsesParams(previous_response_id="resp_123"),
         ]
-        stream = models.stream(
-            model,
-            [user_msg("Hi")],
-            params=request_params,
-        )
-
         with pytest.raises(ValueError, match="duplicate provider params for 'openai'"):
-            async for _ in stream:
-                pass
+            async with models.stream(
+                model,
+                [user_msg("Hi")],
+                params=request_params,
+            ) as stream:
+                async for _ in stream:
+                    pass
 
     async def test_gateway_rejects_provider_options_duplicate_key(self) -> None:
         def handler(req: httpx.Request) -> httpx.Response:
@@ -410,15 +409,14 @@ class TestRequest:
             ),
             OpenAIResponsesParams(previous_response_id="resp_123"),
         ]
-        stream = models.stream(
-            model,
-            [user_msg("Hi")],
-            params=request_params,
-        )
-
         with pytest.raises(ValueError, match="duplicate provider params for 'openai'"):
-            async for _ in stream:
-                pass
+            async with models.stream(
+                model,
+                [user_msg("Hi")],
+                params=request_params,
+            ) as stream:
+                async for _ in stream:
+                    pass
 
     async def test_real_tool_in_request_body(self) -> None:
         """A real ``@tool``-decorated function must appear correctly

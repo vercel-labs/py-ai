@@ -8,10 +8,11 @@ Usage::
     ids = await anthropic.list()
 
     # built-in tools
-    s = ai.stream(
+    async with ai.stream(
         model, msgs,
         tools=[anthropic.tools.web_search(max_uses=5)],
-    )
+    ) as s:
+        ...
 
 The adapter module is loaded lazily to avoid pulling in the ``anthropic``
 SDK at import time.

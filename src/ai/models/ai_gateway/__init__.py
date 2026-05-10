@@ -9,20 +9,22 @@ Usage::
 
     # Provider-specific request options and built-in tools come from the
     # native packages and are forwarded through the gateway transparently.
-    s = ai.stream(
+    async with ai.stream(
         model,
         msgs,
         params=[anthropic.AnthropicParams(speed="fast")],
         tools=[anthropic.tools.web_search(max_uses=5)],
-    )
+    ) as s:
+        ...
 
     # The gateway also exposes its own provider-executed tools that work
     # with any gateway-routed model regardless of the underlying provider.
-    s = ai.stream(
+    async with ai.stream(
         model,
         msgs,
         tools=[ai_gateway.tools.perplexity_search(max_results=5)],
-    )
+    ) as s:
+        ...
 
 The heavy ``.adapter`` module is loaded lazily so that ``import ai`` does
 not pull in ``httpx`` and other I/O libraries at import time.  This matters

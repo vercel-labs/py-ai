@@ -11,15 +11,16 @@ Usage::
 
     # stream — auto-creates client from env vars
     msgs = [ai.user_message("hello")]
-    s = ai.stream(model, msgs)
-    async for event in s:
-        if isinstance(event, ai.events.TextDelta):
-            print(event.chunk, end="", flush=True)
+    async with ai.stream(model, msgs) as s:
+        async for event in s:
+            if isinstance(event, ai.events.TextDelta):
+                print(event.chunk, end="", flush=True)
 
     # explicit client for custom auth
     client = ai.Client(base_url="https://custom.example.com/v1", api_key="sk-...")
     model = openai("gpt-5.4", client=client)
-    s = ai.stream(model, msgs)
+    async with ai.stream(model, msgs) as s:
+        ...
 
     # list available models
     ids = await openai.list()
