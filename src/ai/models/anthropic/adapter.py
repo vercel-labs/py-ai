@@ -14,7 +14,6 @@ import pydantic
 from ... import types
 from ...types import events
 from .. import core
-from . import metadata as anthropic_metadata
 from . import tools as anthropic_tools
 
 PROVIDER_NAME = "anthropic"
@@ -30,6 +29,10 @@ _TOOL_RESULT_BLOCK_TYPES: frozenset[str] = frozenset(
         "memory_tool_result",
     }
 )
+
+
+def _provider_metadata(**values: Any) -> dict[str, Any]:
+    return {"provider": PROVIDER_NAME, **values}
 
 
 # ---------------------------------------------------------------------------
@@ -196,19 +199,7 @@ async def _messages_to_anthropic(
                             text=text,
                             provider_metadata=provider_metadata,
                         ):
-                            part_metadata = (
-                                provider_metadata
-                                if isinstance(
-                                    provider_metadata,
-                                    anthropic_metadata.AnthropicProviderMetadata,
-                                )
-                                else None
-                            )
-                            signature = (
-                                part_metadata.signature
-                                if part_metadata is not None
-                                else None
-                            )
+                            signature = (provider_metadata or {}).get("signature")
                             if signature:
                                 content.append(
                                     {
@@ -247,19 +238,10 @@ async def _messages_to_anthropic(
                             # Result block type comes from the original wire
                             # event ("web_search_tool_result", etc.); stored in
                             # provider metadata when emitted.
-                            part_metadata = (
-                                part.provider_metadata
-                                if isinstance(
-                                    part.provider_metadata,
-                                    anthropic_metadata.AnthropicProviderMetadata,
-                                )
-                                else None
-                            )
+                            part_metadata = part.provider_metadata or {}
                             wire_type = (
-                                part_metadata.result_type
-                                if part_metadata is not None
-                                and part_metadata.result_type is not None
-                                else f"{part.tool_name}_tool_result"
+                                part_metadata.get("resultType")
+                                or f"{part.tool_name}_tool_result"
                             )
                             content.append(
                                 {
@@ -484,7 +466,7 @@ async def stream(
                                 yield events.BuiltinToolStart(
                                     tool_call_id=block.id,
                                     tool_name=block.name,
-                                    provider_metadata=anthropic_metadata.AnthropicProviderMetadata(),
+                                    provider_metadata=_provider_metadata(),
                                 )
                             # Result blocks (web_search_tool_result etc.) arrive
                             # complete; we emit on stop so we have full content.
@@ -533,9 +515,7 @@ async def stream(
                             yield events.ReasoningEnd(
                                 block_id=str(idx),
                                 provider_metadata=(
-                                    anthropic_metadata.AnthropicProviderMetadata(
-                                        signature=signature
-                                    )
+                                    _provider_metadata(signature=signature)
                                     if signature is not None
                                     else None
                                 ),
@@ -555,7 +535,7 @@ async def stream(
                                     tool_call=types.messages.BuiltinToolCallPart(
                                         tool_call_id=tool_id,
                                         tool_name=tool_names.get(idx, ""),
-                                        provider_metadata=anthropic_metadata.AnthropicProviderMetadata(),
+                                        provider_metadata=_provider_metadata(),
                                     ),
                                 )
                         elif block_type in _TOOL_RESULT_BLOCK_TYPES:
@@ -588,8 +568,8 @@ async def stream(
                                     tool_call_id=tool_use_id,
                                     tool_name=tool_name,
                                     result=content_payload,
-                                    provider_metadata=anthropic_metadata.AnthropicProviderMetadata(
-                                        result_type=block_type or ""
+                                    provider_metadata=_provider_metadata(
+                                        resultType=block_type or ""
                                     ),
                                 ),
                             )

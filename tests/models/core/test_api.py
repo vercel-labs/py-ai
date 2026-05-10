@@ -9,20 +9,21 @@ import ai
 from ai import models
 from ai.types import events as events_
 from ai.types import messages as messages_
-from ai.types import metadata as metadata_
 
 from ...conftest import MOCK_MODEL, MOCK_PROVIDER, MockProvider, mock_llm, text_msg
 
 
-class _TestProviderMetadata(metadata_.ProviderMetadata):
-    marker: str
+def _test_provider_metadata(marker: str) -> dict[str, Any]:
+    return {"marker": marker}
 
 
 def _provider_metadata_marker(
-    provider_metadata: metadata_.ProviderMetadata | None,
+    provider_metadata: dict[str, Any] | None,
 ) -> str:
-    assert isinstance(provider_metadata, _TestProviderMetadata)
-    return provider_metadata.marker
+    assert provider_metadata is not None
+    marker = provider_metadata.get("marker")
+    assert isinstance(marker, str)
+    return marker
 
 
 async def test_stream_aggregates_registered_adapter_events() -> None:
@@ -79,55 +80,55 @@ async def test_stream_accumulates_provider_metadata_latest_wins() -> None:
         yield events_.StreamStart()
         yield events_.TextStart(
             block_id="text",
-            provider_metadata=_TestProviderMetadata(marker="text-start"),
+            provider_metadata=_test_provider_metadata("text-start"),
         )
         yield events_.TextDelta(block_id="text", chunk="hello")
         yield events_.TextDelta(
             block_id="text",
             chunk=" world",
-            provider_metadata=_TestProviderMetadata(marker="text-delta"),
+            provider_metadata=_test_provider_metadata("text-delta"),
         )
         yield events_.TextEnd(
             block_id="text",
-            provider_metadata=_TestProviderMetadata(marker="text-end"),
+            provider_metadata=_test_provider_metadata("text-end"),
         )
         yield events_.ReasoningStart(
             block_id="reasoning",
-            provider_metadata=_TestProviderMetadata(marker="reasoning-start"),
+            provider_metadata=_test_provider_metadata("reasoning-start"),
         )
         yield events_.ReasoningDelta(
             block_id="reasoning",
             chunk="thinking",
-            provider_metadata=_TestProviderMetadata(marker="reasoning-delta"),
+            provider_metadata=_test_provider_metadata("reasoning-delta"),
         )
         yield events_.ReasoningEnd(
             block_id="reasoning",
-            provider_metadata=_TestProviderMetadata(marker="reasoning-end"),
+            provider_metadata=_test_provider_metadata("reasoning-end"),
         )
         yield events_.ToolStart(
             tool_call_id="tc-1",
             tool_name="weather",
-            provider_metadata=_TestProviderMetadata(marker="tool-start"),
+            provider_metadata=_test_provider_metadata("tool-start"),
         )
         yield events_.ToolDelta(tool_call_id="tc-1", chunk='{"city"')
         yield events_.ToolDelta(
             tool_call_id="tc-1",
             chunk=':"SF"}',
-            provider_metadata=_TestProviderMetadata(marker="tool-delta"),
+            provider_metadata=_test_provider_metadata("tool-delta"),
         )
         yield events_.ToolEnd(
             tool_call_id="tc-1",
             tool_call=messages_.DUMMY_TOOL_CALL,
-            provider_metadata=_TestProviderMetadata(marker="tool-end"),
+            provider_metadata=_test_provider_metadata("tool-end"),
         )
         yield events_.FileEvent(
             block_id="file",
             media_type="image/png",
             data="base64-data",
-            provider_metadata=_TestProviderMetadata(marker="file"),
+            provider_metadata=_test_provider_metadata("file"),
         )
         yield events_.StreamEnd(
-            provider_metadata=_TestProviderMetadata(marker="message"),
+            provider_metadata=_test_provider_metadata("message"),
         )
 
     stream = models.Stream(_metadata_stream())

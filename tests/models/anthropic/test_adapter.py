@@ -13,7 +13,6 @@ import pytest
 import ai
 from ai import models
 from ai.models.anthropic import adapter, anthropic
-from ai.models.anthropic import metadata as anthropic_metadata
 from ai.types import messages
 
 from .conftest import FakeAnthropicClient
@@ -109,9 +108,10 @@ async def test_reasoning_signature_round_trips_from_provider_metadata(
                 ai.assistant_message(
                     ai.thinking(
                         "hidden",
-                        provider_metadata=anthropic_metadata.AnthropicProviderMetadata(
-                            signature="sig"
-                        ),
+                        provider_metadata={
+                            "provider": "anthropic",
+                            "signature": "sig",
+                        },
                     )
                 ),
                 ai.user_message("Hi"),
@@ -141,15 +141,16 @@ async def test_builtin_tool_parts_round_trip(
         tool_call_id="srvtoolu_1",
         tool_name="web_search",
         tool_args='{"query":"weather"}',
-        provider_metadata=anthropic_metadata.AnthropicProviderMetadata(),
+        provider_metadata={"provider": "anthropic"},
     )
     result = messages.BuiltinToolReturnPart(
         tool_call_id="srvtoolu_1",
         tool_name="web_search",
         result=[{"title": "Forecast", "url": "https://example.com"}],
-        provider_metadata=anthropic_metadata.AnthropicProviderMetadata(
-            result_type="web_search_tool_result"
-        ),
+        provider_metadata={
+            "provider": "anthropic",
+            "resultType": "web_search_tool_result",
+        },
     )
     convo = [
         ai.user_message("What's the weather?"),
