@@ -166,7 +166,9 @@ async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.events.AgentEv
 
         tasks = [asyncio.ensure_future(run_tool(tc)) for tc in msg.tool_calls]
         parts = await asyncio.gather(*tasks)
-        yield ai.tool_result(*parts)
+        result_event = ai.tool_result(*parts)
+        yield result_event
+        context.add(result_event.message)
 
 
 # ── Workflow ─────────────────────────────────────────────────────
