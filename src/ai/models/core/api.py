@@ -117,9 +117,23 @@ def _normalize_stream_params[ProviderParamsT: pydantic.BaseModel](
 class Stream:
     """Async-iterable wrapper around an adapter's event stream."""
 
-    def __init__(self, gen: AsyncGenerator[types.events.Event]) -> None:
+    def __init__(
+        self,
+        gen: AsyncGenerator[types.events.Event],
+        *,
+        seed_message: types.messages.Message | None = None,
+    ) -> None:
+        """Wrap an event generator.
+
+        ``seed_message`` seeds the in-progress assistant message. Pass
+        a copy of an existing turn when replaying so
+        ``stream.message`` ends up identical to that turn instead of
+        being rebuilt from synthetic events.  When ``None`` (default),
+        an empty assistant message is created and rebuilt from the
+        incoming events.
+        """
         self._gen = gen
-        self._message: types.messages.Message = types.messages.Message(
+        self._message: types.messages.Message = seed_message or types.messages.Message(
             role="assistant", parts=[]
         )
         self._parts: dict[str, types.messages.Part] = {}
@@ -179,6 +193,11 @@ class Stream:
 
     def _aggregate_event(self, event: types.events.Event) -> dict[str, Any]:
         updates: dict[str, Any] = {}
+
+        # Replay events carry no new state — the seeded message already
+        # has everything they would have produced.
+        if event.replay:
+            return updates
 
         # grab usage from any event that carries one
         if event.usage is not None:
@@ -264,6 +283,27 @@ class Stream:
         return updates
 
 
+async def _replay_tool_calls(
+    msg: types.messages.Message,
+) -> AsyncGenerator[types.events.Event]:
+    """Replay an assistant turn's tool calls as ``replay``-flagged ``ToolEnd``.
+
+    Used by :func:`stream` to short-circuit when the last message is
+    already marked for replay — letting resume flows (e.g. post-hook
+    re-entry) re-dispatch the existing tool calls without hitting the
+    LLM and without re-streaming the original text/reasoning to the
+    consumer.  The wrapping :class:`Stream`'s ``message`` is seeded
+    with the original turn so callers see the same parts they would
+    have without replay.
+    """
+    for part in msg.tool_calls:
+        yield types.events.ToolEnd(
+            tool_call_id=part.tool_call_id,
+            tool_call=part,
+            replay=True,
+        )
+
+
 def stream[ProviderParamsT: pydantic.BaseModel](
     model: model_.Model[ProviderParamsT],
     messages: list[types.messages.Message],
@@ -273,7 +313,15 @@ def stream[ProviderParamsT: pydantic.BaseModel](
     params: params_.StreamParams[ProviderParamsT] | None = None,
     executor: StreamExecutor = _default_executor,
 ) -> Stream:
-    """Stream an LLM response."""
+    """Stream an LLM response.
+
+    If the last message is marked ``replay=True``, replay that turn as
+    synthetic stream events instead of calling the model.
+    """
+    if messages and messages[-1].replay:
+        last = messages[-1]
+        return Stream(_replay_tool_calls(last), seed_message=last.model_copy(deep=True))
+
     messages = integrity.prepare_messages(messages)
     stream_params = _normalize_stream_params(model, params)
     request = StreamRequest[ProviderParamsT](

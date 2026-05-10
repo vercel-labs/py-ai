@@ -205,3 +205,103 @@ async def test_check_connection_delegates_to_model_provider() -> None:
 
     assert result is False
     assert provider.received_client is explicit
+
+
+async def test_stream_replays_marked_last_assistant_with_tool_calls() -> None:
+    """If the last message is marked replay, no LLM call."""
+    called = False
+
+    async def _spy_stream(
+        client: models.Client,
+        model: models.Model[pydantic.BaseModel],
+        messages: list[messages_.Message],
+        *,
+        tools: Sequence[ai.tools.Tool] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
+        **kwargs: Any,
+    ) -> AsyncGenerator[events_.Event]:
+        nonlocal called
+        called = True
+        yield events_.StreamStart()
+        yield events_.StreamEnd()
+
+    models.register_stream("mock", _spy_stream)
+
+    assistant_msg = messages_.Message(
+        role="assistant",
+        parts=[
+            messages_.TextPart(id="t1", text="calling tools"),
+            messages_.ToolCallPart(
+                tool_call_id="tc-1",
+                tool_name="weather",
+                tool_args='{"city":"SF"}',
+            ),
+        ],
+    )
+
+    stream = models.stream(
+        MOCK_MODEL,
+        [ai.user_message("Hi"), assistant_msg.model_copy(update={"replay": True})],
+    )
+    events: list[events_.Event] = [event async for event in stream]
+
+    assert called is False, "should not have hit the LLM"
+    # Stream.message is seeded from the original turn — text and tool
+    # calls are both preserved.
+    assert stream.text == "calling tools"
+    assert len(stream.tool_calls) == 1
+    assert stream.tool_calls[0].tool_call_id == "tc-1"
+    assert stream.tool_calls[0].tool_args == '{"city":"SF"}'
+    # Replay only emits ToolEnd events, flagged for agent.run to drop.
+    tool_ends = [e for e in events if isinstance(e, events_.ToolEnd)]
+    assert len(tool_ends) == 1
+    assert tool_ends[0].replay is True
+    assert tool_ends[0].tool_call.tool_call_id == "tc-1"
+    # No ToolStart/Delta/text events are re-emitted.
+    assert not any(isinstance(e, events_.ToolStart) for e in events)
+    assert not any(isinstance(e, events_.TextDelta) for e in events)
+
+
+def test_tool_end_replay_flag_excluded_from_json() -> None:
+    """The replay flag is internal — it must not appear in serialized output."""
+    ev = events_.ToolEnd(
+        tool_call_id="tc-1",
+        tool_call=messages_.DUMMY_TOOL_CALL,
+        replay=True,
+    )
+    dumped = ev.model_dump()
+    assert "replay" not in dumped
+    dumped_json = ev.model_dump(mode="json")
+    assert "replay" not in dumped_json
+
+
+async def test_stream_does_not_replay_when_assistant_is_unmarked() -> None:
+    """Bare assistant text doesn't trigger replay — fall through to LLM."""
+    called = False
+
+    async def _spy_stream(
+        client: models.Client,
+        model: models.Model[pydantic.BaseModel],
+        messages: list[messages_.Message],
+        *,
+        tools: Sequence[ai.tools.Tool] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
+        **kwargs: Any,
+    ) -> AsyncGenerator[events_.Event]:
+        nonlocal called
+        called = True
+        yield events_.StreamStart()
+        yield events_.StreamEnd()
+
+    models.register_stream("mock", _spy_stream)
+
+    assistant_text_only = messages_.Message(
+        role="assistant",
+        parts=[messages_.TextPart(text="just talking")],
+    )
+
+    stream = models.stream(MOCK_MODEL, [assistant_text_only])
+    async for _ in stream:
+        pass
+
+    assert called is True

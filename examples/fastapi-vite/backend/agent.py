@@ -54,29 +54,17 @@ async def graph(context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
     request event on the SSE stream.  The frontend displays Approve /
     Reject buttons and sends the decision back on the next request.
     """
-    while True:
-        # If the last message is already an assistant turn, we're being
-        # replayed after a hook resolution — skip the model call and go
-        # straight to processing its tool calls (resolutions are
-        # pre-registered, so the hook returns immediately).
-        if context.keep_running():
-            s = ai.models.stream(context.model, context.messages, tools=context.tools)
+    while context.keep_running():
+        async with ai.models.stream(
+            context.model, context.messages, tools=context.tools
+        ) as s:
             async for event in s:
                 yield event
-            context.add(s.message)
+        context.add(s.message)
 
-        # Pull tool calls off the most recent assistant message.
-        # ``to_messages`` may append "internal" hook messages after the
-        # assistant, so ``messages[-1]`` isn't always the assistant turn.
-        last_assistant = next(
-            (m for m in reversed(context.messages) if m.role == "assistant"),
-            None,
-        )
-        tool_calls = (
-            context.resolve(last_assistant.tool_calls) if last_assistant else []
-        )
+        tool_calls = context.resolve(s.tool_calls)
         if not tool_calls:
-            return
+            continue
 
         results = await asyncio.gather(
             *(_execute_with_approval(tc) for tc in tool_calls)

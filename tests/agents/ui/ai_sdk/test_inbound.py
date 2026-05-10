@@ -10,6 +10,7 @@ from ai.agents.ui.ai_sdk.inbound import (
     extract_approvals,
 )
 from ai.agents.ui.ai_sdk.ui_message import UIMessage, UIToolPart
+from ai.types import messages as messages_
 
 
 def _ui(role: str, *parts: dict[str, Any], id: str = "m1") -> UIMessage:
@@ -35,14 +36,15 @@ def _tool(
 
 
 def test_to_messages_user_text() -> None:
-    result = to_messages([_ui("user", _text("hello"))])
-    assert len(result) == 1
-    assert result[0].role == "user"
-    assert result[0].text == "hello"
+    messages, approvals = to_messages([_ui("user", _text("hello"))])
+    assert len(messages) == 1
+    assert messages[0].role == "user"
+    assert messages[0].text == "hello"
+    assert approvals == []
 
 
 def test_to_messages_splits_at_tool_boundary() -> None:
-    result = to_messages(
+    messages, _ = to_messages(
         [
             _ui(
                 "assistant",
@@ -58,12 +60,13 @@ def test_to_messages_splits_at_tool_boundary() -> None:
             )
         ]
     )
-    assert [m.role for m in result] == ["assistant", "tool", "assistant"]
-    assert result[1].tool_results[0].tool_call_id == "tc1"
+    assert [m.role for m in messages] == ["assistant", "tool", "assistant"]
+    assert messages[1].tool_results[0].tool_call_id == "tc1"
 
 
-def test_to_messages_approval_hook_emitted_as_internal() -> None:
-    result = to_messages(
+def test_to_messages_keeps_pending_approval_tombstone() -> None:
+    """Pending approvals carry no response — leave the tombstone in history."""
+    messages, _ = to_messages(
         [
             _ui(
                 "assistant",
@@ -75,16 +78,39 @@ def test_to_messages_approval_hook_emitted_as_internal() -> None:
                 ),
             )
         ],
-        apply_approvals_=False,
     )
-    assert [m.role for m in result] == ["assistant", "internal"]
-    hook = result[1].parts[0]
-    assert hook.kind == "hook"
-    assert hook.hook_id == "approve_tc1"
+    assert [m.role for m in messages] == ["assistant", "internal"]
+    hook_part = messages[1].parts[0]
+    assert isinstance(hook_part, messages_.HookPart)
+    assert hook_part.hook_type == "ToolApproval"
+    assert hook_part.status == "pending"
+
+
+def test_to_messages_drops_resolved_approval_tombstone() -> None:
+    """Resolved approvals come back via the side-channel; the tombstone is dead."""
+    messages, approvals = to_messages(
+        [
+            _ui(
+                "assistant",
+                _tool(
+                    "delete",
+                    "tc1",
+                    "approval-responded",
+                    approval={
+                        "id": "approve_tc1",
+                        "approved": True,
+                        "reason": None,
+                    },
+                ),
+            )
+        ],
+    )
+    assert [m.role for m in messages] == ["assistant"]
+    assert [a.hook_id for a in approvals] == ["approve_tc1"]
 
 
 def test_to_messages_keeps_trailing_assistant_when_approved() -> None:
-    result = to_messages(
+    messages, approvals = to_messages(
         [
             _ui("user", _text("delete it"), id="u1"),
             _ui(
@@ -98,9 +124,9 @@ def test_to_messages_keeps_trailing_assistant_when_approved() -> None:
                 id="a1",
             ),
         ],
-        apply_approvals_=False,
     )
-    assert [m.role for m in result] == ["user", "assistant", "internal"]
+    assert [m.role for m in messages] == ["user", "assistant"]
+    assert [a.hook_id for a in approvals] == ["approve_tc1"]
 
 
 def test_extract_approvals_returns_approved_responses() -> None:

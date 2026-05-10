@@ -10,8 +10,7 @@ Flow:
   2. Second run: resolve_hook() pre-registers the answer, agent.run()
      replays from the same input, and hook finds the resolution immediately.
 
-TODO: The implementation *works* but requires some hacks on the user
-side. We need to come up with cleaner API support.
+TODO: This works, but currently requires not using ToolRunner!
 """
 
 import asyncio
@@ -47,24 +46,16 @@ async def main() -> None:
     async def with_confirmation(
         context: ai.Context,
     ) -> AsyncGenerator[ai.events.AgentEvent]:
-        while True:
-            # HACK: If there isn't anything to do, it's because we hit
-            # a hook and bailed out. Skip running the stream in that
-            # case, but process its tool calls (which should have
-            # resolved now).
-            if context.keep_running():
-                s = ai.models.stream(
-                    context.model, context.messages, tools=context.tools
-                )
+        while context.keep_running():
+            async with ai.models.stream(
+                context.model, context.messages, tools=context.tools
+            ) as s:
                 async for event in s:
                     yield event
 
-                context.add(s.message)
+            context.add(s.message)
 
-            tool_calls = context.resolve(context.messages[-1].tool_calls)
-            if not tool_calls:
-                return
-
+            tool_calls = context.resolve(s.tool_calls)
             results: list[ai.events.ToolCallResult] = []
             for tc in tool_calls:
                 try:
@@ -90,7 +81,8 @@ async def main() -> None:
                         )
                     )
 
-            context.add(ai.tool_message(*results))
+            if results:
+                context.add(ai.tool_message(*results))
 
     messages = [
         ai.system_message("Delete files when asked. Always use the delete_file tool."),

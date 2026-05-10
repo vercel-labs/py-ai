@@ -24,10 +24,17 @@ class BaseEvent(pydantic.BaseModel):
     streaming layer aggregates parts into it as deltas arrive and stamps
     a reference onto each yielded event. ``usage`` carries the latest
     usage value reported by the provider (latest-wins across the stream).
+
+    ``replay`` is set on synthetic events emitted when ``models.stream``
+    short-circuits an existing assistant turn (resume-after-approval
+    flows).  ``Agent.run`` drops replay-flagged events from the consumer-
+    facing stream — the loop's tool dispatcher still consumes them
+    internally.  Excluded from JSON: it's a control flag, not data.
     """
 
     message: messages.Message = _DUMMY_MESSAGE
     usage: usage_.Usage | None = None
+    replay: bool = pydantic.Field(default=False, exclude=True, repr=False)
 
     model_config = pydantic.ConfigDict(frozen=True)
 

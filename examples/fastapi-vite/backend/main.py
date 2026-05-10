@@ -57,7 +57,10 @@ class ChatRequest(pydantic.BaseModel):
 @app.post("/chat")
 async def chat(request: ChatRequest) -> fastapi.responses.StreamingResponse:
     """Handle chat requests and stream responses."""
-    messages = ai.agents.ui.ai_sdk.to_messages(request.messages)
+    messages, approvals = ai.agents.ui.ai_sdk.to_messages(request.messages)
+    # Pre-register hook resolutions so the agent loop's hooks find them
+    # immediately on the resume turn.
+    ai.agents.ui.ai_sdk.apply_approvals(approvals)
     result = agent_.chat_agent.run(agent_.MODEL, messages)
 
     async def stream_response() -> AsyncGenerator[str]:
