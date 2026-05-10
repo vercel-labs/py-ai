@@ -236,6 +236,40 @@ async def test_stream_forwards_output_type_and_request_params() -> None:
     assert received_params == [params]
 
 
+async def test_stream_accepts_context() -> None:
+    """``stream(context)`` reads model/messages/tools off the context."""
+    mock = mock_llm([[text_msg("ok")]])
+    ctx = ai.Context(
+        model=MOCK_MODEL,
+        messages=[ai.user_message("Hi")],
+        tools=[],
+    )
+    async with models.stream(ctx) as s:
+        async for _ in s:
+            pass
+    assert mock.call_count == 1
+    assert s.text == "ok"
+
+
+async def test_stream_rejects_context_with_explicit_kwargs() -> None:
+    """Passing both ``context`` and ``model=`` is a TypeError."""
+    ctx = ai.Context(
+        model=MOCK_MODEL,
+        messages=[ai.user_message("Hi")],
+        tools=[],
+    )
+    with pytest.raises(TypeError, match="either a context or"):
+        async with models.stream(ctx, model=MOCK_MODEL):  # type: ignore[call-overload]
+            pass
+
+
+async def test_stream_requires_context_or_kwargs() -> None:
+    """Passing nothing is a TypeError."""
+    with pytest.raises(TypeError, match="either a context or"):
+        async with models.stream():  # type: ignore[call-overload]
+            pass
+
+
 async def test_normalize_params_rejects_non_pydantic_value() -> None:
     """``stream(...)`` rejects raw dicts (and anything not a BaseModel)."""
     with pytest.raises(TypeError, match="pydantic BaseModel"):

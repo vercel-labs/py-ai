@@ -31,9 +31,7 @@ async def test_resolve_live_future() -> None:
     @my_agent.loop
     async def custom(context: ai.Context) -> AsyncGenerator[ai.events.Event]:
         nonlocal resolved_value
-        async with ai.models.stream(
-            model=context.model, messages=context.messages
-        ) as stream:
+        async with ai.models.stream(context) as stream:
             async for event in stream:
                 yield event
         result = await ai.hook("confirm_1", payload=Confirmation)
@@ -65,9 +63,7 @@ async def test_cancel_live_hook() -> None:
     @my_agent.loop
     async def custom(context: ai.Context) -> AsyncGenerator[ai.events.Event]:
         nonlocal was_cancelled
-        async with ai.models.stream(
-            model=context.model, messages=context.messages
-        ) as stream:
+        async with ai.models.stream(context) as stream:
             async for event in stream:
                 yield event
         try:
@@ -106,9 +102,7 @@ async def test_pre_registered_resolution_consumed() -> None:
     @my_agent.loop
     async def custom(context: ai.Context) -> AsyncGenerator[ai.events.Event]:
         nonlocal resolved_value
-        async with ai.models.stream(
-            model=context.model, messages=context.messages
-        ) as stream:
+        async with ai.models.stream(context) as stream:
             async for event in stream:
                 yield event
         resolved_value = await ai.hook("pre_reg_1", payload=Confirmation)
@@ -148,9 +142,7 @@ async def test_resolved_hook_emits_message() -> None:
 
     @my_agent.loop
     async def custom(context: ai.Context) -> AsyncGenerator[ai.events.Event]:
-        async with ai.models.stream(
-            model=context.model, messages=context.messages
-        ) as stream:
+        async with ai.models.stream(context) as stream:
             async for event in stream:
                 yield event
         await ai.hook("emit_test", payload=Confirmation)
@@ -179,9 +171,7 @@ async def test_hook_metadata_in_pending() -> None:
 
     @my_agent.loop
     async def custom(context: ai.Context) -> AsyncGenerator[ai.events.Event]:
-        async with ai.models.stream(
-            model=context.model, messages=context.messages
-        ) as stream:
+        async with ai.models.stream(context) as stream:
             async for event in stream:
                 yield event
         await ai.hook(

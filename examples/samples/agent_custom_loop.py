@@ -27,11 +27,7 @@ class CustomAgent(ai.Agent):
         """Stream, execute tools with logging, repeat."""
         while context.keep_running():
             async with (
-                ai.models.stream(
-                    model=context.model,
-                    messages=context.messages,
-                    tools=context.tools,
-                ) as stream,
+                ai.models.stream(context) as stream,
                 ai.ToolRunner() as tr,
             ):
                 async for event in ai.util.merge(stream, tr.events()):

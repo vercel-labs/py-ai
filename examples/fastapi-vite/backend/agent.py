@@ -56,11 +56,7 @@ async def graph(context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
     Reject buttons and sends the decision back on the next request.
     """
     while context.keep_running():
-        async with ai.models.stream(
-            model=context.model,
-            messages=context.messages,
-            tools=context.tools,
-        ) as s:
+        async with ai.models.stream(context) as s:
             async for event in s:
                 yield event
         context.add(s.message)

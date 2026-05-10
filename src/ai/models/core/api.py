@@ -1,7 +1,8 @@
 import contextlib
 import dataclasses
 from collections.abc import AsyncGenerator, AsyncIterator, Sequence
-from typing import Any, Protocol, Self, cast, runtime_checkable
+from contextlib import AbstractAsyncContextManager
+from typing import Any, Protocol, Self, cast, overload, runtime_checkable
 
 import pydantic
 
@@ -329,8 +330,33 @@ async def _replay_tool_calls(
         )
 
 
-@contextlib.asynccontextmanager
-async def stream[ProviderParamsT: pydantic.BaseModel](
+@runtime_checkable
+class StreamContext[ProviderParamsT: pydantic.BaseModel](Protocol):
+    """Anything that exposes ``model``/``messages``/``tools``.
+
+    Used to let callers pass an ``agents.Context`` to :func:`stream`
+    without an import-time circular dependency.
+    """
+
+    @property
+    def model(self) -> model_.Model[ProviderParamsT]: ...
+    @property
+    def messages(self) -> list[types.messages.Message]: ...
+    @property
+    def tools(self) -> list[types.tools.Tool]: ...
+
+
+@overload
+def stream[ProviderParamsT: pydantic.BaseModel](
+    context: StreamContext[ProviderParamsT],
+    /,
+    *,
+    output_type: type[pydantic.BaseModel] | None = None,
+    params: params_.StreamParams[ProviderParamsT] | None = None,
+    executor: StreamExecutor = _default_executor,
+) -> AbstractAsyncContextManager[Stream]: ...
+@overload
+def stream[ProviderParamsT: pydantic.BaseModel](
     *,
     model: model_.Model[ProviderParamsT],
     messages: list[types.messages.Message],
@@ -338,19 +364,61 @@ async def stream[ProviderParamsT: pydantic.BaseModel](
     output_type: type[pydantic.BaseModel] | None = None,
     params: params_.StreamParams[ProviderParamsT] | None = None,
     executor: StreamExecutor = _default_executor,
-) -> AsyncIterator[Stream]:
+) -> AbstractAsyncContextManager[Stream]: ...
+def stream[ProviderParamsT: pydantic.BaseModel](
+    context: StreamContext[ProviderParamsT] | None = None,
+    /,
+    *,
+    model: model_.Model[ProviderParamsT] | None = None,
+    messages: list[types.messages.Message] | None = None,
+    tools: Sequence[types.tools.Tool] | None = None,
+    output_type: type[pydantic.BaseModel] | None = None,
+    params: params_.StreamParams[ProviderParamsT] | None = None,
+    executor: StreamExecutor = _default_executor,
+) -> AbstractAsyncContextManager[Stream]:
     """Stream an LLM response.
 
-    Used as an async context manager whose value is the :class:`Stream`::
+    Used as an async context manager whose value is the :class:`Stream`.
+    Pass either an ``agents.Context`` (or anything matching
+    :class:`StreamContext`) or explicit ``model=``/``messages=``/``tools=``::
 
-        async with ai.stream(model=model, messages=messages) as s:
-            async for event in s:
-                ...
-            print(s.message)
+        async with ai.stream(context) as s: ...
+        async with ai.stream(model=model, messages=messages) as s: ...
 
     If the last message is marked ``replay=True``, replay that turn as
     synthetic stream events instead of calling the model.
     """
+    if context is not None:
+        if model is not None or messages is not None or tools is not None:
+            raise TypeError(
+                "stream() takes either a context or model/messages/tools, not both"
+            )
+        model = context.model
+        messages = context.messages
+        tools = context.tools
+    elif model is None or messages is None:
+        raise TypeError("stream() requires either a context or model= and messages=")
+
+    return _stream(
+        model=model,
+        messages=messages,
+        tools=tools,
+        output_type=output_type,
+        params=params,
+        executor=executor,
+    )
+
+
+@contextlib.asynccontextmanager
+async def _stream[ProviderParamsT: pydantic.BaseModel](
+    *,
+    model: model_.Model[ProviderParamsT],
+    messages: list[types.messages.Message],
+    tools: Sequence[types.tools.Tool] | None,
+    output_type: type[pydantic.BaseModel] | None,
+    params: params_.StreamParams[ProviderParamsT] | None,
+    executor: StreamExecutor,
+) -> AsyncIterator[Stream]:
     if messages and messages[-1].replay:
         last = messages[-1]
         s = Stream(_replay_tool_calls(last), seed_message=last.model_copy(deep=True))

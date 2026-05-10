@@ -47,11 +47,7 @@ async def main() -> None:
         context: ai.Context,
     ) -> AsyncGenerator[ai.events.AgentEvent]:
         while context.keep_running():
-            async with ai.models.stream(
-                model=context.model,
-                messages=context.messages,
-                tools=context.tools,
-            ) as s:
+            async with ai.models.stream(context) as s:
                 async for event in s:
                     yield event
 
