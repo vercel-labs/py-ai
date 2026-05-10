@@ -432,13 +432,16 @@ class ToolCallLike(Protocol):
     def __call__(self) -> Coroutine[Any, Any, events_.ToolCallResult]: ...
 
 
+class _RestartableToolStream:
+    def __init__(self, tr: ToolRunner) -> None:
+        self._tr = tr
+
+    def __aiter__(self) -> AsyncGenerator[events_.ToolCallResult]:
+        return self._tr._iterate()
+
+
 class ToolRunner:
-    def __init__(self, stream: models.Stream) -> None:
-        self._stream = stream
-        # finish_future gets set when the stream exhausts. We won't
-        # exhaust until that happens, since the stream can cause more
-        # tools to get triggered.
-        self._finish_future = stream.finish_future
+    def __init__(self) -> None:
         # A future that gets signalled when we add a new tool, so that
         # asyncio.wait gets woken up and cycles around in the loop to
         # wait on the new thing as well.
@@ -448,7 +451,8 @@ class ToolRunner:
         )
         self._active: set[
             asyncio.Future[events_.ToolCallResult] | asyncio.Future[None]
-        ] = {self._finish_future}
+        ] = set()
+
         self._new_results: list[events_.ToolCallResult] = []
         self._tool_results: list[events_.ToolCallResult] = []
         self._tg_base = asyncio.TaskGroup()
@@ -460,8 +464,8 @@ class ToolRunner:
     async def __aexit__(self, *args: Any) -> None:
         return await self._tg_base.__aexit__(*args)
 
-    def events(self) -> AsyncGenerator[events_.ToolCallResult]:
-        return self._iterate()
+    def events(self) -> _RestartableToolStream:
+        return _RestartableToolStream(self)
 
     def schedule(self, tc: ToolCallLike) -> None:
         """Schedule a tool call (or any callable producing a ToolCallResult).
@@ -473,14 +477,16 @@ class ToolRunner:
         runner's merge-and-iterate flow.
         """
         self._active.add(self._tg.create_task(tc()))
-        self._sched_waiter.set_result(None)
+        if not self._sched_waiter.done():
+            self._sched_waiter.set_result(None)
 
     def add_result(self, res: events_.ToolCallResult) -> None:
         self._tool_results.append(res)
 
         # Also add to _new_results and signal sched_waiter to return them
         self._new_results.append(res)
-        self._sched_waiter.set_result(None)
+        if not self._sched_waiter.done():
+            self._sched_waiter.set_result(None)
 
     def get_tool_message(self) -> types.messages.Message | None:
         if self._tool_results:
@@ -495,9 +501,7 @@ class ToolRunner:
             )
             for t in done:
                 self._active.discard(t)
-                if t is self._finish_future:
-                    t.result()
-                elif t is self._sched_waiter:
+                if t is self._sched_waiter:
                     t.result()
 
                     new = self._new_results
@@ -710,7 +714,7 @@ class Agent:
                 models.stream(
                     context.model, context.messages, tools=context.tools
                 ) as stream,
-                ToolRunner(stream) as tr,
+                ToolRunner() as tr,
             ):
                 async for event in util.merge(stream, tr.events()):
                     yield event

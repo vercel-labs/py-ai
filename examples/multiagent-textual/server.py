@@ -111,7 +111,7 @@ def _gated_agent(
         while context.keep_running():
             async with (
                 ai.stream(context.model, context.messages, tools=context.tools) as s,
-                ai.agents.ToolRunner(s) as tr,
+                ai.agents.ToolRunner() as tr,
             ):
                 async for event in ai.util.merge(s, tr.events()):
                     yield event

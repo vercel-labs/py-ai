@@ -30,7 +30,7 @@ class CustomAgent(ai.Agent):
                 ai.models.stream(
                     context.model, context.messages, tools=context.tools
                 ) as stream,
-                ai.ToolRunner(stream) as tr,
+                ai.ToolRunner() as tr,
             ):
                 async for event in ai.util.merge(stream, tr.events()):
                     yield event

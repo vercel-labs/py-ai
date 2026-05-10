@@ -1,4 +1,3 @@
-import asyncio
 import dataclasses
 from collections.abc import AsyncGenerator, Sequence
 from typing import Any, Protocol, Self, cast, runtime_checkable
@@ -137,13 +136,6 @@ class Stream:
             role="assistant", parts=[]
         )
         self._parts: dict[str, types.messages.Part] = {}
-        self._finish_future: asyncio.Future[None] = (
-            asyncio.get_event_loop().create_future()
-        )
-
-    @property
-    def finish_future(self) -> asyncio.Future[None]:
-        return self._finish_future
 
     async def __aenter__(self) -> Self:
         return self
@@ -166,7 +158,6 @@ class Stream:
         except Exception:
             # Usually this fires on StopAsyncIteration, but could be a
             # real exception too
-            self._finish_future.set_result(None)
             raise
         updates = self._aggregate_event(event)
         return event.model_copy(update={"message": self._message, **updates})

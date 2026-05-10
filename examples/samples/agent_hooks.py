@@ -71,7 +71,7 @@ async def main() -> None:
         while context.keep_running():
             async with (
                 ai.stream(context.model, context.messages, tools=context.tools) as s,
-                ai.ToolRunner(s) as tr,
+                ai.ToolRunner() as tr,
             ):
                 async for event in ai.util.merge(s, tr.events()):
                     yield event
