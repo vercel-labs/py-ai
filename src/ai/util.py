@@ -11,16 +11,12 @@ from typing import Any
 _EMPTY: Any = object()
 
 
+@dataclasses.dataclass
 class _Stop:
-    pass
+    exception: Exception | None = None
 
 
 _STOP = _Stop()
-
-
-@dataclasses.dataclass
-class _Exception:
-    exception: Exception
 
 
 @contextlib.asynccontextmanager
@@ -62,7 +58,7 @@ async def maybe_aclosing[T: AsyncIterable[Any]](iter: T) -> AsyncIterator[T]:
 async def decouple[T](
     iter: AsyncIterable[T],
     *,
-    task_group: asyncio.TaskGroup | None = None,
+    task_group: asyncio.TaskGroup | None,
     size: int = 1,
 ) -> AsyncIterator[T]:
     """Drive ``iter`` from a single worker task and yield its items.
@@ -79,15 +75,22 @@ async def decouple[T](
     generators are closed, so we should be OK.
 
     """
-    queue: asyncio.Queue[_Stop | _Exception | T] = asyncio.Queue(size)
+    queue: asyncio.Queue[_Stop | T] = asyncio.Queue(size)
 
     async def worker() -> None:
         async with maybe_aclosing(iter):
             try:
+                # N.B: There's a potential case, if iter is *not* a
+                # generator (and so we aren't closing it), and this
+                # task gets cancelled before it can write it, then
+                # maybe an element gets lost?
+                #
+                # TODO: I'm not sure if this case can ever matter, but
+                # think about it more.
                 async for x in iter:
                     await queue.put(x)
             except Exception as e:
-                await queue.put(_Exception(e))
+                await queue.put(_Stop(exception=e))
                 return
         await queue.put(_STOP)
 
@@ -100,11 +103,13 @@ async def decouple[T](
         while True:
             el = await queue.get()
             if isinstance(el, _Stop):
-                break
-            elif isinstance(el, _Exception):
-                raise el.exception
+                if el.exception:
+                    raise el.exception
+                else:
+                    return
             yield el
     finally:
+        # cancel is a no-op if a task is already done or cancelled
         task.cancel()
         with contextlib.suppress(Exception, asyncio.CancelledError):
             await task
