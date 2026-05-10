@@ -4,7 +4,7 @@ from typing import Annotated, Any, Literal
 
 import pydantic
 
-from . import messages
+from . import messages, metadata
 from . import usage as usage_
 
 # we're using pydantic because events are crossing
@@ -34,6 +34,7 @@ class BaseEvent(pydantic.BaseModel):
 
     message: messages.Message = _DUMMY_MESSAGE
     usage: usage_.Usage | None = None
+    provider_metadata: pydantic.SerializeAsAny[metadata.ProviderMetadata] | None = None
     replay: bool = pydantic.Field(default=False, exclude=True, repr=False)
 
     model_config = pydantic.ConfigDict(frozen=True)
@@ -81,7 +82,6 @@ class ReasoningDelta(BaseEvent):
 
 class ReasoningEnd(BaseEvent):
     block_id: str = ""
-    signature: str | None = None
 
     kind: Literal["reasoning_end"] = "reasoning_end"
 
@@ -110,7 +110,6 @@ class ToolEnd(BaseEvent):
 class BuiltinToolStart(BaseEvent):
     tool_call_id: str = ""
     tool_name: str = ""
-    provider_name: str | None = None
 
     kind: Literal["builtin_tool_start"] = "builtin_tool_start"
 

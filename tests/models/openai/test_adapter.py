@@ -195,7 +195,6 @@ async def test_builtin_part_in_messages_raises(
                 messages.BuiltinToolCallPart(
                     tool_call_id="srvtoolu_1",
                     tool_name="web_search",
-                    provider_name="openai",
                 ),
             ],
         ),

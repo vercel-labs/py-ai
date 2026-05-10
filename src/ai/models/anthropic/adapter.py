@@ -13,16 +13,10 @@ import pydantic
 
 from ... import types
 from ...types import events
-from ...types import messages as messages_
 from .. import core
+from . import metadata as anthropic_metadata
+from . import params
 from . import tools as anthropic_tools
-from .params import (
-    AnthropicContainer,
-    AnthropicCustomSkill,
-    AnthropicDisabledThinking,
-    AnthropicParams,
-    AnthropicProviderSkill,
-)
 
 PROVIDER_NAME = "anthropic"
 
@@ -37,6 +31,7 @@ _TOOL_RESULT_BLOCK_TYPES: frozenset[str] = frozenset(
         "memory_tool_result",
     }
 )
+
 
 # ---------------------------------------------------------------------------
 # Message / tool conversion — internal types → Anthropic wire format
@@ -201,8 +196,22 @@ async def _messages_to_anthropic(
                 for part in msg.parts:
                     match part:
                         case types.messages.ReasoningPart(
-                            text=text, signature=signature
+                            text=text,
+                            provider_metadata=provider_metadata,
                         ):
+                            part_metadata = (
+                                provider_metadata
+                                if isinstance(
+                                    provider_metadata,
+                                    anthropic_metadata.AnthropicProviderMetadata,
+                                )
+                                else None
+                            )
+                            signature = (
+                                part_metadata.signature
+                                if part_metadata is not None
+                                else None
+                            )
                             if send_reasoning and signature:
                                 content.append(
                                     {
@@ -239,12 +248,21 @@ async def _messages_to_anthropic(
                             )
                         case types.messages.BuiltinToolReturnPart():
                             # Result block type comes from the original wire
-                            # event ("web_search_tool_result", etc.); stored
-                            # in provider_details when emitted.
-                            details = part.provider_details or {}
-                            wire_type = details.get(
-                                "result_type",
-                                f"{part.tool_name}_tool_result",
+                            # event ("web_search_tool_result", etc.); stored in
+                            # provider metadata when emitted.
+                            part_metadata = (
+                                part.provider_metadata
+                                if isinstance(
+                                    part.provider_metadata,
+                                    anthropic_metadata.AnthropicProviderMetadata,
+                                )
+                                else None
+                            )
+                            wire_type = (
+                                part_metadata.result_type
+                                if part_metadata is not None
+                                and part_metadata.result_type is not None
+                                else f"{part.tool_name}_tool_result"
                             )
                             content.append(
                                 {
@@ -343,19 +361,23 @@ def _make_client(
     )
 
 
-def _coerce_anthropic_params(value: Any) -> AnthropicParams:
+def _coerce_anthropic_params(value: Any) -> params.AnthropicParams:
     if value is None:
-        return AnthropicParams()
-    if isinstance(value, AnthropicParams):
+        return params.AnthropicParams()
+    if isinstance(value, params.AnthropicParams):
         return value
     if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
         items = list(value)
-        if len(items) == 1 and isinstance(items[0], AnthropicParams):
+        if len(items) == 1 and isinstance(items[0], params.AnthropicParams):
             return items[0]
-    raise TypeError(f"anthropic stream params must be {AnthropicParams.__name__}")
+    raise TypeError(
+        f"anthropic stream params must be {params.AnthropicParams.__name__}"
+    )
 
 
-def _container_to_wire(container: AnthropicContainer) -> str | dict[str, Any] | None:
+def _container_to_wire(
+    container: params.AnthropicContainer,
+) -> str | dict[str, Any] | None:
     if not container.skills:
         return container.id
 
@@ -367,9 +389,9 @@ def _container_to_wire(container: AnthropicContainer) -> str | dict[str, Any] | 
 
 
 def _skill_to_wire(
-    skill: AnthropicProviderSkill | AnthropicCustomSkill,
+    skill: params.AnthropicProviderSkill | params.AnthropicCustomSkill,
 ) -> dict[str, Any]:
-    if isinstance(skill, AnthropicProviderSkill):
+    if isinstance(skill, params.AnthropicProviderSkill):
         result: dict[str, Any] = {
             "type": "anthropic",
             "skill_id": skill.skill_id,
@@ -466,7 +488,7 @@ async def stream(
         api_kwargs["tools"] = wire_tools
 
     if anthropic_params.thinking is not None:
-        if not isinstance(anthropic_params.thinking, AnthropicDisabledThinking):
+        if not isinstance(anthropic_params.thinking, params.AnthropicDisabledThinking):
             api_kwargs["thinking"] = anthropic_params.thinking.model_dump(
                 exclude_none=True,
             )
@@ -569,7 +591,7 @@ async def stream(
                                 yield events.BuiltinToolStart(
                                     tool_call_id=block.id,
                                     tool_name=block.name,
-                                    provider_name=PROVIDER_NAME,
+                                    provider_metadata=anthropic_metadata.AnthropicProviderMetadata(),
                                 )
                             # Result blocks (web_search_tool_result etc.) arrive
                             # complete; we emit on stop so we have full content.
@@ -614,26 +636,33 @@ async def stream(
                         if block_type == "text":
                             yield events.TextEnd(block_id=str(idx))
                         elif block_type == "thinking":
+                            signature = signature_buffer.get(idx)
                             yield events.ReasoningEnd(
                                 block_id=str(idx),
-                                signature=signature_buffer.get(idx),
+                                provider_metadata=(
+                                    anthropic_metadata.AnthropicProviderMetadata(
+                                        signature=signature
+                                    )
+                                    if signature is not None
+                                    else None
+                                ),
                             )
                         elif block_type == "tool_use":
                             tool_id = tool_ids.get(idx)
                             if tool_id:
                                 yield events.ToolEnd(
                                     tool_call_id=tool_id,
-                                    tool_call=messages_.DUMMY_TOOL_CALL,
+                                    tool_call=types.messages.DUMMY_TOOL_CALL,
                                 )
                         elif block_type == "server_tool_use":
                             tool_id = tool_ids.get(idx)
                             if tool_id:
                                 yield events.BuiltinToolEnd(
                                     tool_call_id=tool_id,
-                                    tool_call=messages_.BuiltinToolCallPart(
+                                    tool_call=types.messages.BuiltinToolCallPart(
                                         tool_call_id=tool_id,
                                         tool_name=tool_names.get(idx, ""),
-                                        provider_name=PROVIDER_NAME,
+                                        provider_metadata=anthropic_metadata.AnthropicProviderMetadata(),
                                     ),
                                 )
                         elif block_type in _TOOL_RESULT_BLOCK_TYPES:
@@ -662,14 +691,13 @@ async def stream(
                                     break
                             yield events.BuiltinToolResult(
                                 tool_call_id=tool_use_id,
-                                result=messages_.BuiltinToolReturnPart(
+                                result=types.messages.BuiltinToolReturnPart(
                                     tool_call_id=tool_use_id,
                                     tool_name=tool_name,
                                     result=content_payload,
-                                    provider_name=PROVIDER_NAME,
-                                    provider_details={
-                                        "result_type": block_type or "",
-                                    },
+                                    provider_metadata=anthropic_metadata.AnthropicProviderMetadata(
+                                        result_type=block_type or ""
+                                    ),
                                 ),
                             )
 

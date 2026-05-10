@@ -195,79 +195,121 @@ class Stream:
             self._message.usage = event.usage
 
         match event:
-            case types.events.TextStart(block_id=bid):
-                tp = types.messages.TextPart(id=bid, text="")
+            case types.events.TextStart(block_id=bid, provider_metadata=pm):
+                tp = types.messages.TextPart(id=bid, text="", provider_metadata=pm)
                 self._message.parts.append(tp)
                 self._parts[bid] = tp
-            case types.events.TextDelta(block_id=bid, chunk=c):
+            case types.events.TextDelta(block_id=bid, chunk=c, provider_metadata=pm):
                 existing_text = self._parts.get(bid)
                 if isinstance(existing_text, types.messages.TextPart):
                     existing_text.text += c
-            case types.events.ReasoningStart(block_id=bid):
-                rp = types.messages.ReasoningPart(id=bid, text="")
+                    if pm is not None:
+                        existing_text.provider_metadata = pm
+            case types.events.TextEnd(block_id=bid, provider_metadata=pm):
+                existing_text = self._parts.get(bid)
+                if (
+                    isinstance(existing_text, types.messages.TextPart)
+                    and pm is not None
+                ):
+                    existing_text.provider_metadata = pm
+            case types.events.ReasoningStart(block_id=bid, provider_metadata=pm):
+                rp = types.messages.ReasoningPart(id=bid, text="", provider_metadata=pm)
                 self._message.parts.append(rp)
                 self._parts[bid] = rp
-            case types.events.ReasoningDelta(block_id=bid, chunk=c):
+            case types.events.ReasoningDelta(
+                block_id=bid, chunk=c, provider_metadata=pm
+            ):
                 existing_reasoning = self._parts.get(bid)
                 if isinstance(existing_reasoning, types.messages.ReasoningPart):
                     existing_reasoning.text += c
-            case types.events.ReasoningEnd(block_id=bid, signature=sig):
+                    if pm is not None:
+                        existing_reasoning.provider_metadata = pm
+            case types.events.ReasoningEnd(block_id=bid, provider_metadata=pm):
                 existing_reasoning = self._parts.get(bid)
                 if (
                     isinstance(existing_reasoning, types.messages.ReasoningPart)
-                    and sig is not None
+                    and pm is not None
                 ):
-                    existing_reasoning.signature = sig
-            case types.events.ToolStart(tool_call_id=tcid, tool_name=name):
+                    existing_reasoning.provider_metadata = pm
+            case types.events.ToolStart(
+                tool_call_id=tcid, tool_name=name, provider_metadata=pm
+            ):
                 tcp = types.messages.ToolCallPart(
                     id=tcid,
                     tool_call_id=tcid,
                     tool_name=name,
                     tool_args="",
+                    provider_metadata=pm,
                 )
                 self._message.parts.append(tcp)
                 self._parts[tcid] = tcp
-            case types.events.ToolDelta(tool_call_id=tcid, chunk=c):
+            case types.events.ToolDelta(
+                tool_call_id=tcid, chunk=c, provider_metadata=pm
+            ):
                 existing_tool = self._parts.get(tcid)
                 if isinstance(existing_tool, types.messages.ToolCallPart):
                     existing_tool.tool_args += c
-            case types.events.ToolEnd(tool_call_id=tcid):
+                    if pm is not None:
+                        existing_tool.provider_metadata = pm
+
+            case types.events.ToolEnd(tool_call_id=tcid, provider_metadata=pm):
                 existing_tool = self._parts.get(tcid)
                 if isinstance(existing_tool, types.messages.ToolCallPart):
                     updates["tool_call"] = existing_tool
+                    if pm is not None:
+                        existing_tool.provider_metadata = pm
             case types.events.BuiltinToolStart(
-                tool_call_id=tcid, tool_name=name, provider_name=pname
+                tool_call_id=tcid,
+                tool_name=name,
+                provider_metadata=pm,
             ):
                 btcp = types.messages.BuiltinToolCallPart(
                     id=tcid,
                     tool_call_id=tcid,
                     tool_name=name,
                     tool_args="",
-                    provider_name=pname,
+                    provider_metadata=pm,
                 )
                 self._message.parts.append(btcp)
                 self._parts[tcid] = btcp
-            case types.events.BuiltinToolDelta(tool_call_id=tcid, chunk=c):
+            case types.events.BuiltinToolDelta(
+                tool_call_id=tcid, chunk=c, provider_metadata=pm
+            ):
                 existing_btc = self._parts.get(tcid)
                 if isinstance(existing_btc, types.messages.BuiltinToolCallPart):
                     existing_btc.tool_args += c
-            case types.events.BuiltinToolEnd(tool_call_id=tcid):
+                    if pm is not None:
+                        existing_btc.provider_metadata = pm
+            case types.events.BuiltinToolEnd(tool_call_id=tcid, provider_metadata=pm):
                 existing_btc = self._parts.get(tcid)
                 if isinstance(existing_btc, types.messages.BuiltinToolCallPart):
                     updates["tool_call"] = existing_btc
-            case types.events.BuiltinToolResult(result=res):
+                    if pm is not None:
+                        existing_btc.provider_metadata = pm
+            case types.events.BuiltinToolResult(result=res, provider_metadata=pm):
+                if pm is not None:
+                    res = res.model_copy(update={"provider_metadata": pm})
                 self._message.parts.append(res)
             case types.events.FileEvent(
-                block_id=bid, media_type=mt, data=d, filename=fname
+                block_id=bid,
+                media_type=mt,
+                data=d,
+                filename=fname,
+                provider_metadata=pm,
             ):
                 fp = types.messages.FilePart(
                     id=bid or types.messages.generate_id(),
                     data=d,
                     media_type=mt,
                     filename=fname,
+                    provider_metadata=pm,
                 )
                 self._message.parts.append(fp)
                 self._parts[fp.id] = fp
+
+            case types.events.StreamEnd(provider_metadata=pm):
+                if pm is not None:
+                    self._message.provider_metadata = pm
             case _:
                 pass
 

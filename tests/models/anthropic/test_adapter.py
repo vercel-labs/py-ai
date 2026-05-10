@@ -16,6 +16,7 @@ import pytest
 import ai
 from ai import models
 from ai.models.anthropic import adapter, anthropic
+from ai.models.anthropic import metadata as anthropic_metadata
 from ai.models.anthropic import params as anthropic_params
 from ai.types import messages
 
@@ -161,7 +162,14 @@ async def test_send_reasoning_false_strips_thinking_blocks(
             _TEST_CLIENT,
             _MODEL,
             [
-                ai.assistant_message(ai.thinking("hidden", signature="sig")),
+                ai.assistant_message(
+                    ai.thinking(
+                        "hidden",
+                        provider_metadata=anthropic_metadata.AnthropicProviderMetadata(
+                            signature="sig"
+                        ),
+                    )
+                ),
                 ai.user_message("Hi"),
             ],
             params=anthropic_params.AnthropicParams(send_reasoning=False),
@@ -171,6 +179,41 @@ async def test_send_reasoning_false_strips_thinking_blocks(
     # The assistant message had only a reasoning part; with reasoning
     # stripped it produces no content and is dropped.
     assert captured["messages"] == [{"role": "user", "content": "Hi"}]
+
+
+async def test_reasoning_signature_round_trips_from_provider_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, captured = _patch_client(monkeypatch)
+
+    await _drain(
+        adapter.stream(
+            _TEST_CLIENT,
+            _MODEL,
+            [
+                ai.assistant_message(
+                    ai.thinking(
+                        "hidden",
+                        provider_metadata=anthropic_metadata.AnthropicProviderMetadata(
+                            signature="sig"
+                        ),
+                    )
+                ),
+                ai.user_message("Hi"),
+            ],
+        )
+    )
+
+    assert captured["messages"][0] == {
+        "role": "assistant",
+        "content": [
+            {
+                "type": "thinking",
+                "thinking": "hidden",
+                "signature": "sig",
+            }
+        ],
+    }
 
 
 async def test_builtin_tool_parts_round_trip(
@@ -183,14 +226,15 @@ async def test_builtin_tool_parts_round_trip(
         tool_call_id="srvtoolu_1",
         tool_name="web_search",
         tool_args='{"query":"weather"}',
-        provider_name="anthropic",
+        provider_metadata=anthropic_metadata.AnthropicProviderMetadata(),
     )
     result = messages.BuiltinToolReturnPart(
         tool_call_id="srvtoolu_1",
         tool_name="web_search",
         result=[{"title": "Forecast", "url": "https://example.com"}],
-        provider_name="anthropic",
-        provider_details={"result_type": "web_search_tool_result"},
+        provider_metadata=anthropic_metadata.AnthropicProviderMetadata(
+            result_type="web_search_tool_result"
+        ),
     )
     convo = [
         ai.user_message("What's the weather?"),

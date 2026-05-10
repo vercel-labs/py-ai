@@ -23,6 +23,7 @@ from .messages import (
     ToolCallPart,
     ToolResultPart,
 )
+from .metadata import ProviderMetadata
 
 _PART_TYPES = (
     TextPart,
@@ -91,12 +92,16 @@ def file_part(
     return FilePart.from_bytes(data, media_type=media_type, filename=filename)
 
 
-def thinking(text: str, *, signature: str | None = None) -> ReasoningPart:
+def thinking(
+    text: str,
+    *,
+    provider_metadata: ProviderMetadata | None = None,
+) -> ReasoningPart:
     """Create a :class:`ReasoningPart`.
 
     Useful for replaying conversation history that includes model reasoning.
     """
-    return ReasoningPart(text=text, signature=signature)
+    return ReasoningPart(text=text, provider_metadata=provider_metadata)
 
 
 def _tool_results_from_messages(messages: list[Message]) -> list[ToolResultPart]:
