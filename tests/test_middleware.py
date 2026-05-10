@@ -52,7 +52,7 @@ async def test_wrap_tool_is_called() -> None:
     mock_llm([call1, call2])
 
     async with my_agent.run(
-        MOCK_MODEL, [ai.user_message("Double 7")], middleware=[Spy()]
+        model=MOCK_MODEL, messages=[ai.user_message("Double 7")], middleware=[Spy()]
     ) as stream:
         async for _m in stream:
             pass
@@ -87,7 +87,7 @@ async def test_wrap_hook_is_called() -> None:
     mock_llm([[text_msg("OK")]])
 
     async with my_agent.run(
-        MOCK_MODEL, [ai.user_message("go")], middleware=[Spy()]
+        model=MOCK_MODEL, messages=[ai.user_message("go")], middleware=[Spy()]
     ) as stream:
         async for event in stream:
             if not isinstance(event, agent_events_.HookEvent):
@@ -130,7 +130,9 @@ async def test_wrap_agent_run_ordering() -> None:
     mock_llm([[text_msg("Hi")]])
 
     async with my_agent.run(
-        MOCK_MODEL, [ai.user_message("Hi")], middleware=[Outer(), Inner()]
+        model=MOCK_MODEL,
+        messages=[ai.user_message("Hi")],
+        middleware=[Outer(), Inner()],
     ) as stream:
         async for _m in stream:
             pass
@@ -158,7 +160,7 @@ async def test_wrap_tool_context_fields_flow_to_result() -> None:
     mock_llm([call1, call2])
 
     async with my_agent.run(
-        MOCK_MODEL, [ai.user_message("go")], middleware=[Rewriter()]
+        model=MOCK_MODEL, messages=[ai.user_message("go")], middleware=[Rewriter()]
     ) as stream:
         msgs = await collect_messages(stream)
     tool_result_msgs = [m for m in msgs if m.role == "tool" and m.tool_results]
@@ -188,7 +190,7 @@ async def test_wrap_tool_rewriting_tool_call_id_breaks_history() -> None:
 
     with pytest.raises(ExceptionGroup) as exc_info:
         async with my_agent.run(
-            MOCK_MODEL, [ai.user_message("go")], middleware=[Rewriter()]
+            model=MOCK_MODEL, messages=[ai.user_message("go")], middleware=[Rewriter()]
         ) as stream:
             async for _m in stream:
                 pass
@@ -214,7 +216,7 @@ async def test_model_context_messages_are_isolated() -> None:
     mock_llm([[text_msg("Hi")]])
 
     async with my_agent.run(
-        MOCK_MODEL, original_messages, middleware=[Mutator()]
+        model=MOCK_MODEL, messages=original_messages, middleware=[Mutator()]
     ) as stream:
         async for _m in stream:
             pass
@@ -250,7 +252,7 @@ async def test_middleware_can_fix_bad_tool_kwargs() -> None:
     mock_llm([call1, call2])
 
     async with my_agent.run(
-        MOCK_MODEL, [ai.user_message("go")], middleware=[ArgFixer()]
+        model=MOCK_MODEL, messages=[ai.user_message("go")], middleware=[ArgFixer()]
     ) as stream:
         msgs = await collect_messages(stream)
     tool_result_msgs = [m for m in msgs if m.role == "tool" and m.tool_results]

@@ -39,7 +39,9 @@ async def test_resolve_live_future() -> None:
 
     mock_llm([[text_msg("OK")]])
 
-    async with my_agent.run(MOCK_MODEL, [ai.user_message("go")]) as stream:
+    async with my_agent.run(
+        model=MOCK_MODEL, messages=[ai.user_message("go")]
+    ) as stream:
         async for event in stream:
             if not isinstance(event, agent_events_.HookEvent):
                 continue
@@ -73,7 +75,9 @@ async def test_cancel_live_hook() -> None:
 
     mock_llm([[text_msg("OK")]])
 
-    async with my_agent.run(MOCK_MODEL, [ai.user_message("go")]) as stream:
+    async with my_agent.run(
+        model=MOCK_MODEL, messages=[ai.user_message("go")]
+    ) as stream:
         async for event in stream:
             if not isinstance(event, agent_events_.HookEvent):
                 continue
@@ -111,7 +115,9 @@ async def test_pre_registered_resolution_consumed() -> None:
     ai.resolve_hook("pre_reg_1", {"approved": True})
 
     mock_llm([[text_msg("OK")]])
-    async with my_agent.run(MOCK_MODEL, [ai.user_message("go")]) as stream:
+    async with my_agent.run(
+        model=MOCK_MODEL, messages=[ai.user_message("go")]
+    ) as stream:
         async for _msg in stream:
             pass
 
@@ -150,7 +156,9 @@ async def test_resolved_hook_emits_message() -> None:
     mock_llm([[text_msg("OK")]])
 
     hooks: list[ai.messages.HookPart[Any]] = []
-    async with my_agent.run(MOCK_MODEL, [ai.user_message("go")]) as stream:
+    async with my_agent.run(
+        model=MOCK_MODEL, messages=[ai.user_message("go")]
+    ) as stream:
         async for event in stream:
             if not isinstance(event, agent_events_.HookEvent):
                 continue
@@ -183,7 +191,9 @@ async def test_hook_metadata_in_pending() -> None:
 
     mock_llm([[text_msg("OK")]])
     hooks: list[ai.messages.HookPart[Any]] = []
-    async with my_agent.run(MOCK_MODEL, [ai.user_message("go")]) as stream:
+    async with my_agent.run(
+        model=MOCK_MODEL, messages=[ai.user_message("go")]
+    ) as stream:
         async for event in stream:
             if isinstance(event, agent_events_.HookEvent):
                 hooks.append(event.hook)

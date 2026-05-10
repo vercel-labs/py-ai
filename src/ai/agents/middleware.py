@@ -2,7 +2,7 @@
 
 Middleware is run-scoped — pass it to :meth:`Agent.run`::
 
-    agent.run(model, messages, middleware=[LoggingMiddleware()])
+    agent.run(model=model, messages=messages, middleware=[LoggingMiddleware()])
 
 Middleware wraps agent runs, model calls, generate calls, tool calls, and
 hook calls.  Subclass :class:`Middleware` and override the methods you care

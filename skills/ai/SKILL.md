@@ -29,7 +29,7 @@ messages = [
     ai.user_message("What's the weather in Tokyo?"),
 ]
 
-async for msg in agent.run(model, messages):
+async for msg in agent.run(model=model, messages=messages):
     print(msg.text_delta, end="")
 ```
 
@@ -85,7 +85,7 @@ async def render(prompt: str) -> ai.StreamingTextTool:
 @ai.tool
 async def research(topic: str) -> ai.SubAgentTool:
     sub = ai.agent(tools=[...])
-    async for event in sub.run(model, msgs):
+    async for event in sub.run(model=model, messages=msgs):
         yield event         # final assistant text becomes the tool result
 ```
 
@@ -164,12 +164,12 @@ async def multi(model: ai.Model, query: str) -> str:
 
     r1, r2 = await asyncio.gather(
         ai.yield_from(
-            researcher.run(model, msgs1),
+            researcher.run(model=model, messages=msgs1),
             label="researcher",
             aggregator=ai.MessageAggregator,
         ),
         ai.yield_from(
-            analyst.run(model, msgs2),
+            analyst.run(model=model, messages=msgs2),
             label="analyst",
             aggregator=ai.MessageAggregator,
         ),
@@ -217,7 +217,7 @@ Hook messages have `role="signal"` with a `HookPart`.
 Consuming hooks in the iterator:
 
 ```python
-async for msg in my_agent.run(model, messages):
+async for msg in my_agent.run(model=model, messages=messages):
     if msg.role == "signal" and (hook := msg.get_hook_part()):
         answer = input(f"Approve {hook.hook_id}? [y/n] ")
         ai.resolve_hook(
@@ -264,7 +264,7 @@ from ai.ai_sdk_ui import UI_MESSAGE_STREAM_HEADERS, to_messages, to_sse_stream
 
 messages = to_messages(request.messages)
 return StreamingResponse(
-    to_sse_stream(agent.run(model, messages)),
+    to_sse_stream(agent.run(model=model, messages=messages)),
     headers=UI_MESSAGE_STREAM_HEADERS,
 )
 ```
@@ -285,7 +285,7 @@ class LoggingMiddleware(ai.Middleware):
         print(f"tool {call.tool_name}({call.kwargs})")
         return await next(call)
 
-async for msg in agent.run(model, messages, middleware=[LoggingMiddleware()]):
+async for msg in agent.run(model=model, messages=messages, middleware=[LoggingMiddleware()]):
     ...
 ```
 

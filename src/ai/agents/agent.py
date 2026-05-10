@@ -163,7 +163,7 @@ becomes the tool result the parent model sees::
     @ai.tool
     async def research(topic: str) -> SubAgentTool:
         sub = ai.agent(tools=[...])
-        async with sub.run(model, messages) as stream:
+        async with sub.run(model=model, messages=messages) as stream:
             async for event in stream:
                 yield event
 """
@@ -658,12 +658,15 @@ async def yield_from[T, R](
     Use inside a custom loop to stream messages from a sub-agent to the
     consumer without adding them to the parent agent's message history::
 
-        async with sub.run(model, msgs) as stream:
+        async with sub.run(model=model, messages=msgs) as stream:
             result = await yield_from(stream, label="researcher")
 
     Works with :func:`asyncio.gather` for concurrent fan-out::
 
-        async with a.run(model, m1) as sa, b.run(model, m2) as sb:
+        async with (
+            a.run(model=model, messages=m1) as sa,
+            b.run(model=model, messages=m2) as sb,
+        ):
             r1, r2 = await asyncio.gather(
                 yield_from(sa, label="a"),
                 yield_from(sb, label="b"),
@@ -740,16 +743,16 @@ class Agent:
     @contextlib.asynccontextmanager
     async def run(
         self,
+        *,
         model: models.Model[Any],
         messages: list[types.messages.Message],
-        *,
         middleware: list[middleware_.Middleware] | None = None,
     ) -> AsyncIterator[AsyncGenerator[events_.AgentEvent]]:
         """Run the agent loop, yielding events to the consumer.
 
         Used as an async context manager whose value is the event stream::
 
-            async with agent.run(model, messages) as stream:
+            async with agent.run(model=model, messages=messages) as stream:
                 async for event in stream:
                     ...
 

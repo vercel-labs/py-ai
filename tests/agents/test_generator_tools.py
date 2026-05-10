@@ -45,7 +45,9 @@ async def test_generator_tool_streams_and_returns_result() -> None:
     llm = mock_llm([call, reply])
 
     all_events: list[agent_events_.AgentEvent] = []
-    async with my_agent.run(MOCK_MODEL, [ai.user_message("Go")]) as stream:
+    async with my_agent.run(
+        model=MOCK_MODEL, messages=[ai.user_message("Go")]
+    ) as stream:
         async for event in stream:
             all_events.append(event)
 
@@ -117,7 +119,7 @@ async def research_tool(topic: str) -> AsyncGenerator[agent_events_.AgentEvent]:
         ai.system_message("Be concise."),
         ai.user_message(f"Research: {topic}"),
     ]
-    async with inner.run(MOCK_MODEL, msgs) as stream:
+    async with inner.run(model=MOCK_MODEL, messages=msgs) as stream:
         async for event in stream:
             yield event
 
@@ -146,7 +148,9 @@ async def test_yield_from_nested_agent() -> None:
     models.register_stream("mock", adapter.stream)
 
     all_events: list[agent_events_.AgentEvent] = []
-    async with outer.run(MOCK_MODEL, [ai.user_message("Tell me about Mars")]) as stream:
+    async with outer.run(
+        model=MOCK_MODEL, messages=[ai.user_message("Tell me about Mars")]
+    ) as stream:
         async for event in stream:
             all_events.append(event)
 

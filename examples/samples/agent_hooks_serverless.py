@@ -91,7 +91,7 @@ async def main() -> None:
     print("--- Run 1: hook fires, no resolution, run suspends ---")
     pending_hook_labels: list[str] = []
 
-    async with my_agent.run(model, messages) as stream:
+    async with my_agent.run(model=model, messages=messages) as stream:
         async for event in stream:
             # HACK?: When we get a complete assistant message, add it to
             # messages so it can get replayed easily.
@@ -118,7 +118,7 @@ async def main() -> None:
     for label in pending_hook_labels:
         ai.resolve_hook(label, Confirmation(approved=True, reason="user approved"))
 
-    async with my_agent.run(model, messages) as stream:
+    async with my_agent.run(model=model, messages=messages) as stream:
         async for event in stream:
             if isinstance(event, ai.events.TextDelta):
                 print(event.chunk, end="", flush=True)

@@ -30,7 +30,7 @@ async def research(topic: str) -> ai.SubAgentTool:
         ai.user_message(f"Research: {topic}"),
     ]
 
-    async with researcher.run(model, messages) as stream:
+    async with researcher.run(model=model, messages=messages) as stream:
         async for event in stream:
             yield event
 
@@ -45,7 +45,7 @@ async def main() -> None:
         ai.user_message("Tell me about Mars."),
     ]
 
-    async with orchestrator.run(model, messages) as stream:
+    async with orchestrator.run(model=model, messages=messages) as stream:
         async for event in stream:
             # Subtool results
             if isinstance(event, ai.events.PartialToolCallResult):

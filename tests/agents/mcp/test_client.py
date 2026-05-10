@@ -89,7 +89,9 @@ async def test_mcp_tool_executes_through_agent() -> None:
     call2 = [text_msg("Done.", id="msg-2")]
     llm = mock_llm([call1, call2])
 
-    async with my_agent.run(MOCK_MODEL, [ai.user_message("echo hello")]) as stream:
+    async with my_agent.run(
+        model=MOCK_MODEL, messages=[ai.user_message("echo hello")]
+    ) as stream:
         msgs = await collect_messages(stream)
 
     # Tool was called with the right args.

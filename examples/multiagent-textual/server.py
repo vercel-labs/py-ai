@@ -158,8 +158,8 @@ async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.events.Agent
     # carrying the branch label, so the TUI can route to the right panel.
     async with (
         mothership_agent.run(
-            context.model,
-            [
+            model=context.model,
+            messages=[
                 ai.system_message(
                     "You are assistant 1. Use contact_mothership "
                     "when asked about the future."
@@ -168,8 +168,8 @@ async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.events.Agent
             ],
         ) as mothership_stream,
         data_centers_agent.run(
-            context.model,
-            [
+            model=context.model,
+            messages=[
                 ai.system_message(
                     "You are assistant 2. Use contact_data_centers "
                     "when asked about the future."
@@ -198,8 +198,8 @@ async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.events.Agent
     # panel as its default.
     summary_agent = ai.agent()
     async with summary_agent.run(
-        context.model,
-        [
+        model=context.model,
+        messages=[
             ai.system_message(
                 "You are assistant 3. Summarise the results from the other assistants."
             ),
@@ -263,7 +263,7 @@ async def ws_endpoint(websocket: fastapi.WebSocket) -> None:
 
     try:
         async with orchestrator.run(
-            MODEL, [ai.user_message("When will the robots take over?")]
+            model=MODEL, messages=[ai.user_message("When will the robots take over?")]
         ) as result:
             async for event in result:
                 data = _normalise_event(event.model_dump())

@@ -30,7 +30,9 @@ async def test_agent_text_only() -> None:
     my_agent = ai.agent(tools=[double])
 
     llm = mock_llm([[text_msg("Hello!")]])
-    async with my_agent.run(MOCK_MODEL, [ai.user_message("Hi")]) as stream:
+    async with my_agent.run(
+        model=MOCK_MODEL, messages=[ai.user_message("Hi")]
+    ) as stream:
         msgs = await collect_messages(stream)
     assert llm.call_count == 1
     assert any(m.text == "Hello!" for m in msgs)
@@ -47,7 +49,9 @@ async def test_agent_tool_then_text() -> None:
     call2 = [text_msg("The answer is 10.")]
     llm = mock_llm([call1, call2])
 
-    async with my_agent.run(MOCK_MODEL, [ai.user_message("Double 5")]) as stream:
+    async with my_agent.run(
+        model=MOCK_MODEL, messages=[ai.user_message("Double 5")]
+    ) as stream:
         msgs = await collect_messages(stream)
     assert llm.call_count == 2
     tool_results = [m for m in msgs if m.role == "tool" and m.tool_results]
@@ -81,7 +85,9 @@ async def test_agent_parallel_tools() -> None:
     call2 = [text_msg("6 and 14", id="msg-2")]
     llm = mock_llm([[two_tools], call2])
 
-    async with my_agent.run(MOCK_MODEL, [ai.user_message("Double 3 and 7")]) as stream:
+    async with my_agent.run(
+        model=MOCK_MODEL, messages=[ai.user_message("Double 3 and 7")]
+    ) as stream:
         msgs = await collect_messages(stream)
     assert llm.call_count == 2
     tool_result_msgs = [m for m in msgs if m.role == "tool" and m.tool_results]
@@ -103,7 +109,7 @@ async def test_agent_multi_turn() -> None:
     llm = mock_llm([turn1, turn2, turn3])
 
     async with my_agent.run(
-        MOCK_MODEL, [ai.user_message("Concat then double")]
+        model=MOCK_MODEL, messages=[ai.user_message("Concat then double")]
     ) as stream:
         await collect_messages(stream)
     assert llm.call_count == 3

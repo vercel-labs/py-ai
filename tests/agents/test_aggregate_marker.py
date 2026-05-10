@@ -128,7 +128,9 @@ async def test_alias_declared_tool_runs_end_to_end() -> None:
     llm = mock_llm([call, reply])
 
     all_events: list[agent_events_.AgentEvent] = []
-    async with my_agent.run(MOCK_MODEL, [ai.user_message("Go")]) as stream:
+    async with my_agent.run(
+        model=MOCK_MODEL, messages=[ai.user_message("Go")]
+    ) as stream:
         async for event in stream:
             all_events.append(event)
 

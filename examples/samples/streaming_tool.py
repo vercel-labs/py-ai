@@ -35,7 +35,7 @@ async def main() -> None:
         ai.user_message("When will the robots take over?"),
     ]
 
-    async with my_agent.run(model, messages) as stream:
+    async with my_agent.run(model=model, messages=messages) as stream:
         async for event in stream:
             if isinstance(event, ai.events.PartialToolCallResult):
                 print(f"  [{event.value}]")

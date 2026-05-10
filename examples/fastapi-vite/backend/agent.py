@@ -36,7 +36,7 @@ async def talk_to_mothership(question: str) -> ai.SubAgentTool:
         ai.system_message(MOTHERSHIP_SYSTEM),
         ai.user_message(question),
     ]
-    async with mothership.run(MOTHERSHIP_MODEL, messages) as stream:
+    async with mothership.run(model=MOTHERSHIP_MODEL, messages=messages) as stream:
         async for event in stream:
             yield event
 

@@ -53,8 +53,10 @@ async def main() -> None:
     my_agent = CustomAgent(tools=tools)
 
     async with my_agent.run(
-        model,
-        [ai.user_message("Compare the weather and population of New York and Tokyo.")],
+        model=model,
+        messages=[
+            ai.user_message("Compare the weather and population of New York and Tokyo.")
+        ],
     ) as stream:
         async for event in stream:
             if (

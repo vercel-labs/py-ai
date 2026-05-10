@@ -21,7 +21,7 @@ async def main() -> None:
         ai.user_message("What's the weather in Tokyo?"),
     ]
 
-    async with my_agent.run(model, messages) as stream:
+    async with my_agent.run(model=model, messages=messages) as stream:
         async for event in stream:
             if isinstance(event, ai.events.TextDelta):
                 print(event.chunk, end="", flush=True)
