@@ -482,9 +482,9 @@ async def test_stream_calls_prepare_messages() -> None:
     with patch(
         "ai.models.core.api.integrity.prepare_messages", wraps=lambda m: m
     ) as spy:
-        s = models.stream(MOCK_MODEL, msgs)
-        async for _ in s:
-            pass
+        async with models.stream(MOCK_MODEL, msgs) as s:
+            async for _ in s:
+                pass
         spy.assert_called_once_with(msgs)
 
 
@@ -518,9 +518,9 @@ async def test_stream_sanitizes_internal_messages() -> None:
         messages.Message(role="internal", parts=[messages.TextPart(text="internal")]),
         ai.assistant_message("hello"),
     ]
-    s = models.stream(MOCK_MODEL, msgs)
-    async for _ in s:
-        pass
+    async with models.stream(MOCK_MODEL, msgs) as s:
+        async for _ in s:
+            pass
 
     # The adapter should have received only 2 messages (internal stripped)
     assert len(received) == 1

@@ -1,5 +1,6 @@
+import contextlib
 import dataclasses
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Sequence
 from typing import Any, Protocol, Self, cast, runtime_checkable
 
 import pydantic
@@ -137,17 +138,8 @@ class Stream:
         )
         self._parts: dict[str, types.messages.Part] = {}
 
-    async def __aenter__(self) -> Self:
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: object,
-    ) -> bool:
+    async def aclose(self) -> None:
         await self._gen.aclose()
-        return False
 
     def __aiter__(self) -> Self:
         return self
@@ -337,7 +329,8 @@ async def _replay_tool_calls(
         )
 
 
-def stream[ProviderParamsT: pydantic.BaseModel](
+@contextlib.asynccontextmanager
+async def stream[ProviderParamsT: pydantic.BaseModel](
     model: model_.Model[ProviderParamsT],
     messages: list[types.messages.Message],
     *,
@@ -345,26 +338,37 @@ def stream[ProviderParamsT: pydantic.BaseModel](
     output_type: type[pydantic.BaseModel] | None = None,
     params: params_.StreamParams[ProviderParamsT] | None = None,
     executor: StreamExecutor = _default_executor,
-) -> Stream:
+) -> AsyncIterator[Stream]:
     """Stream an LLM response.
+
+    Used as an async context manager whose value is the :class:`Stream`::
+
+        async with ai.stream(model, messages) as s:
+            async for event in s:
+                ...
+            print(s.message)
 
     If the last message is marked ``replay=True``, replay that turn as
     synthetic stream events instead of calling the model.
     """
     if messages and messages[-1].replay:
         last = messages[-1]
-        return Stream(_replay_tool_calls(last), seed_message=last.model_copy(deep=True))
-
-    messages = integrity.prepare_messages(messages)
-    stream_params = _normalize_stream_params(model, params)
-    request = StreamRequest[ProviderParamsT](
-        model,
-        messages,
-        tools,
-        output_type,
-        stream_params,
-    )
-    return Stream(executor._do_stream(request))
+        s = Stream(_replay_tool_calls(last), seed_message=last.model_copy(deep=True))
+    else:
+        prepared = integrity.prepare_messages(messages)
+        stream_params = _normalize_stream_params(model, params)
+        request = StreamRequest[ProviderParamsT](
+            model,
+            prepared,
+            tools,
+            output_type,
+            stream_params,
+        )
+        s = Stream(executor._do_stream(request))
+    try:
+        yield s
+    finally:
+        await s.aclose()
 
 
 async def generate(

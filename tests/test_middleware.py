@@ -79,8 +79,9 @@ async def test_wrap_hook_is_called() -> None:
 
     @my_agent.loop
     async def custom(context: ai.Context) -> AsyncGenerator[ai.events.Event]:
-        async for event in ai.models.stream(context.model, context.messages):
-            yield event
+        async with ai.models.stream(context.model, context.messages) as stream:
+            async for event in stream:
+                yield event
         await ai.hook("test_hook", payload=Confirmation)
 
     mock_llm([[text_msg("OK")]])

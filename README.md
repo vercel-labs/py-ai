@@ -38,9 +38,10 @@ async def main() -> None:
         ai.user_message("What's the weather in Tokyo?"),
     ]
 
-    async for event in agent.run(model, messages):
-        if isinstance(event, ai.TextDelta):
-            print(event.chunk, end="", flush=True)
+    async with agent.run(model, messages) as stream:
+        async for event in stream:
+            if isinstance(event, ai.TextDelta):
+                print(event.chunk, end="", flush=True)
     print()
 
 
@@ -106,17 +107,17 @@ Override the default loop when you need approval gates, routing, or custom orche
 @agent.loop
 async def custom(context: ai.Context):
     while True:
-        s = ai.stream(context.model, context.messages, tools=context.tools)
-        async for event in s:
-            yield event
-        context.add(s.message)
+        async with ai.stream(context.model, context.messages, tools=context.tools) as s:
+            async for event in s:
+                yield event
+            context.add(s.message)
 
-        tool_calls = context.resolve(s.tool_calls)
-        if not tool_calls:
-            return
+            tool_calls = context.resolve(s.tool_calls)
+            if not tool_calls:
+                return
 
-        results = [await tc() for tc in tool_calls]
-        yield ai.tool_result(*results)
+            results = [await tc() for tc in tool_calls]
+            yield ai.tool_result(*results)
 ```
 
 ## Examples
