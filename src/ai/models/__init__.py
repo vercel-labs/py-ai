@@ -3,10 +3,11 @@
 Usage::
 
     import ai
-    from ai.models import openai, anthropic, ai_gateway
+    from ai.models import openai, anthropic, google, ai_gateway
 
     model = openai("gpt-5.4")
     model = anthropic("claude-sonnet-4-6")
+    model = google("gemini-2.5-flash")
     model = ai_gateway("anthropic/claude-sonnet-4")
 
     # stream — auto-creates client from env vars
@@ -44,6 +45,7 @@ from .core.client import Client
 from .core.model import Model
 from .core.params import GenerateParams, ImageParams, VideoParams
 from .core.proto import CheckConnFn, GenerateFn, Provider, StreamFn
+from .google import google
 from .openai import openai
 
 __all__ = [
@@ -66,6 +68,7 @@ __all__ = [
     # Provider factories
     "ai_gateway",
     "anthropic",
+    "google",
     "openai",
     # Adapter registration
     "register_generate",

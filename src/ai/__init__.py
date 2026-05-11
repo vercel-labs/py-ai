@@ -44,6 +44,7 @@ from .models import (
     anthropic,
     check_connection,
     generate,
+    google,
     openai,
     stream,
 )
@@ -87,6 +88,7 @@ __all__ = [
     # Provider factories
     "openai",
     "anthropic",
+    "google",
     "ai_gateway",
     # Agents — primary API
     "Agent",

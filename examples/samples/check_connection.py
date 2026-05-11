@@ -8,6 +8,7 @@ import ai
 PROVIDERS: list[tuple[str, ai.Provider, str]] = [
     ("ai_gateway", ai.ai_gateway, "anthropic/claude-sonnet-4"),
     ("anthropic", ai.anthropic, "claude-sonnet-4-20250514"),
+    ("google", ai.google, "gemini-2.5-flash"),
     ("openai", ai.openai, "gpt-5.4-mini"),
 ]
 

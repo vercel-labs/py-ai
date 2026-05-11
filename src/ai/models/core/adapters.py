@@ -32,12 +32,14 @@ def _ensure_adapters() -> None:
     from ..ai_gateway.adapter import generate as ai_gw_generate
     from ..ai_gateway.adapter import stream as ai_gw_stream
     from ..anthropic.adapter import stream as anthropic_stream
+    from ..google.adapter import stream as google_stream
     from ..openai.adapter import stream as openai_stream
 
     _stream_adapters["ai-gateway-v3"] = ai_gw_stream
     _generate_adapters["ai-gateway-v3"] = ai_gw_generate
     _stream_adapters["openai"] = openai_stream
     _stream_adapters["anthropic"] = anthropic_stream
+    _stream_adapters["google"] = google_stream
 
 
 def register_stream(adapter: str, fn: proto.StreamFn) -> None:
