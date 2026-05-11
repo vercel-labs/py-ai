@@ -73,6 +73,11 @@ def merge_tool_results(
     for part in tool_parts:
         if not isinstance(part, messages_.ToolResultPart):
             continue
+        # Hook-abort placeholders are internal: the corresponding
+        # HookPart(pending) carries the user-visible state via
+        # merge_approval_signals.
+        if part.is_hook_pending:
+            continue
         idx_opt = tool_index.get(part.tool_call_id)
         if idx_opt is None:
             continue

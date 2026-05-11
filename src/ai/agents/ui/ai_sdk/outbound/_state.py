@@ -205,6 +205,10 @@ class _StreamState:
         for part in event.results:
             if part.tool_call_id in self.emitted_tool_results:
                 continue
+            # Hook-abort placeholders are internal bookkeeping: the
+            # corresponding HookPart(pending) drives the UI state.
+            if part.is_hook_pending:
+                continue
             self.emitted_tool_results.add(part.tool_call_id)
             if part.is_error:
                 out.append(
