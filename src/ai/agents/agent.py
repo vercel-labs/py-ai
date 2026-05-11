@@ -770,9 +770,7 @@ class Agent:
         """Stream, execute tools, repeat."""
         while context.keep_running():
             async with (
-                models.stream(
-                    context.model, context.messages, tools=context.tools
-                ) as stream,
+                models.stream(context=context) as stream,
                 ToolRunner() as tr,
             ):
                 async for event in util.merge(stream, tr.events()):

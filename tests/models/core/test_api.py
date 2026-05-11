@@ -4,6 +4,7 @@ from collections.abc import AsyncGenerator, Sequence
 from typing import Any
 
 import pydantic
+import pytest
 
 import ai
 from ai import models
@@ -225,6 +226,42 @@ async def test_stream_forwards_output_type_and_request_params() -> None:
 
     assert received_output_types == [Answer]
     assert received_params == [params]
+
+
+async def test_stream_accepts_context() -> None:
+    """``stream(context=ctx)`` reads model/messages/tools off the context."""
+    mock = mock_llm([[text_msg("ok")]])
+    ctx = ai.Context(
+        model=MOCK_MODEL,
+        messages=[ai.user_message("Hi")],
+        tools=[],
+    )
+    async with models.stream(context=ctx) as s:
+        async for _ in s:
+            pass
+    assert mock.call_count == 1
+    assert s.text == "ok"
+
+
+async def test_stream_rejects_context_with_positional_args() -> None:
+    """Passing both positional model/messages and ``context=`` is a TypeError."""
+    ctx = ai.Context(
+        model=MOCK_MODEL,
+        messages=[ai.user_message("Hi")],
+        tools=[],
+    )
+    with pytest.raises(TypeError, match="either model/messages/tools or context="):
+        async with models.stream(  # type: ignore[call-overload]
+            MOCK_MODEL, [ai.user_message("Hi")], context=ctx
+        ):
+            pass
+
+
+async def test_stream_requires_model_messages_or_context() -> None:
+    """Passing nothing is a TypeError."""
+    with pytest.raises(TypeError, match="either model and messages or context="):
+        async with models.stream():  # type: ignore[call-overload]
+            pass
 
 
 async def test_generate_dispatches_to_registered_adapter() -> None:

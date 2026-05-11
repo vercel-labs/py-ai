@@ -70,7 +70,7 @@ async def main() -> None:
     ) -> AsyncGenerator[ai.events.AgentEvent]:
         while context.keep_running():
             async with (
-                ai.stream(context.model, context.messages, tools=context.tools) as s,
+                ai.stream(context=context) as s,
                 ai.ToolRunner() as tr,
             ):
                 async for event in ai.util.merge(s, tr.events()):
