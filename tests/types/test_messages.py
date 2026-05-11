@@ -106,6 +106,30 @@ def test_file_part_in_part_union() -> None:
     assert restored.parts[1].media_type == "image/jpeg"
 
 
+def test_provider_metadata_round_trips_as_dict() -> None:
+    msg = messages.Message(
+        id="m1",
+        role="assistant",
+        provider_metadata={"provider": "test", "nested": {"value": 1}},
+        parts=[
+            messages.TextPart(
+                text="hello",
+                provider_metadata={"provider": "test", "block": "text"},
+            )
+        ],
+    )
+
+    restored = messages.Message.model_validate(msg.model_dump())
+
+    assert restored.provider_metadata == {
+        "provider": "test",
+        "nested": {"value": 1},
+    }
+    part = restored.parts[0]
+    assert isinstance(part, messages.TextPart)
+    assert part.provider_metadata == {"provider": "test", "block": "text"}
+
+
 def test_from_url_infers_from_data_url() -> None:
     fp = messages.FilePart.from_url("data:audio/wav;base64,AAAA")
     assert fp.media_type == "audio/wav"

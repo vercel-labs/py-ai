@@ -14,7 +14,6 @@ import pytest
 import ai
 from ai import models
 from ai.models.anthropic import adapter, anthropic
-from ai.models.anthropic import metadata as anthropic_metadata
 from ai.types import events, messages
 
 from .conftest import (
@@ -55,10 +54,7 @@ async def test_server_tool_use_emits_builtin_events(
     assert calls[0].tool_call_id == "srvtoolu_1"
     assert calls[0].tool_name == "web_search"
     assert calls[0].tool_args == '{"query":"weather"}'
-    assert isinstance(
-        calls[0].provider_metadata,
-        anthropic_metadata.AnthropicProviderMetadata,
-    )
+    assert calls[0].provider_metadata == {"provider": "anthropic"}
 
 
 async def test_tool_result_block_emits_builtin_result(
@@ -92,14 +88,13 @@ async def test_tool_result_block_emits_builtin_result(
     assert ret.tool_call_id == "srvtoolu_1"
     assert ret.tool_name == "web_search"
     assert ret.result == payload
-    assert isinstance(
-        ret.provider_metadata,
-        anthropic_metadata.AnthropicProviderMetadata,
-    )
-    assert ret.provider_metadata.result_type == "web_search_tool_result"
+    assert ret.provider_metadata == {
+        "provider": "anthropic",
+        "resultType": "web_search_tool_result",
+    }
 
 
-async def test_signature_delta_emits_anthropic_metadata(
+async def test_signature_delta_emits_provider_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sdk_events = [
@@ -112,11 +107,10 @@ async def test_signature_delta_emits_anthropic_metadata(
 
     reasoning = s.message.parts[0]
     assert isinstance(reasoning, messages.ReasoningPart)
-    assert isinstance(
-        reasoning.provider_metadata,
-        anthropic_metadata.AnthropicProviderMetadata,
-    )
-    assert reasoning.provider_metadata.signature == "sig"
+    assert reasoning.provider_metadata == {
+        "provider": "anthropic",
+        "signature": "sig",
+    }
 
 
 async def test_event_kinds_in_order(monkeypatch: pytest.MonkeyPatch) -> None:

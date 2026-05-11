@@ -4,7 +4,7 @@ from typing import Annotated, Any, Literal, Self
 
 import pydantic
 
-from . import media, metadata
+from . import media
 from . import usage as usage_
 
 
@@ -17,7 +17,7 @@ def generate_id(prefix: str | None = None) -> str:
 class TextPart(pydantic.BaseModel):
     id: str = pydantic.Field(default_factory=generate_id)
     text: str
-    provider_metadata: pydantic.SerializeAsAny[metadata.ProviderMetadata] | None = None
+    provider_metadata: dict[str, Any] | None = None
 
     kind: Literal["text"] = "text"
 
@@ -27,7 +27,7 @@ class ToolCallPart(pydantic.BaseModel):
     tool_call_id: str
     tool_name: str
     tool_args: str
-    provider_metadata: pydantic.SerializeAsAny[metadata.ProviderMetadata] | None = None
+    provider_metadata: dict[str, Any] | None = None
 
     kind: Literal["tool_call"] = "tool_call"
 
@@ -43,7 +43,7 @@ class ToolResultPart(pydantic.BaseModel):
     tool_name: str
     result: Any = None
     is_error: bool = False
-    provider_metadata: pydantic.SerializeAsAny[metadata.ProviderMetadata] | None = None
+    provider_metadata: dict[str, Any] | None = None
 
     kind: Literal["tool_result"] = "tool_result"
     model_config = pydantic.ConfigDict(frozen=True)
@@ -60,7 +60,7 @@ class BuiltinToolCallPart(pydantic.BaseModel):
     tool_call_id: str
     tool_name: str
     tool_args: str = ""
-    provider_metadata: pydantic.SerializeAsAny[metadata.ProviderMetadata] | None = None
+    provider_metadata: dict[str, Any] | None = None
 
     kind: Literal["builtin_tool_call"] = "builtin_tool_call"
 
@@ -73,7 +73,7 @@ class BuiltinToolReturnPart(pydantic.BaseModel):
     tool_name: str
     result: Any = None
     is_error: bool = False
-    provider_metadata: pydantic.SerializeAsAny[metadata.ProviderMetadata] | None = None
+    provider_metadata: dict[str, Any] | None = None
 
     kind: Literal["builtin_tool_return"] = "builtin_tool_return"
     model_config = pydantic.ConfigDict(frozen=True)
@@ -82,7 +82,7 @@ class BuiltinToolReturnPart(pydantic.BaseModel):
 class ReasoningPart(pydantic.BaseModel):
     id: str = pydantic.Field(default_factory=generate_id)
     text: str
-    provider_metadata: pydantic.SerializeAsAny[metadata.ProviderMetadata] | None = None
+    provider_metadata: dict[str, Any] | None = None
 
     kind: Literal["reasoning"] = "reasoning"
 
@@ -136,7 +136,7 @@ class StructuredOutputPart(pydantic.BaseModel):
     data: dict[str, Any]
     output_type_name: str
     kind: Literal["structured_output"] = "structured_output"
-    provider_metadata: pydantic.SerializeAsAny[metadata.ProviderMetadata] | None = None
+    provider_metadata: dict[str, Any] | None = None
 
     _hydrated: Any = pydantic.PrivateAttr(default=None)
 
@@ -170,7 +170,7 @@ class FilePart(pydantic.BaseModel):
     media_type: str  # IANA media type, e.g. "image/png", "audio/wav"
     filename: str | None = None
     kind: Literal["file"] = "file"
-    provider_metadata: pydantic.SerializeAsAny[metadata.ProviderMetadata] | None = None
+    provider_metadata: dict[str, Any] | None = None
 
     @classmethod
     def from_url(cls, url: str, *, media_type: str | None = None) -> Self:
@@ -230,7 +230,7 @@ class Message(pydantic.BaseModel):
     id: str = pydantic.Field(default_factory=generate_id)
     turn_id: str | None = None
     usage: usage_.Usage | None = None
-    provider_metadata: pydantic.SerializeAsAny[metadata.ProviderMetadata] | None = None
+    provider_metadata: dict[str, Any] | None = None
 
     # Set on the seeded message that ``models.stream`` returns when
     # short-circuiting an existing assistant turn (resume-after-approval

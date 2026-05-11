@@ -23,7 +23,6 @@ from .messages import (
     ToolCallPart,
     ToolResultPart,
 )
-from .metadata import ProviderMetadata
 
 _PART_TYPES = (
     TextPart,
@@ -95,7 +94,7 @@ def file_part(
 def thinking(
     text: str,
     *,
-    provider_metadata: ProviderMetadata | None = None,
+    provider_metadata: dict[str, Any] | None = None,
 ) -> ReasoningPart:
     """Create a :class:`ReasoningPart`.
 
