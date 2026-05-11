@@ -34,6 +34,7 @@ class Sample:
 
 TEXT_SAMPLES = [
     Sample("stream.py"),
+    Sample("gemini.py"),
     Sample("stream_all.py"),
     Sample("tools_schema.py"),
     Sample("agent_simple.py"),

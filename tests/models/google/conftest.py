@@ -30,7 +30,7 @@ class FakeModels:
         self._captured = captured
         self._stream = stream
 
-    def generate_content_stream(
+    async def generate_content_stream(
         self,
         *,
         model: str,

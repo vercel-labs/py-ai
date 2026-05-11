@@ -510,7 +510,7 @@ async def stream(
     try:
         yield events.StreamStart()
 
-        sdk_stream = sdk_client.models.generate_content_stream(
+        sdk_stream = await sdk_client.models.generate_content_stream(
             model=model.id,
             contents=google_contents,
             config=config or None,

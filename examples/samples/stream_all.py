@@ -7,6 +7,7 @@ import ai
 MODELS: list[tuple[str, ai.Provider, str]] = [
     ("ai_gateway", ai.ai_gateway, "anthropic/claude-sonnet-4.6"),
     ("anthropic", ai.anthropic, "claude-sonnet-4-6"),
+    ("google", ai.google, "gemini-2.5-flash"),
     ("openai", ai.openai, "gpt-5.5"),
 ]
 
