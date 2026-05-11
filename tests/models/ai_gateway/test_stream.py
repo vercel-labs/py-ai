@@ -78,8 +78,8 @@ class TestStreaming:
     async def test_text_stream(self) -> None:
         body = sse(
             {"type": "text-start", "id": "t1"},
-            {"type": "text-delta", "id": "t1", "textDelta": "Hello"},
-            {"type": "text-delta", "id": "t1", "textDelta": " World"},
+            {"type": "text-delta", "id": "t1", "delta": "Hello"},
+            {"type": "text-delta", "id": "t1", "delta": " World"},
             {"type": "text-end", "id": "t1"},
             {
                 "type": "finish",
@@ -107,7 +107,7 @@ class TestStreaming:
             {"type": "reasoning-delta", "id": "r1", "delta": "think"},
             {"type": "reasoning-end", "id": "r1"},
             {"type": "text-start", "id": "t1"},
-            {"type": "text-delta", "id": "t1", "textDelta": "42"},
+            {"type": "text-delta", "id": "t1", "delta": "42"},
             {"type": "text-end", "id": "t1"},
             {"type": "finish", "finishReason": "stop", "usage": {}},
         )
@@ -152,7 +152,7 @@ class TestStreaming:
         alongside text in the language model stream."""
         body = sse(
             {"type": "text-start", "id": "t1"},
-            {"type": "text-delta", "id": "t1", "textDelta": "Here is an image:"},
+            {"type": "text-delta", "id": "t1", "delta": "Here is an image:"},
             {"type": "text-end", "id": "t1"},
             {
                 "type": "file",
@@ -376,13 +376,11 @@ class TestRequest:
         }
         assert captured_body["futureGatewayField"] is True
 
-    async def test_gateway_language_params_serialize_body_and_headers(self) -> None:
+    async def test_gateway_language_params_serialize_body(self) -> None:
         captured_body: dict[str, Any] = {}
-        captured_headers: dict[str, str] = {}
 
         def handler(req: httpx.Request) -> httpx.Response:
             captured_body.update(json.loads(req.content))
-            captured_headers.update(dict(req.headers))
             return httpx.Response(
                 200,
                 text=sse({"type": "finish", "finishReason": "stop", "usage": {}}),
@@ -390,38 +388,52 @@ class TestRequest:
 
         client = mock_client(httpx.MockTransport(handler))
         model = ai_gateway("anthropic/claude-sonnet-4", client=client)
-        stream = models.stream(
+        async with models.stream(
             model,
             [user_msg("Hi")],
             params=LanguageParams(
                 max_output_tokens=128,
                 stop_sequences=["END"],
-                response_format={"type": "text"},
                 reasoning="high",
                 tool_choice=NamedToolChoice(tool_name="lookup"),
                 include_raw_chunks=True,
-                headers={"x-gateway-test": "yes", "x-dropped": None},
                 provider_options={"gateway": {"order": ["anthropic"]}},
             ),
-        )
-        async for _ in stream:
-            pass
+        ) as stream:
+            async for _ in stream:
+                pass
 
         assert captured_body["maxOutputTokens"] == 128
         assert captured_body["stopSequences"] == ["END"]
-        assert captured_body["responseFormat"] == {"type": "text"}
         assert captured_body["reasoning"] == "high"
         assert captured_body["toolChoice"] == {
             "type": "tool",
             "toolName": "lookup",
         }
         assert captured_body["includeRawChunks"] is True
-        assert captured_body["providerOptions"] == {
-            "gateway": {"order": ["anthropic"]}
-        }
-        assert "headers" not in captured_body
+        assert captured_body["providerOptions"] == {"gateway": {"order": ["anthropic"]}}
+
+    async def test_client_headers_pass_through(self) -> None:
+        """Custom HTTP headers belong on the ``Client``, not in params."""
+        captured_headers: dict[str, str] = {}
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            captured_headers.update(dict(req.headers))
+            return httpx.Response(
+                200,
+                text=sse({"type": "finish", "finishReason": "stop", "usage": {}}),
+            )
+
+        client = mock_client(
+            httpx.MockTransport(handler),
+            headers={"x-gateway-test": "yes"},
+        )
+        model = ai_gateway("anthropic/claude-sonnet-4", client=client)
+        async with models.stream(model, [user_msg("Hi")]) as stream:
+            async for _ in stream:
+                pass
+
         assert captured_headers["x-gateway-test"] == "yes"
-        assert "x-dropped" not in captured_headers
 
     async def test_gateway_rejects_non_dict_params(self) -> None:
         def handler(req: httpx.Request) -> httpx.Response:
@@ -437,22 +449,6 @@ class TestRequest:
             ) as stream:
                 async for _ in stream:
                     pass
-
-    async def test_gateway_rejects_non_dict_param_headers(self) -> None:
-        def handler(req: httpx.Request) -> httpx.Response:
-            raise AssertionError("request should not be sent")
-
-        client = mock_client(httpx.MockTransport(handler))
-        model = ai_gateway("openai/gpt-5.4", client=client)
-        stream = models.stream(
-            model,
-            [user_msg("Hi")],
-            params={"headers": ["x-not-valid"]},
-        )
-
-        with pytest.raises(TypeError, match="headers"):
-            async for _ in stream:
-                pass
 
     async def test_real_tool_in_request_body(self) -> None:
         """A real ``@tool``-decorated function must appear correctly

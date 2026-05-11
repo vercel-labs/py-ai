@@ -17,11 +17,18 @@ def sse(*events: dict[str, Any]) -> str:
 
 
 def mock_client(
-    handler: httpx.MockTransport, *, api_key: str = "test-key"
+    handler: httpx.MockTransport,
+    *,
+    api_key: str = "test-key",
+    headers: dict[str, str] | None = None,
 ) -> client_.Client:
     """Create a Client wired to a mock transport."""
-    c = client_.Client(base_url="https://gw.test/v4/ai", api_key=api_key)
-    c._http = httpx.AsyncClient(transport=handler)
+    c = client_.Client(
+        base_url="https://gw.test/v4/ai",
+        api_key=api_key,
+        headers=headers or {},
+    )
+    c._http = httpx.AsyncClient(transport=handler, headers=headers)
     return c
 
 

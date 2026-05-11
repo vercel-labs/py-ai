@@ -26,24 +26,24 @@ from ai.types import messages
 
 
 class TestMessagesToPrompt:
-    async def test_system_message(self) -> None:
+    def test_system_message(self) -> None:
         msgs = [
             messages.Message(
                 role="system",
                 parts=[messages.TextPart(text="You are helpful.")],
             )
         ]
-        result = await adapter._messages_to_prompt(msgs)
+        result = adapter._messages_to_prompt(msgs)
         assert result == [{"role": "system", "content": "You are helpful."}]
 
-    async def test_user_message(self) -> None:
+    def test_user_message(self) -> None:
         msgs = [
             messages.Message(
                 role="user",
                 parts=[messages.TextPart(text="Hello")],
             )
         ]
-        result = await adapter._messages_to_prompt(msgs)
+        result = adapter._messages_to_prompt(msgs)
         assert result == [
             {
                 "role": "user",
@@ -51,7 +51,7 @@ class TestMessagesToPrompt:
             }
         ]
 
-    async def test_assistant_with_reasoning_and_text(self) -> None:
+    def test_assistant_with_reasoning_and_text(self) -> None:
         msgs = [
             messages.Message(
                 role="assistant",
@@ -61,12 +61,12 @@ class TestMessagesToPrompt:
                 ],
             )
         ]
-        result = await adapter._messages_to_prompt(msgs)
+        result = adapter._messages_to_prompt(msgs)
         content = result[0]["content"]
         assert content[0] == {"type": "reasoning", "text": "Let me think..."}
         assert content[1] == {"type": "text", "text": "42"}
 
-    async def test_tool_call_with_result_produces_two_messages(self) -> None:
+    def test_tool_call_with_result_produces_two_messages(self) -> None:
         """A completed tool call must produce an assistant message
         (with the tool-call) AND a tool message (with the result)."""
         msgs = [
@@ -91,7 +91,7 @@ class TestMessagesToPrompt:
                 ],
             ),
         ]
-        result = await adapter._messages_to_prompt(msgs)
+        result = adapter._messages_to_prompt(msgs)
         assert len(result) == 2
 
         # Assistant message has the tool-call
@@ -105,7 +105,7 @@ class TestMessagesToPrompt:
         assert tr["type"] == "tool-result"
         assert tr["output"] == {"type": "json", "value": {"temp": 72}}
 
-    async def test_tool_error_result(self) -> None:
+    def test_tool_error_result(self) -> None:
         msgs = [
             messages.Message(
                 role="assistant",
@@ -129,12 +129,12 @@ class TestMessagesToPrompt:
                 ],
             ),
         ]
-        result = await adapter._messages_to_prompt(msgs)
+        result = adapter._messages_to_prompt(msgs)
         tr = result[1]["content"][0]
         assert tr["output"]["type"] == "error-text"
         assert tr["output"]["value"] == "Connection timeout"
 
-    async def test_user_message_with_image_url(self) -> None:
+    def test_user_message_with_image_url(self) -> None:
         """FilePart with image URL -> tagged v4 URL file data."""
         msgs = [
             messages.Message(
@@ -147,7 +147,7 @@ class TestMessagesToPrompt:
                 ],
             )
         ]
-        result = await adapter._messages_to_prompt(msgs)
+        result = adapter._messages_to_prompt(msgs)
         content = result[0]["content"]
         assert content[0] == {"type": "text", "text": "Look at this"}
         assert content[1]["type"] == "file"
@@ -157,7 +157,7 @@ class TestMessagesToPrompt:
             "url": "https://example.com/cat.jpg",
         }
 
-    async def test_user_message_with_file_bytes(self) -> None:
+    def test_user_message_with_file_bytes(self) -> None:
         """FilePart with bytes -> v4 URL-tagged data URL."""
         msgs = [
             messages.Message(
@@ -169,7 +169,7 @@ class TestMessagesToPrompt:
                 ],
             )
         ]
-        result = await adapter._messages_to_prompt(msgs)
+        result = adapter._messages_to_prompt(msgs)
         part = result[0]["content"][0]
         assert part["type"] == "file"
         assert part["mediaType"] == "image/png"
@@ -177,7 +177,7 @@ class TestMessagesToPrompt:
         assert part["data"]["url"].startswith("data:image/png;base64,")
         assert part["filename"] == "pic.png"
 
-    async def test_pending_tool_call_no_tool_message(self) -> None:
+    def test_pending_tool_call_no_tool_message(self) -> None:
         """A tool call without a corresponding tool-result message
         should NOT produce a tool-result in the prompt."""
         msgs = [
@@ -192,7 +192,7 @@ class TestMessagesToPrompt:
                 ],
             )
         ]
-        result = await adapter._messages_to_prompt(msgs)
+        result = adapter._messages_to_prompt(msgs)
         assert len(result) == 1
         assert result[0]["role"] == "assistant"
 
@@ -203,7 +203,7 @@ class TestMessagesToPrompt:
 
 
 class TestBuildRequestBody:
-    async def test_with_output_type(self) -> None:
+    def test_with_output_type(self) -> None:
         class WeatherResult(pydantic.BaseModel):
             temp: float
             condition: str
@@ -214,7 +214,7 @@ class TestBuildRequestBody:
                 parts=[messages.TextPart(text="Weather?")],
             )
         ]
-        body = await adapter._build_request_body(msgs, output_type=WeatherResult)
+        body = adapter._build_request_body(msgs, output_type=WeatherResult)
 
         assert "responseFormat" in body
         rf = body["responseFormat"]
@@ -225,10 +225,10 @@ class TestBuildRequestBody:
 
 
 class TestParseStreamPartComplex:
-    def test_text_delta_uses_textDelta_key(self) -> None:
-        """The gateway sends ``textDelta`` (camelCase), not ``delta``."""
+    def test_text_delta(self) -> None:
+        """v4 sends text-delta payloads with ``delta``."""
         events = adapter._parse_stream_part(
-            {"type": "text-delta", "id": "t1", "textDelta": "Hello"}, set()
+            {"type": "text-delta", "id": "t1", "delta": "Hello"}, set()
         )
         assert isinstance(events[0], events_.TextDelta)
         assert events[0].chunk == "Hello"
@@ -287,8 +287,9 @@ class TestParseStreamPartComplex:
         assert done.usage is not None
         assert done.usage.input_tokens == 10
         assert done.usage.output_tokens == 20
+        assert done.finish_reason == "stop"
 
-    def test_finish_nested_usage(self) -> None:
+    def test_finish_nested_usage_and_v4_reason(self) -> None:
         events = adapter._parse_stream_part(
             {
                 "type": "finish",
@@ -315,6 +316,7 @@ class TestParseStreamPartComplex:
         assert done.usage.input_tokens == 100
         assert done.usage.cache_read_tokens == 50
         assert done.usage.reasoning_tokens == 30
+        assert done.finish_reason == "tool-calls"
 
     def test_file_part(self) -> None:
         """A ``file`` stream part (inline image from Gemini/GPT-5)

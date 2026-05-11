@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import ClassVar, Literal
 
 import pydantic
 from pydantic.alias_generators import to_camel
@@ -14,6 +14,17 @@ _CONFIG_MODEL = pydantic.ConfigDict(
     populate_by_name=True,
     alias_generator=to_camel,
 )
+
+
+class GatewayProviderArgs(pydantic.BaseModel):
+    """Base for AI Gateway-native provider-executed tool args.
+
+    Concrete classes set ``gateway_id`` to the v4 ``provider.tool`` wire id.
+    """
+
+    model_config = _CONFIG_MODEL
+
+    gateway_id: ClassVar[str]
 
 
 class SourcePolicy(pydantic.BaseModel):
@@ -43,8 +54,8 @@ class FetchPolicy(pydantic.BaseModel):
     max_age_seconds: int | None = None
 
 
-class PerplexitySearchArgs(pydantic.BaseModel):
-    model_config = _CONFIG_MODEL
+class PerplexitySearchArgs(GatewayProviderArgs):
+    gateway_id: ClassVar[str] = "gateway.perplexity_search"
 
     max_results: int | None = None
     max_tokens_per_page: int | None = None
@@ -55,8 +66,8 @@ class PerplexitySearchArgs(pydantic.BaseModel):
     search_recency_filter: Literal["day", "week", "month", "year"] | None = None
 
 
-class ParallelSearchArgs(pydantic.BaseModel):
-    model_config = _CONFIG_MODEL
+class ParallelSearchArgs(GatewayProviderArgs):
+    gateway_id: ClassVar[str] = "gateway.parallel_search"
 
     mode: Literal["one-shot", "agentic"] | None = None
     max_results: int | None = None
@@ -120,6 +131,7 @@ def parallel_search(
 __all__ = [
     "Excerpts",
     "FetchPolicy",
+    "GatewayProviderArgs",
     "ParallelSearchArgs",
     "PerplexitySearchArgs",
     "SourcePolicy",

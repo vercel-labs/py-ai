@@ -6,7 +6,7 @@ responses back to public event/message types."""
 import base64
 import json
 from collections.abc import AsyncGenerator, Mapping, Sequence
-from typing import Any
+from typing import Any, Literal, get_args
 
 import httpx
 import pydantic
@@ -67,12 +67,12 @@ def _file_part_to_wire(part: types.messages.FilePart) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-async def _file_part_to_v4(part: types.messages.FilePart) -> dict[str, Any]:
+def _file_part_to_v4(part: types.messages.FilePart) -> dict[str, Any]:
     """Convert a :class:`FilePart` to a v4 ``file`` content part."""
     data = part.data
 
     if isinstance(data, str) and types.media.is_url(data):
-        file_data = {"type": "url", "url": data}
+        file_data: dict[str, Any] = {"type": "url", "url": data}
     else:
         file_data = {
             "type": "url",
@@ -89,7 +89,7 @@ async def _file_part_to_v4(part: types.messages.FilePart) -> dict[str, Any]:
     return entry
 
 
-async def _messages_to_prompt(
+def _messages_to_prompt(
     messages: list[types.messages.Message],
 ) -> list[dict[str, Any]]:
     """Convert ``Message`` list to the v4 prompt wire format."""
@@ -109,7 +109,7 @@ async def _messages_to_prompt(
                     if isinstance(p, types.messages.TextPart):
                         content.append({"type": "text", "text": p.text})
                     elif isinstance(p, types.messages.FilePart):
-                        content.append(await _file_part_to_v4(p))
+                        content.append(_file_part_to_v4(p))
                 result.append({"role": "user", "content": content})
 
             case "assistant":
@@ -226,16 +226,13 @@ def _tool_to_v4(tool: types.tools.Tool) -> dict[str, Any]:
 
 
 def _provider_tool_id(tool: types.tools.Tool) -> str:
-    if isinstance(tool.args, anthropic_tools.AnthropicProviderArgs):
-        return f"anthropic.{tool.args.anthropic_type}"
-    if isinstance(tool.args, openai_tools.OpenAIProviderArgs):
-        return tool.args.openai_id
-
     match tool.args:
-        case gateway_tools.PerplexitySearchArgs():
-            return "gateway.perplexity_search"
-        case gateway_tools.ParallelSearchArgs():
-            return "gateway.parallel_search"
+        case anthropic_tools.AnthropicProviderArgs() as args:
+            return f"anthropic.{args.anthropic_type}"
+        case openai_tools.OpenAIProviderArgs() as args:
+            return args.openai_id
+        case gateway_tools.GatewayProviderArgs() as args:
+            return args.gateway_id
         case _:
             raise TypeError(
                 f"provider tool {tool.name!r} has unsupported args "
@@ -243,16 +240,15 @@ def _provider_tool_id(tool: types.tools.Tool) -> str:
             )
 
 
-async def _build_request_body(
+def _build_request_body(
     messages: list[types.messages.Message],
     tools: Sequence[types.tools.Tool] | None = None,
     output_type: type[Any] | None = None,
     params: Any = None,
 ) -> dict[str, Any]:
     """Build the ``LanguageModelV4CallOptions`` request body."""
-    stream_params = _coerce_params(params)
-    body: dict[str, Any] = dict(stream_params)
-    body["prompt"] = await _messages_to_prompt(messages)
+    body: dict[str, Any] = _coerce_params(params)
+    body["prompt"] = _messages_to_prompt(messages)
     if tools:
         body["tools"] = [_tool_to_v4(tool) for tool in tools]
     if output_type is not None and issubclass(output_type, pydantic.BaseModel):
@@ -265,6 +261,7 @@ async def _build_request_body(
 
 
 def _coerce_params(value: Any) -> dict[str, Any]:
+    """Render user-supplied params into a v4 wire body fragment."""
     if value is None:
         return {}
     if isinstance(value, gateway_params.LanguageParams):
@@ -272,31 +269,10 @@ def _coerce_params(value: Any) -> dict[str, Any]:
             mode="json",
             by_alias=True,
             exclude_none=True,
-            exclude={"headers"},
         )
     if isinstance(value, Mapping):
-        body = dict(value)
-        body.pop("headers", None)
-        return body
+        return dict(value)
     raise TypeError("ai-gateway stream params must be a dict or LanguageParams")
-
-
-def _coerce_headers(value: Any) -> dict[str, str] | None:
-    if value is None:
-        return None
-    if isinstance(value, gateway_params.LanguageParams):
-        raw_headers = value.headers
-    elif isinstance(value, Mapping):
-        raw_headers = value.get("headers")
-    else:
-        raise TypeError("ai-gateway stream params must be a dict or LanguageParams")
-
-    if raw_headers is None:
-        return None
-    if not isinstance(raw_headers, Mapping):
-        raise TypeError("ai-gateway stream params headers must be a dict")
-    headers = {str(k): str(v) for k, v in raw_headers.items() if v is not None}
-    return headers or None
 
 
 # ---------------------------------------------------------------------------
@@ -306,18 +282,19 @@ def _coerce_headers(value: Any) -> dict[str, str] | None:
 
 def _is_provider_executed(data: dict[str, Any]) -> bool:
     """Whether a v4 tool part marks itself as provider-executed."""
-    return bool(data.get("providerExecuted") or data.get("provider_executed"))
+    return bool(data.get("providerExecuted"))
 
 
 def _provider_metadata(data: dict[str, Any]) -> dict[str, Any] | None:
-    metadata = data.get("providerMetadata") or data.get("provider_metadata")
+    metadata = data.get("providerMetadata")
     return metadata if isinstance(metadata, dict) else None
 
 
 def _file_data_to_framework(data: Any) -> str | bytes:
+    """Flatten a v4 ``SharedV4FileData`` tagged union into raw bytes/url."""
     if isinstance(data, dict):
         match data.get("type"):
-            case "data" | "base64":
+            case "data":
                 value = data.get("data", "")
                 return value if isinstance(value, (str, bytes)) else str(value)
             case "url":
@@ -325,6 +302,20 @@ def _file_data_to_framework(data: Any) -> str | bytes:
             case _:
                 return ""
     return data if isinstance(data, (str, bytes)) else str(data)
+
+
+FinishReason = Literal[
+    "stop", "length", "content-filter", "tool-calls", "error", "other"
+]
+_FINISH_REASONS: frozenset[str] = frozenset(get_args(FinishReason))
+
+
+def _finish_reason(data: Any) -> FinishReason | None:
+    """Read the unified ``finishReason`` from a v4 ``finish`` stream part."""
+    raw: Any = data.get("unified") if isinstance(data, dict) else data
+    if isinstance(raw, str) and raw in _FINISH_REASONS:
+        return raw  # type: ignore[return-value]
+    return None
 
 
 def _expand_tool_call(
@@ -436,7 +427,7 @@ def _parse_stream_part(
             return [
                 types.events.TextDelta(
                     block_id=data.get("id", "text"),
-                    chunk=data.get("textDelta", data.get("delta", "")),
+                    chunk=data.get("delta", ""),
                     provider_metadata=provider_metadata,
                 )
             ]
@@ -573,6 +564,7 @@ def _parse_stream_part(
             return [
                 types.events.StreamEnd(
                     usage=usage,
+                    finish_reason=_finish_reason(data.get("finishReason")),
                     provider_metadata=provider_metadata,
                 )
             ]
@@ -597,13 +589,11 @@ async def stream(
     **kwargs: Any,
 ) -> AsyncGenerator[types.events.Event]:
     """Stream an LLM response through the AI Gateway v4 protocol."""
-    stream_params = kwargs.get("params")
-    headers = _coerce_headers(stream_params)
-    body = await _build_request_body(
+    body = _build_request_body(
         messages,
         tools=tools,
         output_type=output_type,
-        params=stream_params,
+        params=kwargs.get("params"),
     )
     gateway = sdk.GatewayClient(client, model)
 
@@ -613,7 +603,6 @@ async def stream(
             body,
             model_type="language",
             streaming=True,
-            headers=headers,
         ) as response:
             yield types.events.StreamStart()
             streamed_tool_ids: set[str] = set()

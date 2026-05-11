@@ -42,9 +42,9 @@ from .params import (
 from .provider import ai_gateway
 
 __all__ = [
+    "AutoToolChoice",
     "GatewayFunctionToolArgs",
     "LanguageParams",
-    "AutoToolChoice",
     "NamedToolChoice",
     "NoneToolChoice",
     "RequiredToolChoice",

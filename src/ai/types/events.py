@@ -45,6 +45,11 @@ class StreamStart(BaseEvent):
 
 
 class StreamEnd(BaseEvent):
+    finish_reason: (
+        Literal["stop", "length", "content-filter", "tool-calls", "error", "other"]
+        | None
+    ) = None
+
     kind: Literal["stream_end"] = "stream_end"
 
 
