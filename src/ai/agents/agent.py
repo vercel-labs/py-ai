@@ -42,6 +42,66 @@ def _unwrap_singleton_group(exc: BaseException) -> BaseException:
     return exc
 
 
+def _process_interrupted_hooks(messages: list[types.messages.Message]) -> None:
+    """Detect a bailed-out-on-hook tail and mangle ``messages`` in place
+    so the next agent run resumes correctly.
+
+    Two shapes are recognised:
+
+    1. **Trailing assistant turn with tool calls** (single-tool gating
+       or no-tool-results-yet bail-out): mark the assistant message
+       ``replay=True`` so ``models.stream`` short-circuits and the
+       loop's tool dispatcher re-runs the calls.
+
+    2. **Trailing tool message containing ``is_hook_abort=True``
+       results** (concurrent gating: some tools completed, others
+       were suspended on a hook): fold the completed (non-abort) tool
+       results onto the matching ``ToolCallPart.cached_result`` of the
+       preceding assistant turn, drop the tool message, and mark the
+       assistant message ``replay=True``.  On replay, the completed
+       calls short-circuit to the cached value; the suspended calls
+       re-run (and pick up the pre-registered hook resolution).
+    """
+    if not messages:
+        return
+
+    last = messages[-1]
+
+    # Case 1: trailing assistant turn with tool calls.
+    if last.role == "assistant" and last.tool_calls:
+        messages[-1] = last.model_copy(update={"replay": True})
+        return
+
+    # Case 2: trailing tool message with at least one hook-abort result.
+    if (
+        len(messages) >= 2
+        and last.role == "tool"
+        and last.tool_results
+        and any(r.is_hook_abort for r in last.tool_results)
+    ):
+        prev = messages[-2]
+        if prev.role != "assistant" or not prev.tool_calls:
+            return
+
+        completed_by_id = {
+            r.tool_call_id: r for r in last.tool_results if not r.is_hook_abort
+        }
+
+        new_parts: list[types.messages.Part] = []
+        for part in prev.parts:
+            if (
+                isinstance(part, types.messages.ToolCallPart)
+                and part.tool_call_id in completed_by_id
+            ):
+                part = part.model_copy(
+                    update={"cached_result": completed_by_id[part.tool_call_id]}
+                )
+            new_parts.append(part)
+
+        messages[-2] = prev.model_copy(update={"parts": new_parts, "replay": True})
+        messages.pop()
+
+
 class SimpleAggregator[Item, Result](events_.Aggregator[Item, Result, Result]):
     def to_model_output(self) -> Result:
         return self.snapshot()
@@ -365,6 +425,15 @@ class ToolCall:
 
     async def __call__(self, **overrides: Any) -> events_.ToolCallResult:
         """Execute the tool and return a :class:`ToolCallResult`."""
+        # Replay-from-hook-abort short-circuit: if a prior run already
+        # produced a result for this call (cached on the ToolCallPart
+        # by ``_process_interrupted_hooks``), return it without
+        # re-executing the tool.
+        cached = self._part.cached_result
+        if cached is not None:
+            msg = builders.tool_message(cached)
+            return events_.ToolCallResult(message=msg, results=msg.tool_results)
+
         # Best-effort parse so middleware sees usable kwargs when possible.
         # If parsing fails, middleware still gets the raw tool_call_id /
         # tool_name and can replace kwargs before _real() executes.
@@ -518,7 +587,13 @@ class ToolRunner:
                         yield n
                     self._sched_waiter = asyncio.get_running_loop().create_future()
                 else:
-                    res = t.result()
+                    try:
+                        res = t.result()
+                    except asyncio.CancelledError:
+                        # If a task got cancelled, that's fine.
+                        # Need to catch it or the whole runner gets zapped.
+                        continue
+
                     assert res is not None
                     self._tool_results.append(res)
                     yield res
@@ -546,6 +621,11 @@ class Context(pydantic.BaseModel):
             return False
 
         last_message = self.messages[-1]
+        # Bail out if any tool result in the last message is a
+        # hook-abort placeholder. There's nothing we can do until
+        # those are resolved and we get called again.
+        if any(r.is_hook_abort for r in last_message.tool_results):
+            return False
         return last_message.replay or last_message.role not in ("assistant", "internal")
 
     @overload
@@ -693,6 +773,43 @@ def tool_result(
     )
 
 
+def pending_tool_result(
+    hook: types.messages.HookPart[Any],
+    *,
+    tool_call_id: str,
+    tool_name: str = "",
+) -> events_.ToolCallResult:
+    """Build an error :class:`ToolCallResult` for a tool call pending on a hook.
+
+    Use in approval-gated flows when a hook abort (e.g. ``HookAbortError``)
+    leaves a tool call without a real result.  The placeholder is flagged
+    ``is_error=True`` and keeps the assistant turn well-formed (every
+    ``tool_call`` paired with a ``tool_result``) so the run can be replayed
+    on the next invocation once the hook is resolved::
+
+        try:
+            approval = await ai.hook(...)
+        except ai.HookAbortError as e:
+            return ai.pending_tool_result(
+                e.hook, tool_call_id=tc.id, tool_name=tc.name
+            )
+
+    The hook itself is surfaced separately via the ``HookPart`` already
+    emitted by ``ai.hook()`` (status=``"pending"``) which downstream
+    consumers (e.g. the ai-sdk UI bridge) use to render the actual
+    approval state.
+    """
+    part = types.messages.ToolResultPart(
+        tool_call_id=tool_call_id,
+        tool_name=tool_name,
+        result=f"Pending on hook {hook.hook_id!r}",
+        is_error=True,
+        is_hook_abort=True,
+    )
+    msg = types.messages.Message(role="tool", parts=[part])
+    return events_.ToolCallResult(message=msg, results=msg.tool_results)
+
+
 async def yield_from[T, R](
     source: AsyncGenerator[T],
     *,
@@ -821,18 +938,7 @@ class Agent:
             tools=[t.tool for t in self._tools],
         )
         context._agent_tools_by_name = {t.name: t for t in self._tools}
-        # If the final message is an assistant call with tool
-        # calls, then probably the situation is that we bailed out
-        # earlier due to unresolved hooks, and we need to arrange
-        # to replay the message now.
-        if (
-            context.messages
-            and context.messages[-1].role == "assistant"
-            and context.messages[-1].tool_calls
-        ):
-            context.messages[-1] = context.messages[-1].model_copy(
-                update={"replay": True}
-            )
+        _process_interrupted_hooks(context.messages)
 
         loop_fn = self._loop_fn or self.default_loop
 

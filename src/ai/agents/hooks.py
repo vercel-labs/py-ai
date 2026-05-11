@@ -63,6 +63,19 @@ _live_hooks: dict[
 _pending_resolutions: dict[str, dict[str, Any]] = {}
 
 
+class HookAbortError(Exception):
+    """Exception for aborting due to a hook"""
+
+    type: str = "gateway_error"
+
+    def __init__(
+        self,
+        hook: messages_.HookPart[Any],
+    ) -> None:
+        super().__init__(hook.hook_id)
+        self.hook = hook
+
+
 def cleanup_run(labels: set[str]) -> None:
     """Remove all registry entries associated with a finished run."""
     for label in labels:
@@ -124,21 +137,21 @@ async def _hook_impl(call: middleware_.HookContext) -> pydantic.BaseModel:
     rt.track_hook_label(label)
 
     # Emit pending signal.
-    await rt.put_hook(
-        messages_.HookPart(
-            hook_id=label,
-            hook_type=payload.__name__,
-            status="pending",
-            metadata=hook_metadata,
-        )
+    hook_part: messages_.HookPart[Any] = messages_.HookPart(
+        hook_id=label,
+        hook_type=payload.__name__,
+        status="pending",
+        metadata=hook_metadata,
     )
 
+    await rt.put_hook(hook_part)
+
     if interrupt_loop:
-        # Yield control so the consumer can see the pending message,
-        # then cancel — the caller catches CancelledError.
+        # Yield control so the consumer can see the pending message (??),
+        # then signal a hook error.
         await asyncio.sleep(0)
         if not future.done():
-            future.cancel()
+            future.set_exception(HookAbortError(hook_part))
 
     # Await resolution — may be resolved externally or cancelled.
     resolution = await future

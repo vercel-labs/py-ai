@@ -22,6 +22,7 @@ from .agents import (
     hook,
     mcp,
     middleware,
+    pending_tool_result,
     resolve_hook,
     tool,
     tool_result,
@@ -66,6 +67,7 @@ __all__ = [
     "tool_message",
     "tool_result",
     "tool_result_part",
+    "pending_tool_result",
     "file_part",
     "thinking",
     # Models (from models/)

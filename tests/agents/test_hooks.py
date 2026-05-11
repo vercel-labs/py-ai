@@ -174,12 +174,15 @@ async def test_hook_metadata_in_pending() -> None:
         async with ai.models.stream(context=context) as stream:
             async for event in stream:
                 yield event
-        await ai.hook(
-            "meta_test",
-            payload=Confirmation,
-            metadata={"tool": "rm -rf", "path": "/"},
-            interrupt_loop=True,
-        )
+        try:
+            await ai.hook(
+                "meta_test",
+                payload=Confirmation,
+                metadata={"tool": "rm -rf", "path": "/"},
+                interrupt_loop=True,
+            )
+        except ai.agents.hooks.HookAbortError:
+            return
 
     mock_llm([[text_msg("OK")]])
     hooks: list[ai.messages.HookPart[Any]] = []
