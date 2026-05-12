@@ -3,10 +3,14 @@
 Usage::
 
     import ai
-    from ai.providers import openai, anthropic, ai_gateway
+    from ai.providers import openai, openai_like, anthropic, anthropic_like, ai_gateway
 
     model = openai("gpt-5.4")
+    model = openai_like(name="local", base_url="http://localhost:11434/v1")("llama3")
     model = anthropic("claude-sonnet-4-6")
+    model = anthropic_like(name="custom", base_url="https://anthropic.example.com")(
+        "claude-sonnet-4-6"
+    )
     model = ai_gateway("anthropic/claude-sonnet-4")
 
     # stream — auto-creates client from env vars

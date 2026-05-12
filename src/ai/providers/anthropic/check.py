@@ -22,9 +22,10 @@ async def check(client: core.client.Client, model: core.model.Model) -> bool:
     if not client.api_key:
         return False
     url = f"{client.base_url.rstrip('/')}/v1/models/{model.id}"
+    anthropic_version = getattr(model.provider, "anthropic_version", _ANTHROPIC_VERSION)
     headers = {
         "x-api-key": client.api_key,
-        "anthropic-version": _ANTHROPIC_VERSION,
+        "anthropic-version": anthropic_version,
     }
     response = await client.http.get(url, headers=headers)
     if response.status_code == 200:

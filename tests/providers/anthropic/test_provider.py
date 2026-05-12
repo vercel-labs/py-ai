@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from ai.models.core import client as client_
-from ai.providers.anthropic import anthropic
+from ai.providers.anthropic import anthropic, anthropic_like
 
 
 async def test_list_gets_models_with_provider_headers_and_sorts_ids() -> None:
@@ -60,3 +60,41 @@ def test_client_uses_anthropic_base_url_env(
     c = anthropic.client()
     assert c.base_url == "https://proxy.example.com"
     assert c.api_key == "sk-test"
+
+
+def test_anthropic_like_creates_generic_compatible_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CUSTOM_ANTHROPIC_API_KEY", "sk-custom")
+    provider = anthropic_like(
+        name="custom-anthropic",
+        base_url="https://custom.example.com",
+        api_key_env="CUSTOM_ANTHROPIC_API_KEY",
+        anthropic_version="2024-01-01",
+    )
+
+    model = provider("custom-model")
+    client = provider.client()
+
+    assert repr(provider) == "custom-anthropic"
+    assert provider.adapter == "anthropic"
+    assert provider.base_url == "https://custom.example.com"
+    assert provider.anthropic_version == "2024-01-01"
+    assert client.base_url == "https://custom.example.com"
+    assert client.api_key == "sk-custom"
+    assert model.id == "custom-model"
+    assert model.adapter == "anthropic"
+    assert model.provider is provider
+
+
+def test_anthropic_like_reads_custom_base_url_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CUSTOM_ANTHROPIC_BASE_URL", "https://proxy.example.com")
+    provider = anthropic_like(
+        name="custom-anthropic",
+        base_url="https://custom.example.com",
+        base_url_env="CUSTOM_ANTHROPIC_BASE_URL",
+    )
+
+    assert provider.base_url == "https://proxy.example.com"

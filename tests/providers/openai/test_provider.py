@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from ai.models.core import client as client_
-from ai.providers.openai import openai
+from ai.providers.openai import openai, openai_like
 
 
 async def test_list_gets_models_with_auth_header_and_sorts_ids() -> None:
@@ -59,3 +59,39 @@ def test_client_uses_openai_base_url_env(
     c = openai.client()
     assert c.base_url == "https://proxy.example.com/v1"
     assert c.api_key == "sk-test"
+
+
+def test_openai_like_creates_generic_compatible_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CUSTOM_OPENAI_API_KEY", "sk-custom")
+    provider = openai_like(
+        name="custom-openai",
+        base_url="https://custom.example.com/v1",
+        api_key_env="CUSTOM_OPENAI_API_KEY",
+    )
+
+    model = provider("custom-model")
+    client = provider.client()
+
+    assert repr(provider) == "custom-openai"
+    assert provider.adapter == "openai"
+    assert provider.base_url == "https://custom.example.com/v1"
+    assert client.base_url == "https://custom.example.com/v1"
+    assert client.api_key == "sk-custom"
+    assert model.id == "custom-model"
+    assert model.adapter == "openai"
+    assert model.provider is provider
+
+
+def test_openai_like_reads_custom_base_url_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CUSTOM_OPENAI_BASE_URL", "https://proxy.example.com/v1")
+    provider = openai_like(
+        name="custom-openai",
+        base_url="https://custom.example.com/v1",
+        base_url_env="CUSTOM_OPENAI_BASE_URL",
+    )
+
+    assert provider.base_url == "https://proxy.example.com/v1"

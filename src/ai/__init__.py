@@ -46,7 +46,7 @@ from .models import (
     generate,
     stream,
 )
-from .providers import ai_gateway, anthropic, openai
+from .providers import ai_gateway, anthropic, anthropic_like, openai, openai_like
 from .types import events, messages, tools
 from .types.builders import (
     assistant_message,
@@ -88,7 +88,9 @@ __all__ = [
     "providers",
     # Provider factories
     "openai",
+    "openai_like",
     "anthropic",
+    "anthropic_like",
     "ai_gateway",
     # Agents — primary API
     "Agent",

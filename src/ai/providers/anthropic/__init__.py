@@ -2,9 +2,12 @@
 
 Usage::
 
-    from ai.providers import anthropic
+    from ai.providers import anthropic, anthropic_like
 
     model = anthropic("claude-sonnet-4-6")
+    model = anthropic_like(name="custom", base_url="https://anthropic.example.com")(
+        "claude-sonnet-4-6"
+    )
     ids = await anthropic.list()
 
     # built-in tools
@@ -19,9 +22,9 @@ SDK at import time.
 """
 
 from . import tools
-from .provider import anthropic
+from .provider import AnthropicCompatibleProvider, anthropic, anthropic_like
 
-__all__ = ["anthropic", "tools"]
+__all__ = ["AnthropicCompatibleProvider", "anthropic", "anthropic_like", "tools"]
 
 
 def __getattr__(name: str) -> object:
