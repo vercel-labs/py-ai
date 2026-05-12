@@ -96,7 +96,6 @@ class HookContext:
     label: str
     payload: type[pydantic.BaseModel]
     metadata: dict[str, Any]
-    interrupt_loop: bool
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "metadata", dict(self.metadata))
