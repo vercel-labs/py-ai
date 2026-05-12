@@ -21,6 +21,8 @@ async def get_population(city: str) -> int:
 
 
 class CustomAgent(ai.Agent):
+    TOOLS = [get_weather, get_population]
+
     async def loop(self, context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
         """Stream, execute tools with logging, repeat."""
         while context.keep_running():
@@ -47,8 +49,7 @@ class CustomAgent(ai.Agent):
 async def main() -> None:
     model = ai.ai_gateway("anthropic/claude-sonnet-4")
 
-    tools = [get_weather, get_population]
-    my_agent = CustomAgent(tools=tools)
+    my_agent = CustomAgent()
 
     async with my_agent.run(
         model,

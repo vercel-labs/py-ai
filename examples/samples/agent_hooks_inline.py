@@ -36,6 +36,8 @@ async def contact_mothership(query: str) -> str:
 
 
 class ApprovalAgent(ai.Agent):
+    TOOLS = [contact_mothership]
+
     async def loop(self, context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
         while context.keep_running():
             async with (
@@ -74,7 +76,7 @@ class ApprovalAgent(ai.Agent):
 async def main() -> None:
     model = ai.ai_gateway("anthropic/claude-sonnet-4")
 
-    my_agent = ApprovalAgent(tools=[contact_mothership])
+    my_agent = ApprovalAgent()
 
     messages = [
         ai.system_message(
