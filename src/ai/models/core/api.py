@@ -84,6 +84,7 @@ class Stream:
         gen: AsyncGenerator[types.events.Event],
         *,
         seed_message: types.messages.Message | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
     ) -> None:
         """Wrap an event generator.
 
@@ -93,12 +94,18 @@ class Stream:
         being rebuilt from synthetic events.  When ``None`` (default),
         an empty assistant message is created and rebuilt from the
         incoming events.
+
+        ``output_type`` is the Pydantic model the request was constrained
+        to.  When set, ``Stream.output`` validates the streamed JSON text
+        against it.  When ``None`` (default), ``Stream.output`` returns
+        the concatenated text content unchanged.
         """
         self._gen = gen
         self._message: types.messages.Message = seed_message or types.messages.Message(
             role="assistant", parts=[]
         )
         self._parts: dict[str, types.messages.Part] = {}
+        self._output_type = output_type
 
     async def aclose(self) -> None:
         await self._gen.aclose()
@@ -146,7 +153,15 @@ class Stream:
 
     @property
     def output(self) -> Any:
-        return self._message.output
+        """Return the streamed output as the ``output_type`` passed in.
+
+        Defaults to the concatenated message text.  When a Pydantic
+        model subclass was passed, validates the streamed JSON against
+        it and returns the parsed instance.
+        """
+        if self._output_type is None:
+            return self._message.text
+        return self._output_type.model_validate_json(self._message.text)
 
     def _aggregate_event(self, event: types.events.Event) -> dict[str, Any]:
         updates: dict[str, Any] = {}
@@ -393,7 +408,11 @@ async def _stream(
 ) -> AsyncIterator[Stream]:
     if messages and messages[-1].replay:
         last = messages[-1]
-        s = Stream(_replay_tool_calls(last), seed_message=last.model_copy(deep=True))
+        s = Stream(
+            _replay_tool_calls(last),
+            seed_message=last.model_copy(deep=True),
+            output_type=output_type,
+        )
     else:
         prepared = integrity.prepare_messages(messages)
         request = StreamRequest(
@@ -403,7 +422,7 @@ async def _stream(
             output_type,
             params,
         )
-        s = Stream(executor._do_stream(request))
+        s = Stream(executor._do_stream(request), output_type=output_type)
     try:
         yield s
     finally:
