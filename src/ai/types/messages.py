@@ -25,15 +25,17 @@ class ToolResultPart(pydantic.BaseModel):
     id: str = pydantic.Field(default_factory=generate_id)
     tool_call_id: str
     tool_name: str
-    result: Any = None
     is_error: bool = False
     is_hook_pending: bool = False
     provider_metadata: dict[str, Any] | None = None
 
+    # The "real" result of the tool call
+    result: Any = None
+
     # The value the LLM sees on its next turn.  For most tools this is
-    # identical to ``result``; for aggregator-backed tools (sub-agents,
-    # streaming-text) it's a scalar derived from the rich snapshot via
-    # ``Aggregator.from_snapshot``.
+    # identical to ``result``; for aggregator-backed tools
+    # (sub-agents, streaming-text) it's derived from the aggregator's
+    # `to_model_output`.
     model_result: Any = pydantic.Field(default=None, repr=False)
 
     kind: Literal["tool_result"] = "tool_result"
