@@ -1,4 +1,4 @@
-from . import models, util
+from . import models, providers, util
 from .agents import (
     TOOL_APPROVAL_HOOK_TYPE,
     Agent,
@@ -42,13 +42,11 @@ from .models import (
     StreamExecutor,
     StreamRequest,
     VideoParams,
-    ai_gateway,
-    anthropic,
     check_connection,
     generate,
-    openai,
     stream,
 )
+from .providers import ai_gateway, anthropic, openai
 from .types import events, messages, tools
 from .types.builders import (
     assistant_message,
@@ -87,6 +85,7 @@ __all__ = [
     "stream",
     "generate",
     "models",
+    "providers",
     # Provider factories
     "openai",
     "anthropic",

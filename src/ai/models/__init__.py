@@ -3,7 +3,7 @@
 Usage::
 
     import ai
-    from ai.models import openai, anthropic, ai_gateway
+    from ai.providers import openai, anthropic, ai_gateway
 
     model = openai("gpt-5.4")
     model = anthropic("claude-sonnet-4-6")
@@ -26,8 +26,6 @@ Usage::
     ids = await openai.list()
 """
 
-from .ai_gateway import ai_gateway
-from .anthropic import anthropic
 from .core.adapters import register_generate, register_stream
 from .core.api import (
     Executor,
@@ -44,7 +42,6 @@ from .core.client import Client
 from .core.model import Model
 from .core.params import GenerateParams, ImageParams, VideoParams
 from .core.proto import CheckConnFn, GenerateFn, Provider, StreamFn
-from .openai import openai
 
 __all__ = [
     # Core types
@@ -63,10 +60,6 @@ __all__ = [
     "StreamFn",
     "StreamRequest",
     "VideoParams",
-    # Provider factories
-    "ai_gateway",
-    "anthropic",
-    "openai",
     # Adapter registration
     "register_generate",
     "register_stream",
