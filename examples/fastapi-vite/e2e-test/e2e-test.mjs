@@ -1,20 +1,23 @@
 // End-to-end smoke test for the chat + tool-approval flow.
 //
-// Drives the Vite frontend in a headless browser, sends a message that
-// triggers the `talk_to_mothership` tool, approves the request, and
-// asserts the tool result is rendered.
+// Drives the Vite frontend in a headless browser, sends a compound
+// question that triggers both the (non-gated) `get_weather` tool and
+// the (gated) `talk_to_mothership` tool, approves the mothership
+// request, and asserts both tool results render alongside a final
+// assistant reply.
 //
-// Prereqs:
-//   - backend running on :8000 (cd backend && uv run --frozen --with-editable ~/src/py-ai/ fastapi dev main.py)
-//   - frontend running on :5173 (cd frontend && pnpm dev)
-//   - install deps:  npm install && npx playwright install chromium
+// Use ./run.sh to launch backend + frontend and run this script.
 //
 // Run from this directory:  node e2e-test.mjs
 
 import { chromium } from "playwright";
 
 const FRONTEND = process.env.FRONTEND_URL ?? "http://localhost:5173/";
-const PROMPT = "Ask the mothership when robots will take over";
+const PROMPT = [
+  "Two things:",
+  "1. What is the current weather in Tokyo?",
+  "2. Ask the mothership when the robot uprising begins",
+].join("\n");
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext();
@@ -127,6 +130,17 @@ if (transcript.includes("Awaiting Approval")) {
   process.exit(1);
 }
 
+// Both tools must have run — the non-gated get_weather alongside
+// the gated talk_to_mothership we just approved.
+if (!transcript.includes("get_weather")) {
+  console.error("FAIL: get_weather tool not rendered in transcript");
+  process.exit(1);
+}
+if (!transcript.includes("talk_to_mothership")) {
+  console.error("FAIL: talk_to_mothership tool not rendered in transcript");
+  process.exit(1);
+}
+
 // The agent must produce a final assistant text bubble after the tool.
 // `.is-assistant` is the class set by the Message component for
 // `from="assistant"` text parts (tool parts don't carry it), so the last
@@ -142,6 +156,13 @@ if (finalReply.length < 20) {
   console.error(
     `FAIL: final assistant reply too short (${finalReply.length} chars): ` +
       JSON.stringify(finalReply)
+  );
+  process.exit(1);
+}
+// The compound answer should reference both halves of the question.
+if (!finalReply.toLowerCase().includes("tokyo")) {
+  console.error(
+    `FAIL: final reply doesn't mention Tokyo: ${JSON.stringify(finalReply)}`
   );
   process.exit(1);
 }

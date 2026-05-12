@@ -108,6 +108,7 @@ class ApprovalResponse(NamedTuple):
     hook_id: str
     granted: bool
     reason: str | None
+    tool_call_id: str
 
 
 def extract_approvals(
@@ -132,6 +133,7 @@ def extract_approvals(
                         hook_id=part.approval.id,
                         granted=part.approval.approved,
                         reason=part.approval.reason,
+                        tool_call_id=part.tool_call_id,
                     )
                 )
     return approvals
@@ -203,8 +205,10 @@ def to_messages(
 
     Pure: normalizes stale tool states, extracts approval responses,
     parses UIMessages into an ``ai.messages.Message`` list (split at
-    tool boundaries), and drops the internal tombstones for approval
-    responses.
+    tool boundaries), drops the internal tombstones for approval
+    responses, and patches the trailing tool message with
+    ``is_hook_pending`` placeholders for tool calls whose approval was
+    just responded to but never recorded a real tool result.
 
     Returns ``(messages, approvals)``.  The caller can pre-register
     resolutions via :func:`apply_approvals` before calling
@@ -213,7 +217,59 @@ def to_messages(
     normalized = _normalize_ui_messages(ui_messages)
     approvals = extract_approvals(normalized)
     messages = [m for m in _parse(normalized) if not _is_approval_response(m)]
+    _patch_pending_hook_aborts(messages, approvals)
     return messages, approvals
+
+
+def _patch_pending_hook_aborts(
+    messages: list[messages_.Message],
+    approvals: list[ApprovalResponse],
+) -> None:
+    """Inject ``is_hook_pending=True`` placeholders for tool calls whose
+    approval was responded to but whose tool result is still missing.
+
+    This deals with the case where a prior run emitted multiple tool
+    calls, some of which succeeded and some of which aborted on an
+    approval hook.
+
+    In that case, there will be an assistant message with multiple
+    tool calls, a tool result with fewer results (some are missing),
+    and then also some hook approvals.
+
+    This synthesizes `ToolResultPart`s with `is_hook_pending=True` in
+    order to be able to feed things back into the agent protocol.
+    """
+    if len(messages) < 2:
+        return
+
+    tool_msg = messages[-1]
+    assistant_msg = messages[-2]
+    if tool_msg.role != "tool" or assistant_msg.role != "assistant":
+        return
+    if not assistant_msg.tool_calls:
+        return
+
+    hooks = {a.tool_call_id: a for a in approvals}
+    completed_ids = {r.tool_call_id for r in tool_msg.tool_results}
+
+    new_parts: list[messages_.Part] = list(tool_msg.parts)
+    for tc in assistant_msg.tool_calls:
+        if tc.tool_call_id in completed_ids:
+            continue
+        if not (hook := hooks.get(tc.tool_call_id)):
+            continue
+        new_parts.append(
+            messages_.ToolResultPart(
+                tool_call_id=tc.tool_call_id,
+                tool_name=tc.tool_name,
+                result=f"Pending on hook '{hook.hook_id}'",
+                is_error=True,
+                is_hook_pending=True,
+            )
+        )
+
+    if len(new_parts) != len(tool_msg.parts):
+        messages[-1] = tool_msg.model_copy(update={"parts": new_parts})
 
 
 def _is_approval_response(msg: messages_.Message) -> bool:

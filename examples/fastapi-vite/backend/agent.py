@@ -29,6 +29,20 @@ when issuing direction. Two short paragraphs at most. This is fiction."""
 
 
 @ai.tool
+async def get_weather(city: str) -> str:
+    """Get current weather for a city."""
+    await asyncio.sleep(2)
+    return f"Sunny, 72F in {city}" if city == "Tokyo" else f"Cloudy, 55F in {city}"
+
+
+@ai.tool
+async def get_population(city: str) -> int:
+    """Get population of a city."""
+    await asyncio.sleep(1)
+    return {"new york": 8_336_817, "tokyo": 13_960_000}.get(city.lower(), 1_000_000)
+
+
+@ai.tool
 async def talk_to_mothership(question: str) -> ai.SubAgentTool:
     """Contact the mothership for important decisions."""
     mothership = ai.agent()
@@ -41,7 +55,8 @@ async def talk_to_mothership(question: str) -> ai.SubAgentTool:
             yield event
 
 
-TOOLS: list[ai.AgentTool] = [talk_to_mothership]
+TOOLS: list[ai.AgentTool] = [get_weather, get_population, talk_to_mothership]
+
 
 chat_agent = ai.agent(tools=TOOLS)
 
@@ -56,20 +71,28 @@ async def graph(context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
     Reject buttons and sends the decision back on the next request.
     """
     while context.keep_running():
-        async with ai.models.stream(context=context) as s:
-            async for event in s:
+        async with (
+            ai.stream(context=context) as s,
+            ai.ToolRunner() as tr,
+        ):
+            async for event in ai.util.merge(s, tr.events()):
                 yield event
-        context.add(s.message)
+                if isinstance(event, ai.events.ToolEnd):
+                    tc = _resolve(context, event.tool_call)
+                    tr.schedule(tc)
 
-        tool_calls = context.resolve(s.tool_calls)
-        if not tool_calls:
-            continue
+            context.add(s.message)
+            context.add(tr.get_tool_message())
 
-        results = await asyncio.gather(
-            *(_execute_with_approval(tc) for tc in tool_calls)
-        )
-        yield ai.tool_result(*results)
-        context.add(ai.tool_message(*results))
+
+def _resolve(
+    context: ai.Context, tool_call: ai.messages.ToolCallPart
+) -> ai.ToolCallLike:
+    tc = context.resolve(tool_call)
+    if tc.name == "talk_to_mothership":
+        return lambda: _execute_with_approval(tc)
+    else:
+        return tc
 
 
 async def _execute_with_approval(tc: ai.ToolCall) -> ai.events.ToolCallResult:
@@ -78,12 +101,15 @@ async def _execute_with_approval(tc: ai.ToolCall) -> ai.events.ToolCallResult:
     Creates a ToolApproval hook that suspends execution until the
     frontend responds with an approve/reject decision.
     """
-    approval = await ai.hook(
-        f"approve_{tc.id}",
-        payload=ai.tools.ToolApproval,
-        metadata={"tool_name": tc.name, "tool_kwargs": tc.kwargs},
-        interrupt_loop=True,
-    )
+    try:
+        approval = await ai.hook(
+            f"approve_{tc.id}",
+            payload=ai.tools.ToolApproval,
+            metadata={"tool_name": tc.name, "tool_kwargs": tc.kwargs},
+            interrupt_loop=True,
+        )
+    except ai.agents.hooks.HookPendingError as e:
+        return ai.pending_tool_result(e.hook, tool_call_id=tc.id, tool_name=tc.name)
 
     if approval.granted:
         return await tc()
