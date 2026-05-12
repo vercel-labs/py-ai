@@ -26,16 +26,17 @@ class Confirmation(pydantic.BaseModel):
 async def test_resolve_live_future() -> None:
     """In long-running mode, resolve_hook() unblocks the awaiting coroutine."""
     resolved_value: Confirmation | None = None
-    my_agent = ai.agent()
 
-    @my_agent.loop
-    async def custom(context: ai.Context) -> AsyncGenerator[ai.events.Event]:
-        nonlocal resolved_value
-        async with ai.models.stream(context=context) as stream:
-            async for event in stream:
-                yield event
-        result = await ai.hook("confirm_1", payload=Confirmation)
-        resolved_value = result
+    class MyAgent(ai.Agent):
+        async def loop(self, context: ai.Context) -> AsyncGenerator[ai.events.Event]:
+            nonlocal resolved_value
+            async with ai.models.stream(context=context) as stream:
+                async for event in stream:
+                    yield event
+            result = await ai.hook("confirm_1", payload=Confirmation)
+            resolved_value = result
+
+    my_agent = MyAgent()
 
     mock_llm([[text_msg("OK")]])
 
@@ -58,18 +59,19 @@ async def test_resolve_live_future() -> None:
 async def test_cancel_live_hook() -> None:
     """cancel_hook() cancels the future, causing CancelledError in graph."""
     was_cancelled = False
-    my_agent = ai.agent()
 
-    @my_agent.loop
-    async def custom(context: ai.Context) -> AsyncGenerator[ai.events.Event]:
-        nonlocal was_cancelled
-        async with ai.models.stream(context=context) as stream:
-            async for event in stream:
-                yield event
-        try:
-            await ai.hook("cancel_me", payload=Confirmation)
-        except asyncio.CancelledError:
-            was_cancelled = True
+    class MyAgent(ai.Agent):
+        async def loop(self, context: ai.Context) -> AsyncGenerator[ai.events.Event]:
+            nonlocal was_cancelled
+            async with ai.models.stream(context=context) as stream:
+                async for event in stream:
+                    yield event
+            try:
+                await ai.hook("cancel_me", payload=Confirmation)
+            except asyncio.CancelledError:
+                was_cancelled = True
+
+    my_agent = MyAgent()
 
     mock_llm([[text_msg("OK")]])
 
@@ -97,15 +99,16 @@ async def test_cancel_nonexistent_raises() -> None:
 async def test_pre_registered_resolution_consumed() -> None:
     """Pre-registered resolution is consumed by hook() without suspending."""
     resolved_value: Confirmation | None = None
-    my_agent = ai.agent()
 
-    @my_agent.loop
-    async def custom(context: ai.Context) -> AsyncGenerator[ai.events.Event]:
-        nonlocal resolved_value
-        async with ai.models.stream(context=context) as stream:
-            async for event in stream:
-                yield event
-        resolved_value = await ai.hook("pre_reg_1", payload=Confirmation)
+    class MyAgent(ai.Agent):
+        async def loop(self, context: ai.Context) -> AsyncGenerator[ai.events.Event]:
+            nonlocal resolved_value
+            async with ai.models.stream(context=context) as stream:
+                async for event in stream:
+                    yield event
+            resolved_value = await ai.hook("pre_reg_1", payload=Confirmation)
+
+    my_agent = MyAgent()
 
     # Pre-register BEFORE run.
     ai.resolve_hook("pre_reg_1", {"approved": True})
@@ -138,14 +141,15 @@ def test_resolve_validates_schema() -> None:
 
 async def test_resolved_hook_emits_message() -> None:
     """After resolution, a 'resolved' HookPart message is emitted."""
-    my_agent = ai.agent()
 
-    @my_agent.loop
-    async def custom(context: ai.Context) -> AsyncGenerator[ai.events.Event]:
-        async with ai.models.stream(context=context) as stream:
-            async for event in stream:
-                yield event
-        await ai.hook("emit_test", payload=Confirmation)
+    class MyAgent(ai.Agent):
+        async def loop(self, context: ai.Context) -> AsyncGenerator[ai.events.Event]:
+            async with ai.models.stream(context=context) as stream:
+                async for event in stream:
+                    yield event
+            await ai.hook("emit_test", payload=Confirmation)
+
+    my_agent = MyAgent()
 
     mock_llm([[text_msg("OK")]])
 
@@ -167,22 +171,22 @@ async def test_resolved_hook_emits_message() -> None:
 
 
 async def test_hook_metadata_in_pending() -> None:
-    my_agent = ai.agent()
+    class MyAgent(ai.Agent):
+        async def loop(self, context: ai.Context) -> AsyncGenerator[ai.events.Event]:
+            async with ai.models.stream(context=context) as stream:
+                async for event in stream:
+                    yield event
+            try:
+                await ai.hook(
+                    "meta_test",
+                    payload=Confirmation,
+                    metadata={"tool": "rm -rf", "path": "/"},
+                    interrupt_loop=True,
+                )
+            except ai.agents.hooks.HookPendingError:
+                return
 
-    @my_agent.loop
-    async def custom(context: ai.Context) -> AsyncGenerator[ai.events.Event]:
-        async with ai.models.stream(context=context) as stream:
-            async for event in stream:
-                yield event
-        try:
-            await ai.hook(
-                "meta_test",
-                payload=Confirmation,
-                metadata={"tool": "rm -rf", "path": "/"},
-                interrupt_loop=True,
-            )
-        except ai.agents.hooks.HookPendingError:
-            return
+    my_agent = MyAgent()
 
     mock_llm([[text_msg("OK")]])
     hooks: list[ai.messages.HookPart[Any]] = []

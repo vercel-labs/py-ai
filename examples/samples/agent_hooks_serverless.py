@@ -70,15 +70,8 @@ class GatedCall:
         )
 
 
-async def main() -> None:
-    model = ai.ai_gateway("anthropic/claude-sonnet-4")
-
-    my_agent = ai.agent(tools=[delete_file, audit_log])
-
-    @my_agent.loop
-    async def with_confirmation(
-        context: ai.Context,
-    ) -> AsyncGenerator[ai.events.AgentEvent]:
+class ConfirmAgent(ai.Agent):
+    async def loop(self, context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
         while context.keep_running():
             async with (
                 ai.stream(context=context) as s,
@@ -95,6 +88,12 @@ async def main() -> None:
 
                 context.add(s.message)
                 context.add(tr.get_tool_message())
+
+
+async def main() -> None:
+    model = ai.ai_gateway("anthropic/claude-sonnet-4")
+
+    my_agent = ConfirmAgent(tools=[delete_file, audit_log])
 
     messages = [
         ai.system_message("""

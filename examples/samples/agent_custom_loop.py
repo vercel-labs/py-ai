@@ -21,9 +21,7 @@ async def get_population(city: str) -> int:
 
 
 class CustomAgent(ai.Agent):
-    async def default_loop(
-        self, context: ai.Context
-    ) -> AsyncGenerator[ai.events.AgentEvent]:
+    async def loop(self, context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
         """Stream, execute tools with logging, repeat."""
         while context.keep_running():
             async with (

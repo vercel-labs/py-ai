@@ -672,10 +672,6 @@ class Context(pydantic.BaseModel):
             self.messages.append(msg)
 
 
-class LoopFn(Protocol):
-    def __call__(self, context: Context) -> AsyncGenerator[events_.AgentEvent]: ...
-
-
 class AgentStream:
     """Async-iterable wrapper around an agent run's event stream.
 
@@ -869,23 +865,17 @@ class Agent:
         tools: list[AgentTool] | None = None,
     ) -> None:
         self._tools: list[AgentTool] = tools or []
-        self._loop_fn: LoopFn | None = None
 
     @property
     def tools(self) -> list[AgentTool]:
         """The agent's registered tools (read-only copy)."""
         return list(self._tools)
 
-    # TODO: remove?
-    def loop(self, fn: LoopFn) -> LoopFn:
-        """Decorator: override the default loop function."""
-        self._loop_fn = fn
-        return fn
+    async def loop(self, context: Context) -> AsyncGenerator[events_.AgentEvent]:
+        """Stream, execute tools, repeat.
 
-    async def default_loop(
-        self, context: Context
-    ) -> AsyncGenerator[events_.AgentEvent]:
-        """Stream, execute tools, repeat."""
+        Override in a subclass to customise the agent's control flow.
+        """
         while context.keep_running():
             async with (
                 models.stream(context=context) as stream,
@@ -941,10 +931,8 @@ class Agent:
         context._agent_tools_by_name = {t.name: t for t in self._tools}
         _process_interrupted_hooks(context.messages)
 
-        loop_fn = self._loop_fn or self.default_loop
-
         async def _real(call: Context) -> AsyncGenerator[events_.AgentEvent]:
-            source = loop_fn(call)
+            source = self.loop(call)
             async for event in runtime.run(source):
                 # Drop replay-flagged events: they're a control-flow
                 # signal for the loop's tool dispatcher (which already
