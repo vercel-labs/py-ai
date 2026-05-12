@@ -3,10 +3,14 @@
 Usage::
 
     import ai
-    from ai.models import openai, anthropic, ai_gateway
+    from ai.providers import openai, openai_like, anthropic, anthropic_like, ai_gateway
 
     model = openai("gpt-5.4")
+    model = openai_like(name="local", base_url="http://localhost:11434/v1")("llama3")
     model = anthropic("claude-sonnet-4-6")
+    model = anthropic_like(name="custom", base_url="https://anthropic.example.com")(
+        "claude-sonnet-4-6"
+    )
     model = ai_gateway("anthropic/claude-sonnet-4")
 
     # stream — auto-creates client from env vars
@@ -26,8 +30,7 @@ Usage::
     ids = await openai.list()
 """
 
-from .ai_gateway import ai_gateway
-from .anthropic import anthropic
+from ..providers.base import Provider
 from .core.adapters import register_generate, register_stream
 from .core.api import (
     Executor,
@@ -43,8 +46,7 @@ from .core.api import (
 from .core.client import Client
 from .core.model import Model
 from .core.params import GenerateParams, ImageParams, VideoParams
-from .core.proto import CheckConnFn, GenerateFn, Provider, StreamFn
-from .openai import openai
+from .core.proto import CheckConnFn, GenerateFn, StreamFn
 
 __all__ = [
     # Core types
@@ -63,10 +65,6 @@ __all__ = [
     "StreamFn",
     "StreamRequest",
     "VideoParams",
-    # Provider factories
-    "ai_gateway",
-    "anthropic",
-    "openai",
     # Adapter registration
     "register_generate",
     "register_stream",

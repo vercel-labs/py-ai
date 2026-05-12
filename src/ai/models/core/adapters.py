@@ -6,7 +6,7 @@ are imported lazily on first use to keep import-time lightweight.
 .. note::
 
     Connection checks are no longer dispatched through a registry.
-    Each :class:`~ai.models.core.proto.Provider` implements ``check()``
+    Each :class:`~ai.providers.base.Provider` implements ``check()``
     directly, and :func:`~ai.models.core.api.check_connection` delegates
     to ``model.provider.check()``.
 """
@@ -29,10 +29,10 @@ def _ensure_adapters() -> None:
         return
     _adapters_loaded = True
 
-    from ..ai_gateway.adapter import generate as ai_gw_generate
-    from ..ai_gateway.adapter import stream as ai_gw_stream
-    from ..anthropic.adapter import stream as anthropic_stream
-    from ..openai.adapter import stream as openai_stream
+    from ...providers.ai_gateway.adapter import generate as ai_gw_generate
+    from ...providers.ai_gateway.adapter import stream as ai_gw_stream
+    from ...providers.anthropic.adapter import stream as anthropic_stream
+    from ...providers.openai.adapter import stream as openai_stream
 
     _stream_adapters["ai-gateway-v3"] = ai_gw_stream
     _generate_adapters["ai-gateway-v3"] = ai_gw_generate
