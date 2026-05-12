@@ -107,7 +107,6 @@ async def _execute_with_approval(tc: ai.ToolCall) -> ai.events.ToolCallResult:
             f"approve_{tc.id}",
             payload=ai.tools.ToolApproval,
             metadata={"tool_name": tc.name, "tool_kwargs": tc.kwargs},
-            interrupt_loop=True,
         )
     except ai.agents.hooks.HookPendingError as e:
         return ai.pending_tool_result(e.hook, tool_call_id=tc.id, tool_name=tc.name)

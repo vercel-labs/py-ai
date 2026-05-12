@@ -65,7 +65,19 @@ async def chat(request: ChatRequest) -> fastapi.responses.StreamingResponse:
 
     async def stream_response() -> AsyncGenerator[str]:
         async with agent_.chat_agent.run(agent_.MODEL, messages) as result:
-            async for chunk in ai.agents.ui.ai_sdk.to_sse(result):
+            # We need to monitor the stream for HookEvents to abort;
+            # since ui.ai_sdk.to_sse consumes a stream, we have a wrapper
+            # async generator that does this check and yields the events.
+            async def process() -> AsyncGenerator[ai.events.AgentEvent]:
+                async for event in result:
+                    if (
+                        isinstance(event, ai.events.HookEvent)
+                        and event.hook.status == "pending"
+                    ):
+                        ai.agents.abort_pending_hook(event.hook)
+                    yield event
+
+            async for chunk in ai.agents.ui.ai_sdk.to_sse(process()):
                 yield chunk
 
     return fastapi.responses.StreamingResponse(

@@ -98,7 +98,6 @@ async def test_wrap_hook_is_called() -> None:
     assert len(hook_calls) == 1
     assert hook_calls[0].label == "test_hook"
     assert hook_calls[0].payload is Confirmation
-    assert hook_calls[0].interrupt_loop is False
 
 
 # ── wrap_agent_run ──────────────────────────────────────────────

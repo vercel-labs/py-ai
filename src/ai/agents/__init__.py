@@ -24,6 +24,7 @@ from .agent import (
 )
 from .hooks import (
     TOOL_APPROVAL_HOOK_TYPE,
+    abort_pending_hook,
     cancel_hook,
     hook,
     resolve_hook,
@@ -47,6 +48,7 @@ __all__ = [
     "ToolRunner",
     "StreamingStatusTool",
     "TOOL_APPROVAL_HOOK_TYPE",
+    "abort_pending_hook",
     "agent",
     "cancel_hook",
     "hook",

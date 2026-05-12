@@ -17,6 +17,7 @@ from .agents import (
     ToolCall,
     ToolCallLike,
     ToolRunner,
+    abort_pending_hook,
     agent,
     cancel_hook,
     hook,
@@ -117,6 +118,7 @@ __all__ = [
     "hook",
     "resolve_hook",
     "cancel_hook",
+    "abort_pending_hook",
     "TOOL_APPROVAL_HOOK_TYPE",
     # Middleware
     "Middleware",

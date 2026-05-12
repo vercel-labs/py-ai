@@ -1,12 +1,13 @@
-"""Serverless hook pattern: interrupt_loop=True.
+"""Serverless hook pattern.
 
 Demonstrates the serverless/stateless pattern where the agent run suspends
 cleanly when a hook has no resolution, then re-enters with a pre-registered
 resolution.
 
 Flow:
-  1. First run: hook fires, interrupt_loop=True cancels the future,
-     CancelledError is caught and the run ends.
+  1. First run: hook fires; the consumer sees the pending HookEvent and
+     calls abort_pending_hook(), which raises HookPendingError at the
+     awaiter so the gated tool short-circuits to a pending placeholder.
   2. Second run: resolve_hook() pre-registers the answer, agent.run()
      replays from the same input, and hook finds the resolution immediately.
 """
@@ -56,7 +57,6 @@ class GatedCall:
                 f"approve_{tc.id}",
                 payload=ai.tools.ToolApproval,
                 metadata={"tool": tc.name, "kwargs": tc.kwargs},
-                interrupt_loop=True,  # serverless: cancel if unresolved
             )
         except ai.agents.hooks.HookPendingError as e:
             return ai.pending_tool_result(e.hook, tool_call_id=tc.id, tool_name=tc.name)
@@ -121,6 +121,7 @@ async def main() -> None:
                     f"  Hook pending: {hook_part.hook_id} "
                     f"(metadata={hook_part.metadata})"
                 )
+                ai.agents.abort_pending_hook(hook_part)
 
         # Pick up the assistant turn that the loop appended so the
         # next run replays from the same point.
@@ -132,7 +133,7 @@ async def main() -> None:
     # -- Second run: pre-register resolution, replay from checkpoint --
     print("--- Run 2: pre-register approval, resume from checkpoint ---")
     for label in pending_hook_labels:
-        ai.resolve_hook(
+        ai.agents.resolve_hook(
             label, ai.tools.ToolApproval(granted=True, reason="user granted")
         )
 

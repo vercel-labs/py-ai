@@ -181,7 +181,6 @@ async def test_hook_metadata_in_pending() -> None:
                     "meta_test",
                     payload=Confirmation,
                     metadata={"tool": "rm -rf", "path": "/"},
-                    interrupt_loop=True,
                 )
             except ai.agents.hooks.HookPendingError:
                 return
@@ -194,6 +193,8 @@ async def test_hook_metadata_in_pending() -> None:
         async for event in stream:
             if isinstance(event, agent_events_.HookEvent):
                 hooks.append(event.hook)
+                if event.hook.status == "pending":
+                    ai.abort_pending_hook(event.hook)
 
     assert len(hooks) >= 1
     assert hooks[0].metadata == {"tool": "rm -rf", "path": "/"}

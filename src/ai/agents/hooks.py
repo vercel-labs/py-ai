@@ -14,15 +14,6 @@ Cancellation::
 
     await cancel_hook("approve_delete", reason="denied")
 
-Behavior depends on ``interrupt_loop``:
-
-interrupt_loop=False (default, long-running): the await blocks until
-resolve_hook() is called from outside (e.g. websocket handler, API endpoint).
-
-interrupt_loop=True (serverless): if no resolution is available, the
-hook's future is cancelled. The branch receives CancelledError and dies
-cleanly. On re-entry, call resolve_hook() before agent.run() to
-pre-register the resolution.
 """
 
 from __future__ import annotations
@@ -60,7 +51,7 @@ _live_hooks: dict[
     str, tuple[asyncio.Future[dict[str, Any]], dict[str, Any], runtime_.Runtime]
 ] = {}
 
-_pending_resolutions: dict[str, dict[str, Any]] = {}
+_pending_resolutions: dict[str, dict[str, Any] | BaseException] = {}
 
 
 class HookPendingError(Exception):
@@ -88,7 +79,6 @@ async def hook[T: pydantic.BaseModel](
     *,
     payload: type[T],
     metadata: dict[str, Any] | None = None,
-    interrupt_loop: bool = False,
 ) -> T:
     """Create a hook suspension point and await its resolution.
 
@@ -99,17 +89,11 @@ async def hook[T: pydantic.BaseModel](
         metadata: Arbitrary metadata surfaced in the pending signal message
             and checkpoint.  Useful for UI rendering (e.g. which tool needs
             approval, what arguments it received).
-        interrupt_loop: When ``True`` (serverless mode), the hook's future
-            is cancelled if no resolution is available, causing
-            ``CancelledError`` in the awaiting coroutine.  When ``False``
-            (long-running mode), the future is held until resolved
-            externally.
     """
     call = middleware_.HookContext(
         label=label,
         payload=payload,
         metadata=metadata or {},
-        interrupt_loop=interrupt_loop,
     )
 
     chain = middleware_._build_hook_chain(_hook_impl)
@@ -123,11 +107,12 @@ async def _hook_impl(call: middleware_.HookContext) -> pydantic.BaseModel:
     label = call.label
     payload = call.payload
     hook_metadata = call.metadata
-    interrupt_loop = call.interrupt_loop
 
     # Pre-registered resolution (serverless re-entry).
     pre_registered = _pending_resolutions.pop(label, None)
     if pre_registered is not None:
+        if isinstance(pre_registered, BaseException):
+            raise pre_registered
         return payload(**pre_registered)
 
     # No resolution available — suspend.
@@ -145,13 +130,6 @@ async def _hook_impl(call: middleware_.HookContext) -> pydantic.BaseModel:
     )
 
     await rt.put_hook(hook_part)
-
-    if interrupt_loop:
-        # Yield control so the consumer can see the pending message (??),
-        # then signal a hook error.
-        await asyncio.sleep(0)
-        if not future.done():
-            future.set_exception(HookPendingError(hook_part))
 
     # Await resolution — may be resolved externally or cancelled.
     resolution = await future
@@ -175,7 +153,7 @@ async def _hook_impl(call: middleware_.HookContext) -> pydantic.BaseModel:
 
 def resolve_hook(
     label: str,
-    data: pydantic.BaseModel | dict[str, Any],
+    data: pydantic.BaseModel | dict[str, Any] | BaseException,
     *,
     payload: type[pydantic.BaseModel] | None = None,
 ) -> None:
@@ -192,14 +170,22 @@ def resolve_hook(
        replay, it finds the pre-registered value and returns without
        suspending.
 
+    Passing an exception sends it to the awaiter (or stashes it for the
+    next replay) so the awaiting ``ai.hook(...)`` call raises rather than
+    returns.  See :func:`abort_pending_hook` for the common case of
+    propagating a :class:`HookPendingError`.
+
     Args:
         label: The hook label to resolve.
-        data: Resolution data — a dict or pydantic model instance.
-        payload: Optional pydantic model class for validation.  When
-            omitted and *data* is a model instance, its type is used.
+        data: Resolution data — a dict, pydantic model instance, or an
+            exception to raise in the awaiter.
+        payload: Optional pydantic model class for validation.  Ignored
+            when *data* is an exception.
     """
-    # Normalize to dict.
-    if isinstance(data, pydantic.BaseModel):
+    resolution: dict[str, Any] | BaseException
+    if isinstance(data, BaseException):
+        resolution = data
+    elif isinstance(data, pydantic.BaseModel):
         resolution = data.model_dump()
     elif isinstance(data, dict):
         if payload is not None:
@@ -214,11 +200,26 @@ def resolve_hook(
     # Path 1: live hook — resolve the future directly.
     if label in _live_hooks:
         future, _, _rt = _live_hooks[label]
-        future.set_result(resolution)
+        if isinstance(resolution, BaseException):
+            future.set_exception(resolution)
+        else:
+            future.set_result(resolution)
         return
 
     # Path 2: no live hook — pre-register for later consumption.
     _pending_resolutions[label] = resolution
+
+
+def abort_pending_hook(hook_part: messages_.HookPart[Any]) -> None:
+    """Abort the hook identified by ``hook_part.hook_id`` with a
+    :class:`HookPendingError` carrying *hook_part*.
+
+    Convenience wrapper around :func:`resolve_hook` for the serverless
+    pattern where a caller has a :class:`~ai.messages.HookPart` (e.g.
+    from inbound conversion) and needs to surface it back through the
+    awaiting ``ai.hook(...)`` site as a structured suspension.
+    """
+    resolve_hook(hook_part.hook_id, HookPendingError(hook_part))
 
 
 async def cancel_hook(label: str, *, reason: str | None = None) -> None:
