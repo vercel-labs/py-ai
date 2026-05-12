@@ -753,10 +753,7 @@ class AgentStream(Generic[AgentOutputT]):
         is returned.
         """
         last = self._context.messages[-1]
-        output_type = self._context.output_type
-        if output_type is None:
-            return cast(AgentOutputT, last.text)
-        return cast(AgentOutputT, last.get_output(output_type))
+        return cast(AgentOutputT, last.get_output(self._context.output_type))
 
 
 def tool_result(

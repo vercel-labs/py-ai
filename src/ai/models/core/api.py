@@ -171,8 +171,6 @@ class Stream(Generic[StreamOutputT]):
         model subclass was passed, validates the streamed JSON against
         it and returns the parsed instance.
         """
-        if self._output_type is None:
-            return cast(StreamOutputT, self._message.text)
         return cast(StreamOutputT, self._message.get_output(self._output_type))
 
     def _aggregate_event(self, event: types.events.Event) -> dict[str, Any]:

@@ -1,5 +1,5 @@
 import uuid
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal, Self, overload
 
 import pydantic
 
@@ -237,6 +237,26 @@ class Message(pydantic.BaseModel):
     def videos(self) -> list[FilePart]:
         return [p for p in self.files if p.media_type.startswith("video/")]
 
-    def get_output[T: pydantic.BaseModel](self, output_type: type[T]) -> T:
-        """Parse the message's text content as a JSON instance of ``output_type``."""
+    @overload
+    def get_output(self, output_type: None = None) -> str: ...
+    @overload
+    def get_output[T: pydantic.BaseModel](self, output_type: type[T]) -> T: ...
+    def get_output(self, output_type: type[pydantic.BaseModel] | None = None) -> Any:
+        """Return the final output of this assistant turn.
+
+        With no ``output_type``, returns the concatenated text content.
+        With a Pydantic model class, validates the text as JSON against
+        it and returns the parsed instance.
+
+        Raises :class:`ValueError` unless the message is a *final*
+        assistant message: role ``"assistant"`` with no pending tool calls.
+        """
+        if self.role != "assistant" or self.tool_calls:
+            raise ValueError(
+                "get_output() requires a final assistant message "
+                "(role='assistant' with no tool calls); "
+                f"got role={self.role!r} with {len(self.tool_calls)} tool call(s)"
+            )
+        if output_type is None:
+            return self.text
         return output_type.model_validate_json(self.text)
