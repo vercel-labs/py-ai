@@ -11,6 +11,7 @@ import logging
 from typing import Any, NamedTuple
 
 from ....types import messages as messages_
+from ...agent import MessageBundle
 from ...hooks import resolve_hook
 from . import ui_message
 
@@ -57,6 +58,27 @@ def _error_result(error_text: str | None, output: Any) -> dict[str, Any] | None:
         if isinstance(normalized, dict) and "error" not in normalized:
             return {"error": error_text, **normalized}
     return normalized
+
+
+def _decode_wire_output(output: Any) -> Any:
+    """Reconstruct the internal snapshot type from a wire tool output.
+
+    Hacky special case: when the wire output looks like a ``UIMessage``
+    (the wire shape we emit for sub-agent / ``MessageAggregator`` tools),
+    decode it back to a ``MessageBundle``.  Other shapes pass through
+    unchanged.  This avoids requiring callers to thread the tool
+    registry into inbound parsing.
+    """
+    if not isinstance(output, dict):
+        return output
+    if output.get("role") != "assistant" or "parts" not in output:
+        return output
+    try:
+        ui_msg = ui_message.UIMessage.model_validate(output)
+    except Exception:
+        return output
+    inner = list(_parse([ui_msg]))
+    return MessageBundle(messages=tuple(inner))
 
 
 def _approval_hook_part(tp: ui_message.UIToolPart) -> messages_.HookPart[Any] | None:
@@ -210,6 +232,11 @@ def to_messages(
     ``is_hook_pending`` placeholders for tool calls whose approval was
     just responded to but never recorded a real tool result.
 
+    Sub-agent tool outputs (UIMessage wire shape) are decoded back to
+    ``MessageBundle`` so the parent agent's message history carries the
+    rich snapshot.  Per-tool model-facing values are populated by
+    :meth:`Agent.run` (which has the tool registry), not here.
+
     Returns ``(messages, approvals)``.  The caller can pre-register
     resolutions via :func:`apply_approvals` before calling
     :meth:`Agent.run` if the run should resume from a hook.
@@ -287,6 +314,29 @@ def _is_approval_response(msg: messages_.Message) -> bool:
 def _parse(
     ui_messages: list[ui_message.UIMessage],
 ) -> list[messages_.Message]:
+    def _build_result_part(
+        *,
+        tool_call_id: str,
+        tool_name: str,
+        output: Any,
+        is_error: bool,
+    ) -> messages_.ToolResultPart:
+        if is_error:
+            result: Any = output
+        else:
+            decoded = _decode_wire_output(output)
+            result = (
+                decoded
+                if isinstance(decoded, MessageBundle)
+                else (_normalize_tool_result(decoded))
+            )
+        return messages_.ToolResultPart(
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            result=result,
+            is_error=is_error,
+        )
+
     result: list[messages_.Message] = []
 
     for ui_msg in ui_messages:
@@ -313,10 +363,10 @@ def _parse(
                     )
                     if _is_tool_completed(inv.state):
                         tool_result_parts.append(
-                            messages_.ToolResultPart(
+                            _build_result_part(
                                 tool_call_id=inv.tool_invocation_id,
                                 tool_name=inv.tool_name,
-                                result=inv.result,
+                                output=inv.result,
                                 is_error=_is_tool_error(inv.state),
                             )
                         )
@@ -335,10 +385,10 @@ def _parse(
 
                     if tp.state in _TOOL_RESULT_STATES:
                         tool_result_parts.append(
-                            messages_.ToolResultPart(
+                            _build_result_part(
                                 tool_call_id=tp.tool_call_id,
                                 tool_name=tp.tool_name,
-                                result=_normalize_tool_result(tp.output),
+                                output=tp.output,
                                 is_error=False,
                             )
                         )

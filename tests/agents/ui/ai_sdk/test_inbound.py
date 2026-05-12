@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+from ai.agents.agent import MessageBundle
 from ai.agents.ui.ai_sdk import to_messages
 from ai.agents.ui.ai_sdk.inbound import (
     _normalize_ui_messages,
@@ -170,3 +171,57 @@ def test_to_messages_rejects_empty_user() -> None:
     ui = [UIMessage.model_validate({"id": "u1", "role": "user", "parts": []})]
     with pytest.raises(ValueError):
         to_messages(ui)
+
+
+def test_to_messages_decodes_subagent_tool_output() -> None:
+    """A sub-agent tool's wire UIMessage decodes back to MessageBundle.
+
+    ``result`` carries the rich MessageBundle so a subsequent UI render
+    gets the same shape we sent.  ``model_input`` is left unset here —
+    populating it requires the tool registry, which lives in
+    :meth:`Agent.run`.
+    """
+    # Wire shape: a tool-_research_tool part with output = UIMessage{parts=[text]}.
+    ui = [
+        _ui("user", _text("research mars"), id="u1"),
+        _ui(
+            "assistant",
+            _tool(
+                "_research_tool",
+                "tc1",
+                "output-available",
+                input={"topic": "mars"},
+                output={
+                    "id": "sub-1",
+                    "role": "assistant",
+                    "parts": [{"type": "text", "text": "Mars has two moons."}],
+                },
+            ),
+            id="a1",
+        ),
+    ]
+    messages, _ = to_messages(ui)
+
+    # Find the tool message with the decoded result.
+    tool_msgs = [m for m in messages if m.role == "tool"]
+    assert len(tool_msgs) == 1
+    result_part = tool_msgs[0].tool_results[0]
+    assert isinstance(result_part.result, MessageBundle)
+    assert not result_part.has_model_input
+
+
+def test_to_messages_passthrough_keeps_wire_shape() -> None:
+    """Non-UIMessage tool outputs stay in their wire form."""
+    ui = [
+        _ui("user", _text("hi"), id="u1"),
+        _ui(
+            "assistant",
+            _tool("ping", "tc1", "output-available", input={}, output={"pong": True}),
+            id="a1",
+        ),
+    ]
+    messages, _ = to_messages(ui)
+    tool_msgs = [m for m in messages if m.role == "tool"]
+    part = tool_msgs[0].tool_results[0]
+    assert part.result == {"pong": True}
+    assert part.get_model_input() == {"pong": True}
