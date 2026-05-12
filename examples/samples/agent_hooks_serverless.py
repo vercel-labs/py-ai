@@ -13,14 +13,13 @@ Flow:
 """
 
 import asyncio
-from collections.abc import AsyncGenerator
 
 import ai
 
 FILES_DELETED = set()
 
 
-@ai.tool
+@ai.tool(require_approval=True)
 async def delete_file(path: str) -> str:
     """Delete a file at the given path."""
     print("FILE DELETED:", path)
@@ -39,61 +38,10 @@ async def audit_log(message: str) -> str:
     return f"Logged {message!r}"
 
 
-class GatedCall:
-    """ToolCall-shaped wrapper that awaits an approval hook before executing.
-
-    ``ToolRunner.schedule`` only consumes the ``__call__`` shape of
-    ``ToolCall``; this wrapper supplies the same shape while inserting
-    the hook await + denial path before the underlying tool runs.
-    """
-
-    def __init__(self, tc: ai.ToolCall) -> None:
-        self._tc = tc
-
-    async def __call__(self) -> ai.events.ToolCallResult:
-        tc = self._tc
-        try:
-            approval = await ai.hook(
-                f"approve_{tc.id}",
-                payload=ai.tools.ToolApproval,
-                metadata={"tool": tc.name, "kwargs": tc.kwargs},
-            )
-        except ai.agents.hooks.HookPendingError as e:
-            return ai.pending_tool_result(e.hook, tool_call_id=tc.id, tool_name=tc.name)
-        if approval.granted:
-            return await tc()
-        return ai.tool_result(
-            tool_call_id=tc.id,
-            tool_name=tc.name,
-            result=f"Rejected: {approval.reason}",
-            is_error=True,
-        )
-
-
-class ConfirmAgent(ai.Agent):
-    async def loop(self, context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
-        while context.keep_running():
-            async with (
-                ai.stream(context=context) as s,
-                ai.ToolRunner() as tr,
-            ):
-                async for event in ai.util.merge(s, tr.events()):
-                    yield event
-                    if isinstance(event, ai.events.ToolEnd):
-                        tc = context.resolve(event.tool_call)
-                        if tc.name == "delete_file":
-                            tr.schedule(GatedCall(tc))
-                        else:
-                            tr.schedule(tc)
-
-                context.add(s.message)
-                context.add(tr.get_tool_message())
-
-
 async def main() -> None:
     model = ai.ai_gateway("anthropic/claude-sonnet-4")
 
-    my_agent = ConfirmAgent(tools=[delete_file, audit_log])
+    my_agent = ai.Agent(tools=[delete_file, audit_log])
 
     messages = [
         ai.system_message("""

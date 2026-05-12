@@ -174,8 +174,8 @@ weather_agent = WeatherAgent(tools=[get_weather, get_population])
 
 def _activity_tool_call(
     tc: ai.messages.ToolCallPart,
-) -> ai.ToolCallLike:
-    """Build a ``ToolCallLike`` that runs the tool as a Temporal activity.
+) -> ai.agents.ToolCallCallable:
+    """Build a ``ToolCallCallable`` that runs the tool as a Temporal activity.
 
     ``ToolRunner.schedule`` accepts any zero-arg callable that returns
     a coroutine resolving to a ``ToolCallResult``. This lets us route

@@ -37,6 +37,7 @@ from typing_extensions import TypeVar  # noqa: UP035
 from .. import models, types, util
 from ..types import builders
 from ..types import events as events_
+from . import hooks as hooks_
 from . import middleware as middleware_
 from . import runtime
 
@@ -357,6 +358,10 @@ class AgentTool:
         return self.tool.name
 
     @property
+    def require_approval(self) -> bool:
+        return self.tool.require_approval
+
+    @property
     def _aggregator(
         self,
     ) -> Callable[[], events_.Aggregator[Any, Any, Any]] | None:
@@ -383,8 +388,14 @@ def tool[**P, T](fn: Callable[P, AsyncGenerator[T]], /) -> AgentTool: ...
 
 
 @overload
+def tool[**P](*, require_approval: bool) -> Callable[[Callable[P, Any]], AgentTool]: ...
+
+
+@overload
 def tool[**P, T, R](
-    *, aggregator: Callable[[], events_.Aggregator[T, Any, R]]
+    *,
+    aggregator: Callable[[], events_.Aggregator[T, Any, R]],
+    require_approval: bool = False,
 ) -> Callable[[Callable[P, AsyncGenerator[T]]], AgentTool]: ...
 
 
@@ -393,7 +404,12 @@ def tool[**P, T, R](
     /,
     *,
     aggregator: Callable[[], events_.Aggregator[T, Any, R]] | None = None,
-) -> Callable[[Callable[P, AsyncGenerator[T]]], AgentTool] | AgentTool:
+    require_approval: bool = False,
+) -> (
+    Callable[[Callable[P, AsyncGenerator[T]]], AgentTool]
+    | Callable[[Callable[P, Awaitable[R]]], AgentTool]
+    | AgentTool
+):
     """Decorator: turn an async function into a :class:`Tool`.
 
     For async-generator tools, declare the aggregator either via the
@@ -433,6 +449,7 @@ def tool[**P, T, R](
                 description=inspect.getdoc(fn) or "",
                 params=validator.model_json_schema(),
             ),
+            require_approval=require_approval,
         )
 
         return AgentTool(
@@ -565,7 +582,54 @@ class ToolCall:
         return await chain(call)
 
 
-class ToolCallLike(Protocol):
+class GatedCall:
+    """ToolCall-shaped wrapper that awaits an approval hook before executing.
+
+    ``ToolRunner.schedule`` only consumes the ``__call__`` shape of
+    ``ToolCall``; this wrapper supplies the same shape while inserting
+    the hook await + denial path before the underlying tool runs.
+    """
+
+    def __init__(self, tc: ToolCallLike) -> None:
+        self._tc = tc
+
+    @property
+    def id(self) -> str:
+        return self._tc.id
+
+    @property
+    def name(self) -> str:
+        return self._tc.name
+
+    @property
+    def fn(self) -> Callable[..., Awaitable[Any]]:
+        return self._tc.fn
+
+    @property
+    def kwargs(self) -> dict[str, Any]:
+        return self._tc.kwargs
+
+    async def __call__(self) -> events_.ToolCallResult:
+        tc = self._tc
+        try:
+            approval = await hooks_.hook(
+                f"approve_{tc.id}",
+                payload=types.tools.ToolApproval,
+                metadata={"tool": tc.name, "kwargs": tc.kwargs},
+            )
+        except hooks_.HookPendingError as e:
+            return pending_tool_result(e.hook, tool_call_id=tc.id, tool_name=tc.name)
+        if approval.granted:
+            return await tc()
+        return tool_result(
+            tool_call_id=tc.id,
+            tool_name=tc.name,
+            result=f"Rejected: {approval.reason}",
+            is_error=True,
+        )
+
+
+class ToolCallCallable(Protocol):
     """Anything ``ToolRunner.schedule`` can accept.
 
     Satisfied by :class:`ToolCall` and by any zero-arg callable returning
@@ -574,6 +638,22 @@ class ToolCallLike(Protocol):
     """
 
     def __call__(self) -> Coroutine[Any, Any, events_.ToolCallResult]: ...
+
+
+class ToolCallLike(ToolCallCallable, Protocol):
+    """Something with all the key information for a tool call."""
+
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def fn(self) -> Callable[..., Awaitable[Any]]: ...
+
+    @property
+    def kwargs(self) -> dict[str, Any]: ...
 
 
 class _RestartableToolStream:
@@ -611,10 +691,10 @@ class ToolRunner:
     def events(self) -> _RestartableToolStream:
         return _RestartableToolStream(self)
 
-    def schedule(self, tc: ToolCallLike) -> None:
+    def schedule(self, tc: ToolCallCallable) -> None:
         """Schedule a tool call (or any callable producing a ToolCallResult).
 
-        See :class:`ToolCallLike` — accepts both :class:`ToolCall` and
+        See :class:`ToolCallCallable` — accepts both :class:`ToolCall` and
         any zero-arg callable returning a coroutine that resolves to a
         :class:`ToolCallResult`.  The latter lets you wrap a ``ToolCall``
         in custom logic (e.g. an approval hook await) and still ride the
@@ -699,16 +779,16 @@ class Context(pydantic.BaseModel):
         return last_message.replay or last_message.role not in ("assistant", "internal")
 
     @overload
-    def resolve(self, tool_part: types.messages.ToolCallPart) -> ToolCall: ...
+    def resolve(self, tool_part: types.messages.ToolCallPart) -> ToolCallLike: ...
     @overload
     def resolve(
         self, tool_part: Sequence[types.messages.ToolCallPart]
-    ) -> list[ToolCall]: ...
+    ) -> list[ToolCallLike]: ...
 
     def resolve(
         self,
         tool_part: types.messages.ToolCallPart | Sequence[types.messages.ToolCallPart],
-    ) -> ToolCall | list[ToolCall]:
+    ) -> ToolCallLike | list[ToolCallLike]:
         """Resolve ToolCallPart(s) into callable ToolCall object(s)."""
         if isinstance(tool_part, types.messages.ToolCallPart):
             tool = self._agent_tools_by_name.get(tool_part.tool_name)
@@ -716,7 +796,10 @@ class Context(pydantic.BaseModel):
                 raise KeyError(
                     f"No agent executor registered for tool {tool_part.tool_name!r}"
                 )
-            return ToolCall(part=tool_part, tool=tool)
+            tc = ToolCall(part=tool_part, tool=tool)
+            if tool.require_approval:
+                return GatedCall(tc)
+            return tc
         return [self.resolve(tp) for tp in tool_part]
 
     def add(
