@@ -160,19 +160,18 @@ async def _messages_to_prompt(
                 tool_results: list[dict[str, Any]] = []
                 for part in msg.parts:
                     if isinstance(part, types.messages.ToolResultPart):
+                        model_input = part.get_model_input()
                         output = (
                             {
                                 "type": "error-text",
                                 "value": (
-                                    str(part.model_result)
-                                    if part.model_result is not None
-                                    else ""
+                                    str(model_input) if model_input is not None else ""
                                 ),
                             }
                             if part.is_error
                             else {
                                 "type": "json",
-                                "value": part.model_result,
+                                "value": model_input,
                             }
                         )
                         tool_results.append(

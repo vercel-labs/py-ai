@@ -4,7 +4,6 @@ from typing import Any
 
 import pytest
 
-import ai
 from ai.agents.agent import MessageBundle
 from ai.agents.ui.ai_sdk import to_messages
 from ai.agents.ui.ai_sdk.inbound import (
@@ -174,20 +173,13 @@ def test_to_messages_rejects_empty_user() -> None:
         to_messages(ui)
 
 
-@ai.tool
-async def _research_tool(topic: str) -> ai.SubAgentTool:
-    """Sub-agent tool used by the inbound round-trip test."""
-    if False:
-        yield  # pragma: no cover
-    _ = topic
-
-
 def test_to_messages_decodes_subagent_tool_output() -> None:
     """A sub-agent tool's wire UIMessage decodes back to MessageBundle.
 
-    Round-trip: ``model_result`` is recomputed via the aggregator's
-    ``to_model_output``, and ``result`` carries the rich MessageBundle so
-    a subsequent UI render gets the same shape we sent.
+    ``result`` carries the rich MessageBundle so a subsequent UI render
+    gets the same shape we sent.  ``model_input`` is left unset here —
+    populating it requires the tool registry, which lives in
+    :meth:`Agent.run`.
     """
     # Wire shape: a tool-_research_tool part with output = UIMessage{parts=[text]}.
     ui = [
@@ -208,18 +200,18 @@ def test_to_messages_decodes_subagent_tool_output() -> None:
             id="a1",
         ),
     ]
-    messages, _ = to_messages(ui, tools=[_research_tool])
+    messages, _ = to_messages(ui)
 
     # Find the tool message with the decoded result.
     tool_msgs = [m for m in messages if m.role == "tool"]
     assert len(tool_msgs) == 1
     result_part = tool_msgs[0].tool_results[0]
     assert isinstance(result_part.result, MessageBundle)
-    assert result_part.model_result == "Mars has two moons."
+    assert not result_part.has_model_input
 
 
-def test_to_messages_without_tools_keeps_wire_shape() -> None:
-    """No tools arg → tool outputs stay in their wire form (unchanged behavior)."""
+def test_to_messages_passthrough_keeps_wire_shape() -> None:
+    """Non-UIMessage tool outputs stay in their wire form."""
     ui = [
         _ui("user", _text("hi"), id="u1"),
         _ui(
@@ -230,5 +222,6 @@ def test_to_messages_without_tools_keeps_wire_shape() -> None:
     ]
     messages, _ = to_messages(ui)
     tool_msgs = [m for m in messages if m.role == "tool"]
-    assert tool_msgs[0].tool_results[0].result == {"pong": True}
-    assert tool_msgs[0].tool_results[0].model_result == {"pong": True}
+    part = tool_msgs[0].tool_results[0]
+    assert part.result == {"pong": True}
+    assert part.get_model_input() == {"pong": True}

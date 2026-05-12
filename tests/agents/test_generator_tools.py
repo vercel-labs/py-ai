@@ -170,12 +170,12 @@ async def test_yield_from_nested_agent() -> None:
         e for e in all_events if isinstance(e, agent_events_.ToolCallResult)
     ]
     # MessageAggregator stores the rich MessageBundle as `result` and the
-    # extracted assistant text as `model_result` (the value the parent
+    # extracted assistant text as the model input (the value the parent
     # LLM sees on its next turn).
     sub_part = tool_results[0].results[0]
     assert isinstance(sub_part.result, MessageBundle)
     assert sub_part.result.messages[0].text == "Mars has two moons."
-    assert sub_part.model_result == "Mars has two moons."
+    assert sub_part.get_model_input() == "Mars has two moons."
 
     # The outer LLM's second call (index 2) must NOT contain any inner
     # agent messages.  It should only see: the original user message,

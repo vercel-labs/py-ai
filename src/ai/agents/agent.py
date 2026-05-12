@@ -117,6 +117,49 @@ def _process_interrupted_hooks(messages: list[types.messages.Message]) -> None:
         messages.pop()
 
 
+def _aggregator_cls(
+    factory: Any,
+) -> type[events_.Aggregator[Any, Any, Any]] | None:
+    """Resolve a tool's aggregator factory to the underlying class.
+
+    Tools may declare the aggregator as a class directly (``LastAggregator``)
+    or via an ``Aggregate`` marker that wraps it.  This normalizes both forms.
+    """
+    if factory is None:
+        return None
+    if isinstance(factory, type) and issubclass(factory, events_.Aggregator):
+        return factory
+    inner = getattr(factory, "_factory", None)
+    if isinstance(inner, type) and issubclass(inner, events_.Aggregator):
+        return inner
+    return None
+
+
+def _populate_model_inputs(
+    messages: Sequence[types.messages.Message],
+    tools_by_name: dict[str, AgentTool],
+) -> None:
+    """Set ``model_input`` on tool results that arrived without one.
+
+    Tool execution sets ``model_input`` directly; this fills in the
+    value for tool results that were reconstructed from a wire round-
+    trip (e.g. the AI SDK UI inbound path) and never had it computed.
+    """
+    for msg in messages:
+        if msg.role != "tool":
+            continue
+        for part in msg.tool_results:
+            if part.has_model_input or part.is_error or part.is_hook_pending:
+                continue
+            tool = tools_by_name.get(part.tool_name)
+            if tool is None:
+                continue
+            agg_cls = _aggregator_cls(tool.aggregator)
+            if agg_cls is None:
+                continue
+            part.set_model_input(agg_cls.to_model_output(part.result))
+
+
 class SimpleAggregator[Item, Result](events_.Aggregator[Item, Result, Result]):
     @classmethod
     def to_model_output(cls, snapshot: Result) -> Result:
@@ -474,7 +517,7 @@ class ToolCall:
 
         async def _real(call: middleware_.ToolContext) -> events_.ToolCallResult:
             result: Any
-            model_result: Any
+            model_input: Any
             try:
                 kwargs = _validate_kwargs(tool, call.kwargs)
                 if tool.is_gen:
@@ -491,10 +534,10 @@ class ToolCall:
                         aggregator=tool.aggregator,
                     )
                     result = agg.snapshot()
-                    model_result = agg.get_model_output()
+                    model_input = agg.get_model_output()
                 else:
                     result = await tool.fn(**kwargs)
-                    model_result = result
+                    model_input = result
             except Exception as exc:
                 # A nested runtime (e.g. a sub-agent run inside this
                 # tool) raises errors wrapped in a singleton TaskGroup
@@ -510,14 +553,13 @@ class ToolCall:
                     ),
                     exception=unwrapped,
                 )
-            return tool_result(
-                types.messages.ToolResultPart(
-                    tool_call_id=call.tool_call_id,
-                    tool_name=call.tool_name,
-                    result=result,
-                    model_result=model_result,
-                )
+            part = types.messages.ToolResultPart(
+                tool_call_id=call.tool_call_id,
+                tool_name=call.tool_name,
+                result=result,
             )
+            part.set_model_input(model_input)
+            return tool_result(part)
 
         chain = middleware_._build_tool_chain(_real)
         return await chain(call)
@@ -905,8 +947,8 @@ async def _aggregate_from[T, S, R](
 
     Returns the live aggregator so callers can consume both the snapshot
     (the rich shape stored on ``ToolResultPart.result``) and the
-    model-facing value (``ToolResultPart.model_result``) without
-    re-aggregating.
+    model-facing value (set via ``ToolResultPart.set_model_input``)
+    without re-aggregating.
     """
     agg = aggregator()
 
@@ -1033,6 +1075,7 @@ class Agent:
             output_type=output_type,
         )
         context._agent_tools_by_name = {t.name: t for t in self._tools}
+        _populate_model_inputs(context.messages, context._agent_tools_by_name)
         _process_interrupted_hooks(context.messages)
 
         async def _real(call: Context) -> AsyncGenerator[events_.AgentEvent]:

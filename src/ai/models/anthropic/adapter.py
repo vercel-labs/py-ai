@@ -257,11 +257,12 @@ async def _messages_to_anthropic(
                 tool_results: list[dict[str, Any]] = []
                 for part in msg.parts:
                     if isinstance(part, types.messages.ToolResultPart):
+                        model_input = part.get_model_input()
                         entry: dict[str, Any] = {
                             "type": "tool_result",
                             "tool_use_id": part.tool_call_id,
-                            "content": str(part.model_result)
-                            if part.model_result is not None
+                            "content": str(model_input)
+                            if model_input is not None
                             else "",
                         }
                         if part.is_error:

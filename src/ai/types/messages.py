@@ -21,6 +21,9 @@ class TextPart(pydantic.BaseModel):
     kind: Literal["text"] = "text"
 
 
+_MODEL_INPUT_UNSET: Any = object()
+
+
 class ToolResultPart(pydantic.BaseModel):
     id: str = pydantic.Field(default_factory=generate_id)
     tool_call_id: str
@@ -32,21 +35,33 @@ class ToolResultPart(pydantic.BaseModel):
     # The "real" result of the tool call
     result: Any = None
 
-    # The value the LLM sees on its next turn.  For most tools this is
-    # identical to ``result``; for aggregator-backed tools
-    # (sub-agents, streaming-text) it's derived from the aggregator's
-    # `get_model_output`.
-    model_result: Any = pydantic.Field(default=None, repr=False)
+    # Value the LLM sees on its next turn.  For most tools this is
+    # identical to ``result``; for aggregator-backed tools (sub-agents,
+    # streaming-text) it's derived from the aggregator's
+    # ``get_model_output``.  Not part of the wire model: it's populated
+    # by tool execution and by ``Agent.run`` (which has the tool
+    # registry) rather than carried across serialization.  ``default_factory``
+    # preserves singleton identity so the unset sentinel survives pydantic's
+    # default-copying.
+    _model_input: Any = pydantic.PrivateAttr(default_factory=lambda: _MODEL_INPUT_UNSET)
 
     kind: Literal["tool_result"] = "tool_result"
     model_config = pydantic.ConfigDict(frozen=True)
 
-    @pydantic.model_validator(mode="before")
-    @classmethod
-    def _default_model_result(cls, data: Any) -> Any:
-        if isinstance(data, dict) and "model_result" not in data:
-            data = {**data, "model_result": data.get("result")}
-        return data
+    def get_model_input(self) -> Any:
+        """Return the value the LLM should see, falling back to ``result``."""
+        if self._model_input is _MODEL_INPUT_UNSET:
+            return self.result
+        return self._model_input
+
+    def set_model_input(self, value: Any) -> None:
+        """Set the model-facing value (overrides the ``result`` fallback)."""
+        self._model_input = value
+
+    @property
+    def has_model_input(self) -> bool:
+        """Whether ``set_model_input`` has been called on this part."""
+        return self._model_input is not _MODEL_INPUT_UNSET
 
 
 class ToolCallPart(pydantic.BaseModel):

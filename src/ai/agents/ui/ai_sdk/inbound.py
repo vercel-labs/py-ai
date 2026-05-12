@@ -8,12 +8,10 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Sequence
 from typing import Any, NamedTuple
 
-from ....types import events as events_
 from ....types import messages as messages_
-from ...agent import AgentTool, MessageAggregator, MessageBundle
+from ...agent import MessageBundle
 from ...hooks import resolve_hook
 from . import ui_message
 
@@ -62,45 +60,25 @@ def _error_result(error_text: str | None, output: Any) -> dict[str, Any] | None:
     return normalized
 
 
-def _aggregator_cls(
-    factory: Any,
-) -> type[events_.Aggregator[Any, Any, Any]] | None:
-    """Resolve a tool's aggregator factory to the underlying class.
-
-    Tools may declare an aggregator as a class directly (``LastAggregator``)
-    or via an ``Aggregate`` marker that wraps it (``Aggregate(LastAggregator,
-    delim="\\n")``).  This normalizes both forms.
-    """
-    if factory is None:
-        return None
-    if isinstance(factory, type) and issubclass(factory, events_.Aggregator):
-        return factory
-    inner = getattr(factory, "_factory", None)
-    if isinstance(inner, type) and issubclass(inner, events_.Aggregator):
-        return inner
-    return None
-
-
-def _decode_wire_output(
-    output: Any,
-    agg_cls: type[events_.Aggregator[Any, Any, Any]] | None,
-) -> Any:
+def _decode_wire_output(output: Any) -> Any:
     """Reconstruct the internal snapshot type from a wire tool output.
 
-    For aggregator-backed tools the wire shape is a ``UIMessage`` (sub-agent
-    transcripts) or the aggregator's snapshot type directly (passthrough
-    aggregators).  This function decodes UIMessage shapes back into a
-    ``MessageBundle`` so the parent agent's message history carries the
-    rich snapshot, mirroring what tool execution stored locally.
+    Hacky special case: when the wire output looks like a ``UIMessage``
+    (the wire shape we emit for sub-agent / ``MessageAggregator`` tools),
+    decode it back to a ``MessageBundle``.  Other shapes pass through
+    unchanged.  This avoids requiring callers to thread the tool
+    registry into inbound parsing.
     """
-    if agg_cls is None or output is None:
+    if not isinstance(output, dict):
         return output
-
-    if agg_cls is MessageAggregator:
+    if output.get("role") != "assistant" or "parts" not in output:
+        return output
+    try:
         ui_msg = ui_message.UIMessage.model_validate(output)
-        inner = list(_parse([ui_msg]))
-        return MessageBundle(messages=tuple(inner))
-    return output
+    except Exception:
+        return output
+    inner = list(_parse([ui_msg]))
+    return MessageBundle(messages=tuple(inner))
 
 
 def _approval_hook_part(tp: ui_message.UIToolPart) -> messages_.HookPart[Any] | None:
@@ -244,8 +222,6 @@ def _normalize_ui_messages(
 
 def to_messages(
     ui_messages: list[ui_message.UIMessage],
-    *,
-    tools: Sequence[AgentTool] | None = None,
 ) -> tuple[list[messages_.Message], list[ApprovalResponse]]:
     """Parse a UI request into runtime messages + extracted approvals.
 
@@ -256,11 +232,10 @@ def to_messages(
     ``is_hook_pending`` placeholders for tool calls whose approval was
     just responded to but never recorded a real tool result.
 
-    ``tools`` lets the parser decode aggregator-backed tool outputs (e.g.
-    sub-agent UIMessages) back into their internal snapshot type and
-    populate ``ToolResultPart.model_result`` correctly.  When omitted,
-    tool outputs are kept in their wire form — fine for caller code that
-    never feeds the messages back to a model.
+    Sub-agent tool outputs (UIMessage wire shape) are decoded back to
+    ``MessageBundle`` so the parent agent's message history carries the
+    rich snapshot.  Per-tool model-facing values are populated by
+    :meth:`Agent.run` (which has the tool registry), not here.
 
     Returns ``(messages, approvals)``.  The caller can pre-register
     resolutions via :func:`apply_approvals` before calling
@@ -268,9 +243,7 @@ def to_messages(
     """
     normalized = _normalize_ui_messages(ui_messages)
     approvals = extract_approvals(normalized)
-    messages = [
-        m for m in _parse(normalized, tools=tools) if not _is_approval_response(m)
-    ]
+    messages = [m for m in _parse(normalized) if not _is_approval_response(m)]
     _patch_pending_hook_aborts(messages, approvals)
     return messages, approvals
 
@@ -340,11 +313,7 @@ def _is_approval_response(msg: messages_.Message) -> bool:
 
 def _parse(
     ui_messages: list[ui_message.UIMessage],
-    *,
-    tools: Sequence[AgentTool] | None = None,
 ) -> list[messages_.Message]:
-    tools_by_name = {t.name: t for t in tools or []}
-
     def _build_result_part(
         *,
         tool_call_id: str,
@@ -352,21 +321,19 @@ def _parse(
         output: Any,
         is_error: bool,
     ) -> messages_.ToolResultPart:
-        tool = tools_by_name.get(tool_name)
-        agg_cls = _aggregator_cls(tool.aggregator) if tool else None
-        if not is_error and agg_cls is not None:
-            snapshot = _decode_wire_output(output, agg_cls)
-            return messages_.ToolResultPart(
-                tool_call_id=tool_call_id,
-                tool_name=tool_name,
-                result=snapshot,
-                model_result=agg_cls.to_model_output(snapshot),
-                is_error=False,
+        if is_error:
+            result: Any = output
+        else:
+            decoded = _decode_wire_output(output)
+            result = (
+                decoded
+                if isinstance(decoded, MessageBundle)
+                else (_normalize_tool_result(decoded))
             )
         return messages_.ToolResultPart(
             tool_call_id=tool_call_id,
             tool_name=tool_name,
-            result=output if is_error else _normalize_tool_result(output),
+            result=result,
             is_error=is_error,
         )
 
