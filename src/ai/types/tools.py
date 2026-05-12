@@ -21,6 +21,7 @@ class Tool(pydantic.BaseModel):
     kind: Literal["function", "provider"]
     name: str
     args: pydantic.BaseModel
+    require_approval: bool = False
 
     @pydantic.model_validator(mode="after")
     def validate_args_shape(self) -> Self:

@@ -181,17 +181,28 @@ Each forwarded event is wrapped in `ai.events.PartialToolCallResult` carrying th
 
 ## Hooks
 
-Typed suspension points for human-in-the-loop:
+Typed suspension points for human-in-the-loop.
+
+**Tool approval (built-in shortcut).** Flag a tool with `require_approval=True` and the default loop gates each call behind an `ai.tools.ToolApproval` hook (label `approve_{tool_call_id}`, payload carries `granted` + `reason`):
+
+```python
+@ai.tool(require_approval=True)
+async def delete_file(path: str) -> str:
+    ...
+
+# consumer-side resolve:
+ai.resolve_hook(hook.hook_id, ai.tools.ToolApproval(granted=True))
+```
+
+Denial returns an error `ToolCallResult` with `result=f"Rejected: {reason}"`. For custom payloads, label schemes, or per-call gating, write a custom loop using the primitives below.
+
+**Manual hooks.** Inside agent code (blocks until resolved):
 
 ```python
 class Approval(pydantic.BaseModel):
     granted: bool
     reason: str
-```
 
-Inside agent code (blocks until resolved):
-
-```python
 approval = await ai.hook(
     "approve_send_email",
     payload=Approval,

@@ -78,7 +78,7 @@ class GatedCall:
     path before the underlying tool runs.
     """
 
-    def __init__(self, tc: ai.ToolCall, label: str) -> None:
+    def __init__(self, tc: ai.ToolCallLike, label: str) -> None:
         self._tc = tc
         self._label = label
 
