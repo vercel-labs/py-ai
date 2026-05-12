@@ -179,14 +179,15 @@ async def test_hook_metadata_in_pending() -> None:
                 "meta_test",
                 payload=Confirmation,
                 metadata={"tool": "rm -rf", "path": "/"},
-                interrupt_loop=True,
             )
         except ai.agents.hooks.HookPendingError:
             return
 
     mock_llm([[text_msg("OK")]])
     hooks: list[ai.messages.HookPart[Any]] = []
-    async with my_agent.run(MOCK_MODEL, [ai.user_message("go")]) as stream:
+    async with my_agent.run(
+        MOCK_MODEL, [ai.user_message("go")], abort_pending_hooks=True
+    ) as stream:
         async for event in stream:
             if isinstance(event, agent_events_.HookEvent):
                 hooks.append(event.hook)

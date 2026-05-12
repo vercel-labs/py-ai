@@ -23,6 +23,7 @@ import pydantic
 from .. import models, types, util
 from ..types import builders
 from ..types import events as events_
+from . import hooks as hooks_
 from . import middleware as middleware_
 from . import runtime
 
@@ -911,6 +912,7 @@ class Agent:
         messages: list[types.messages.Message],
         *,
         middleware: list[middleware_.Middleware] | None = None,
+        abort_pending_hooks: bool = False,
     ) -> AsyncIterator[AgentStream]:
         """Run the agent loop, yielding events to the consumer.
 
@@ -928,6 +930,12 @@ class Agent:
             middleware: Optional list of middleware to apply to this run.
                 First in the list = outermost.  Middleware wraps model
                 calls, tool calls, hooks, and the run itself.
+            abort_pending_hooks: Default value of ``interrupt_loop`` for
+                ``ai.hook()`` calls made during this run.  ``True`` puts
+                the run in serverless mode: any hook without a
+                pre-registered resolution raises ``HookPendingError``.
+                Individual ``hook()`` calls can override by passing an
+                explicit ``interrupt_loop`` argument.
 
         To attribute a sub-agent's events to a branch, wrap the run in
         ``yield_from(..., label=...)`` — the label flows via
@@ -974,7 +982,11 @@ class Agent:
                 if mw_token is not None:
                     middleware_.deactivate(mw_token)
 
-        yield AgentStream(_stream(), context)
+        token = hooks_.abort_pending_hooks.set(abort_pending_hooks)
+        try:
+            yield AgentStream(_stream(), context)
+        finally:
+            hooks_.abort_pending_hooks.reset(token)
 
 
 def agent(

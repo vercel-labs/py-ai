@@ -1,12 +1,13 @@
-"""Serverless hook pattern: interrupt_loop=True.
+"""Serverless hook pattern: abort_pending_hooks=True.
 
 Demonstrates the serverless/stateless pattern where the agent run suspends
 cleanly when a hook has no resolution, then re-enters with a pre-registered
 resolution.
 
 Flow:
-  1. First run: hook fires, interrupt_loop=True cancels the future,
-     CancelledError is caught and the run ends.
+  1. First run: agent.run() is invoked with abort_pending_hooks=True, so
+     any hook without a pre-registered resolution raises HookPendingError;
+     the GatedCall wrapper catches it and emits a pending tool result.
   2. Second run: resolve_hook() pre-registers the answer, agent.run()
      replays from the same input, and hook finds the resolution immediately.
 """
@@ -56,7 +57,6 @@ class GatedCall:
                 f"approve_{tc.id}",
                 payload=ai.tools.ToolApproval,
                 metadata={"tool": tc.name, "kwargs": tc.kwargs},
-                interrupt_loop=True,  # serverless: cancel if unresolved
             )
         except ai.agents.hooks.HookPendingError as e:
             return ai.pending_tool_result(e.hook, tool_call_id=tc.id, tool_name=tc.name)
@@ -108,7 +108,7 @@ async def main() -> None:
     print("--- Run 1: hook fires, no resolution, run suspends ---")
     pending_hook_labels: list[str] = []
 
-    async with my_agent.run(model, messages) as stream:
+    async with my_agent.run(model, messages, abort_pending_hooks=True) as stream:
         async for event in stream:
             if isinstance(event, ai.events.TextDelta):
                 print(event.chunk, end="", flush=True)
@@ -137,7 +137,7 @@ async def main() -> None:
             label, ai.tools.ToolApproval(granted=True, reason="user granted")
         )
 
-    async with my_agent.run(model, messages) as stream:
+    async with my_agent.run(model, messages, abort_pending_hooks=True) as stream:
         async for event in stream:
             if isinstance(event, ai.events.TextDelta):
                 print(event.chunk, end="", flush=True)

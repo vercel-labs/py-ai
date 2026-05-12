@@ -64,7 +64,9 @@ async def chat(request: ChatRequest) -> fastapi.responses.StreamingResponse:
     ai.agents.ui.ai_sdk.apply_approvals(approvals)
 
     async def stream_response() -> AsyncGenerator[str]:
-        async with agent_.chat_agent.run(agent_.MODEL, messages) as result:
+        async with agent_.chat_agent.run(
+            agent_.MODEL, messages, abort_pending_hooks=True
+        ) as result:
             async for chunk in ai.agents.ui.ai_sdk.to_sse(result):
                 yield chunk
 

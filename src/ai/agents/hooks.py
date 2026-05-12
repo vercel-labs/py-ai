@@ -16,18 +16,23 @@ Cancellation::
 
 Behavior depends on ``interrupt_loop``:
 
-interrupt_loop=False (default, long-running): the await blocks until
+interrupt_loop=False (long-running): the await blocks until
 resolve_hook() is called from outside (e.g. websocket handler, API endpoint).
 
 interrupt_loop=True (serverless): if no resolution is available, the
-hook's future is cancelled. The branch receives CancelledError and dies
-cleanly. On re-entry, call resolve_hook() before agent.run() to
-pre-register the resolution.
+hook raises ``HookPendingError`` in the awaiting coroutine.  On re-entry,
+call resolve_hook() before agent.run() to pre-register the resolution.
+
+interrupt_loop=None (default): defer to the ``abort_pending_hooks``
+contextvar, which ``Agent.run`` sets from its kwonly param of the same
+name.  This lets a caller flip the whole run into serverless mode
+without touching individual hook sites.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextvars
 from typing import Any
 
 import pydantic
@@ -62,6 +67,13 @@ _live_hooks: dict[
 
 _pending_resolutions: dict[str, dict[str, Any]] = {}
 
+# Per-run default for ``interrupt_loop``.  Set by ``Agent.run`` via its
+# ``abort_pending_hooks`` kwonly param.  ``hook()`` reads this when its
+# own ``interrupt_loop`` argument is None.
+abort_pending_hooks: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "abort_pending_hooks", default=False
+)
+
 
 class HookPendingError(Exception):
     """Exception for aborting due to a hook"""
@@ -88,7 +100,7 @@ async def hook[T: pydantic.BaseModel](
     *,
     payload: type[T],
     metadata: dict[str, Any] | None = None,
-    interrupt_loop: bool = False,
+    interrupt_loop: bool | None = None,
 ) -> T:
     """Create a hook suspension point and await its resolution.
 
@@ -99,12 +111,15 @@ async def hook[T: pydantic.BaseModel](
         metadata: Arbitrary metadata surfaced in the pending signal message
             and checkpoint.  Useful for UI rendering (e.g. which tool needs
             approval, what arguments it received).
-        interrupt_loop: When ``True`` (serverless mode), the hook's future
-            is cancelled if no resolution is available, causing
-            ``CancelledError`` in the awaiting coroutine.  When ``False``
-            (long-running mode), the future is held until resolved
-            externally.
+        interrupt_loop: When ``True`` (serverless mode), the hook raises
+            ``HookPendingError`` if no resolution is available.  When
+            ``False`` (long-running mode), the future is held until
+            resolved externally.  When ``None`` (default), the value is
+            taken from the ``abort_pending_hooks`` contextvar, which
+            ``Agent.run`` sets from its kwonly param of the same name.
     """
+    if interrupt_loop is None:
+        interrupt_loop = abort_pending_hooks.get()
     call = middleware_.HookContext(
         label=label,
         payload=payload,

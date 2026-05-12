@@ -6,19 +6,7 @@ import pydantic
 
 
 class ToolApproval(pydantic.BaseModel):
-    """Payload schema for tool-approval hooks.
-
-    Usage inside a loop::
-
-        approval = await hook(
-            f"approve_{tc.tool_call_id}",
-            payload=ToolApproval,
-            metadata={"tool_name": tc.tool_name},
-            interrupt_loop=True,
-        )
-        if approval.granted:
-            ...
-    """
+    """Payload schema for tool-approval hooks."""
 
     granted: bool
     reason: str | None = None
