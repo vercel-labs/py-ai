@@ -104,28 +104,28 @@ def _gated_agent(
     approval_tool: str,
     label: str,
 ) -> ai.Agent:
-    gated = ai.agent(tools=tools)
+    class GatedAgent(ai.Agent):
+        async def loop(
+            self, context: ai.Context
+        ) -> AsyncGenerator[ai.events.AgentEvent]:
+            while context.keep_running():
+                async with (
+                    ai.stream(context=context) as s,
+                    ai.agents.ToolRunner() as tr,
+                ):
+                    async for event in ai.util.merge(s, tr.events()):
+                        yield event
+                        if isinstance(event, ai.events.ToolEnd):
+                            tc = context.resolve(event.tool_call)
+                            if tc.name == approval_tool:
+                                tr.schedule(GatedCall(tc, label))
+                            else:
+                                tr.schedule(tc)
 
-    @gated.loop
-    async def gated_loop(context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
-        while context.keep_running():
-            async with (
-                ai.stream(context=context) as s,
-                ai.agents.ToolRunner() as tr,
-            ):
-                async for event in ai.util.merge(s, tr.events()):
-                    yield event
-                    if isinstance(event, ai.events.ToolEnd):
-                        tc = context.resolve(event.tool_call)
-                        if tc.name == approval_tool:
-                            tr.schedule(GatedCall(tc, label))
-                        else:
-                            tr.schedule(tc)
+                    context.add(s.message)
+                    context.add(tr.get_tool_message())
 
-                context.add(s.message)
-                context.add(tr.get_tool_message())
-
-    return gated
+    return GatedAgent(tools=tools)
 
 
 mothership_agent = _gated_agent(
@@ -145,69 +145,72 @@ data_centers_agent = _gated_agent(
 # Orchestrator — fan-out, hooks, fan-in
 # ---------------------------------------------------------------------------
 
-orchestrator = ai.agent()
 
-
-@orchestrator.loop
-async def multiagent_loop(context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
+class Orchestrator(ai.Agent):
     """Run two gated agents in parallel, then summarise their results."""
-    query = context.messages[-1].text
 
-    # Fan out: both branches stream concurrently via yield_from.
-    # Each yield_from wraps every inner event in a PartialToolCallResult
-    # carrying the branch label, so the TUI can route to the right panel.
-    async with (
-        mothership_agent.run(
+    async def loop(self, context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
+        query = context.messages[-1].text
+
+        # Fan out: both branches stream concurrently via yield_from.
+        # Each yield_from wraps every inner event in a PartialToolCallResult
+        # carrying the branch label, so the TUI can route to the right panel.
+        async with (
+            mothership_agent.run(
+                context.model,
+                [
+                    ai.system_message(
+                        "You are assistant 1. Use contact_mothership "
+                        "when asked about the future."
+                    ),
+                    ai.user_message(query),
+                ],
+            ) as mothership_stream,
+            data_centers_agent.run(
+                context.model,
+                [
+                    ai.system_message(
+                        "You are assistant 2. Use contact_data_centers "
+                        "when asked about the future."
+                    ),
+                    ai.user_message(query),
+                ],
+            ) as data_centers_stream,
+        ):
+            r1, r2 = await asyncio.gather(
+                ai.yield_from(
+                    mothership_stream,
+                    label="mothership",
+                    aggregator=ai.MessageAggregator,
+                ),
+                ai.yield_from(
+                    data_centers_stream,
+                    label="data_centers",
+                    aggregator=ai.MessageAggregator,
+                ),
+            )
+
+        combined = f"Mothership: {r1}\nData centers: {r2}"
+
+        # Fan in: stream the summary directly.  Top-level events from the
+        # orchestrator are unlabeled — the client routes them to the summary
+        # panel as its default.
+        summary_agent = ai.agent()
+        async with summary_agent.run(
             context.model,
             [
                 ai.system_message(
-                    "You are assistant 1. Use contact_mothership "
-                    "when asked about the future."
+                    "You are assistant 3. Summarise the results from the "
+                    "other assistants."
                 ),
-                ai.user_message(query),
+                ai.user_message(combined),
             ],
-        ) as mothership_stream,
-        data_centers_agent.run(
-            context.model,
-            [
-                ai.system_message(
-                    "You are assistant 2. Use contact_data_centers "
-                    "when asked about the future."
-                ),
-                ai.user_message(query),
-            ],
-        ) as data_centers_stream,
-    ):
-        r1, r2 = await asyncio.gather(
-            ai.yield_from(
-                mothership_stream,
-                label="mothership",
-                aggregator=ai.MessageAggregator,
-            ),
-            ai.yield_from(
-                data_centers_stream,
-                label="data_centers",
-                aggregator=ai.MessageAggregator,
-            ),
-        )
+        ) as summary_stream:
+            async for event in summary_stream:
+                yield event
 
-    combined = f"Mothership: {r1}\nData centers: {r2}"
 
-    # Fan in: stream the summary directly.  Top-level events from the
-    # orchestrator are unlabeled — the client routes them to the summary
-    # panel as its default.
-    summary_agent = ai.agent()
-    async with summary_agent.run(
-        context.model,
-        [
-            ai.system_message(
-                "You are assistant 3. Summarise the results from the other assistants."
-            ),
-            ai.user_message(combined),
-        ],
-    ) as summary_stream:
-        async for event in summary_stream:
-            yield event
+orchestrator = Orchestrator()
 
 
 # ---------------------------------------------------------------------------

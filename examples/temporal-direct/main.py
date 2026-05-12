@@ -1,15 +1,15 @@
 """Durable agent with a custom loop — every I/O call is a Temporal activity.
 
-No middleware is involved. A custom ``@agent.loop`` replaces the default loop
-and calls Temporal activities for every LLM call and tool execution. Temporal's
-event history provides durability — on replay, activities return cached results
-without re-executing.
+No middleware is involved. A custom ``Agent`` subclass overrides ``loop``
+to call Temporal activities for every LLM call and tool execution.
+Temporal's event history provides durability — on replay, activities
+return cached results without re-executing.
 
 This is the "lego bricks" approach: the framework gives you ``Agent``,
 ``Context``, ``@tool``, the message types, and ``ToolRunner``. You compose
 them yourself.
 
-The loop mirrors :py:meth:`ai.Agent.default_loop`: a streaming model call
+The loop mirrors :py:meth:`ai.Agent.loop`: a streaming model call
 feeds a ``ToolRunner``, tool calls are scheduled as they're emitted, and
 results are folded back into the context. The only difference is that
 the model "stream" is synthesized from the result of an LLM activity and
@@ -124,50 +124,52 @@ async def llm_call_activity(params: LLMParams) -> LLMResult:
 
 # ── Agent with custom loop ───────────────────────────────────────
 #
-# The loop mirrors ai.Agent.default_loop: stream → schedule tools as
-# they arrive → fold results back into the context. The only twist
-# is that the "stream" comes from a Temporal activity (not the LLM
+# The loop mirrors ai.Agent.loop: stream → schedule tools as they
+# arrive → fold results back into the context. The only twist is
+# that the "stream" comes from a Temporal activity (not the LLM
 # directly) and each scheduled tool dispatches via another activity.
 
-weather_agent = ai.agent(tools=[get_weather, get_population])
+
+class WeatherAgent(ai.Agent):
+    async def loop(self, context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
+        tool_schemas = [
+            {"name": t.name, "args": t.args.model_dump(mode="json")}
+            for t in context.tools
+        ]
+
+        while context.keep_running():
+            # 1. LLM call via activity → complete message
+            result = await temporalio.workflow.execute_activity(
+                llm_call_activity,
+                LLMParams(
+                    messages=[m.model_dump() for m in context.messages],
+                    tool_schemas=tool_schemas,
+                ),
+                start_to_close_timeout=datetime.timedelta(minutes=5),
+                retry_policy=temporalio.common.RetryPolicy(maximum_attempts=3),
+            )
+            llm_msg = ai.messages.Message.model_validate(result.message)
+
+            # 2. Wrap the complete message in a synthetic stream so we can
+            #    drive the rest of the loop with ToolRunner — same shape as
+            #    the default loop. ``replay_message_events`` is the framework
+            #    helper that decomposes a complete ``Message`` back into the
+            #    events a streaming adapter would have produced.
+            async with (
+                ai.Stream(ai.events.replay_message_events(llm_msg)) as stream,
+                ai.ToolRunner() as tr,
+            ):
+                async for event in ai.util.merge(stream, tr.events()):
+                    yield event
+
+                    if isinstance(event, ai.events.ToolEnd):
+                        tr.schedule(_activity_tool_call(event.tool_call))
+
+                context.add(stream.message)
+                context.add(tr.get_tool_message())
 
 
-@weather_agent.loop
-async def temporal_loop(context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
-    tool_schemas = [
-        {"name": t.name, "args": t.args.model_dump(mode="json")} for t in context.tools
-    ]
-
-    while context.keep_running():
-        # 1. LLM call via activity → complete message
-        result = await temporalio.workflow.execute_activity(
-            llm_call_activity,
-            LLMParams(
-                messages=[m.model_dump() for m in context.messages],
-                tool_schemas=tool_schemas,
-            ),
-            start_to_close_timeout=datetime.timedelta(minutes=5),
-            retry_policy=temporalio.common.RetryPolicy(maximum_attempts=3),
-        )
-        llm_msg = ai.messages.Message.model_validate(result.message)
-
-        # 2. Wrap the complete message in a synthetic stream so we can
-        #    drive the rest of the loop with ToolRunner — same shape as
-        #    the default loop. ``replay_message_events`` is the framework
-        #    helper that decomposes a complete ``Message`` back into the
-        #    events a streaming adapter would have produced.
-        async with (
-            ai.Stream(ai.events.replay_message_events(llm_msg)) as stream,
-            ai.ToolRunner() as tr,
-        ):
-            async for event in ai.util.merge(stream, tr.events()):
-                yield event
-
-                if isinstance(event, ai.events.ToolEnd):
-                    tr.schedule(_activity_tool_call(event.tool_call))
-
-            context.add(stream.message)
-            context.add(tr.get_tool_message())
+weather_agent = WeatherAgent(tools=[get_weather, get_population])
 
 
 def _activity_tool_call(
@@ -178,7 +180,7 @@ def _activity_tool_call(
     ``ToolRunner.schedule`` accepts any zero-arg callable that returns
     a coroutine resolving to a ``ToolCallResult``. This lets us route
     tool execution through a Temporal activity (durable!) while keeping
-    the rest of the loop identical to ``Agent.default_loop``.
+    the rest of the loop identical to ``Agent.loop``.
     """
 
     async def _call() -> ai.events.ToolCallResult:

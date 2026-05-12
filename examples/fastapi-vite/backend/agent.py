@@ -58,11 +58,7 @@ async def talk_to_mothership(question: str) -> ai.SubAgentTool:
 TOOLS: list[ai.AgentTool] = [get_weather, get_population, talk_to_mothership]
 
 
-chat_agent = ai.agent(tools=TOOLS)
-
-
-@chat_agent.loop
-async def graph(context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
+class ChatAgent(ai.Agent):
     """Agent graph with human-in-the-loop tool approval.
 
     Loops: stream LLM -> request approval -> execute tools -> repeat.
@@ -70,19 +66,24 @@ async def graph(context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
     request event on the SSE stream.  The frontend displays Approve /
     Reject buttons and sends the decision back on the next request.
     """
-    while context.keep_running():
-        async with (
-            ai.stream(context=context) as s,
-            ai.ToolRunner() as tr,
-        ):
-            async for event in ai.util.merge(s, tr.events()):
-                yield event
-                if isinstance(event, ai.events.ToolEnd):
-                    tc = _resolve(context, event.tool_call)
-                    tr.schedule(tc)
 
-            context.add(s.message)
-            context.add(tr.get_tool_message())
+    async def loop(self, context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
+        while context.keep_running():
+            async with (
+                ai.stream(context=context) as s,
+                ai.ToolRunner() as tr,
+            ):
+                async for event in ai.util.merge(s, tr.events()):
+                    yield event
+                    if isinstance(event, ai.events.ToolEnd):
+                        tc = _resolve(context, event.tool_call)
+                        tr.schedule(tc)
+
+                context.add(s.message)
+                context.add(tr.get_tool_message())
+
+
+chat_agent = ChatAgent(tools=TOOLS)
 
 
 def _resolve(

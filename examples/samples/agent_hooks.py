@@ -52,15 +52,8 @@ class GatedCall:
         )
 
 
-async def main() -> None:
-    model = ai.ai_gateway("anthropic/claude-sonnet-4")
-
-    my_agent = ai.agent(tools=[contact_mothership])
-
-    @my_agent.loop
-    async def with_approval(
-        context: ai.Context,
-    ) -> AsyncGenerator[ai.events.AgentEvent]:
+class ApprovalAgent(ai.Agent):
+    async def loop(self, context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
         while context.keep_running():
             async with (
                 ai.stream(context=context) as s,
@@ -77,6 +70,12 @@ async def main() -> None:
 
                 context.add(s.message)
                 context.add(tr.get_tool_message())
+
+
+async def main() -> None:
+    model = ai.ai_gateway("anthropic/claude-sonnet-4")
+
+    my_agent = ApprovalAgent(tools=[contact_mothership])
 
     messages = [
         ai.system_message(
