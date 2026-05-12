@@ -15,14 +15,7 @@ runner's merge-and-iterate behaviour.
 import asyncio
 from collections.abc import AsyncGenerator
 
-import pydantic
-
 import ai
-
-
-class Approval(pydantic.BaseModel):
-    granted: bool
-    reason: str = ""
 
 
 @ai.tool
@@ -46,7 +39,7 @@ class GatedCall:
         tc = self._tc
         approval = await ai.hook(
             f"approve_{tc.id}",
-            payload=Approval,
+            payload=ai.tools.ToolApproval,
             metadata={"tool": tc.name, "kwargs": tc.kwargs},
         )
         if approval.granted:
@@ -107,7 +100,7 @@ async def main() -> None:
                 answer = input(f"Approve {hook_part.hook_id}? [y/n] ")
                 ai.resolve_hook(
                     hook_part.hook_id,
-                    Approval(
+                    ai.tools.ToolApproval(
                         granted=answer.strip().lower() in ("y", "yes"),
                         reason="operator decision",
                     ),

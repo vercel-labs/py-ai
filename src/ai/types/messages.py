@@ -22,6 +22,19 @@ class TextPart(pydantic.BaseModel):
     kind: Literal["text"] = "text"
 
 
+class ToolResultPart(pydantic.BaseModel):
+    id: str = pydantic.Field(default_factory=generate_id)
+    tool_call_id: str
+    tool_name: str
+    result: Any = None
+    is_error: bool = False
+    is_hook_pending: bool = False
+    provider_metadata: dict[str, Any] | None = None
+
+    kind: Literal["tool_result"] = "tool_result"
+    model_config = pydantic.ConfigDict(frozen=True)
+
+
 class ToolCallPart(pydantic.BaseModel):
     id: str = pydantic.Field(default_factory=generate_id)
     tool_call_id: str
@@ -29,24 +42,22 @@ class ToolCallPart(pydantic.BaseModel):
     tool_args: str
     provider_metadata: dict[str, Any] | None = None
 
+    # Runtime cache used by replay-from-pending-hook flows: when a prior
+    # run completed this tool call but a sibling tool call was suspended
+    # on a hook, we fold the completed result onto the ``ToolCallPart``
+    # so re-execution short-circuits to the cached value instead of
+    # running the tool body again.  Excluded from JSON; not part of the
+    # wire model.
+    cached_result: ToolResultPart | None = pydantic.Field(
+        default=None, exclude=True, repr=False
+    )
+
     kind: Literal["tool_call"] = "tool_call"
 
 
 DUMMY_TOOL_CALL = ToolCallPart(
     id="<invalid>", tool_call_id="", tool_name="", tool_args=""
 )
-
-
-class ToolResultPart(pydantic.BaseModel):
-    id: str = pydantic.Field(default_factory=generate_id)
-    tool_call_id: str
-    tool_name: str
-    result: Any = None
-    is_error: bool = False
-    provider_metadata: dict[str, Any] | None = None
-
-    kind: Literal["tool_result"] = "tool_result"
-    model_config = pydantic.ConfigDict(frozen=True)
 
 
 class BuiltinToolCallPart(pydantic.BaseModel):
