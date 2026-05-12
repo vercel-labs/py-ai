@@ -173,9 +173,7 @@ class Stream(Generic[StreamOutputT]):
         """
         if self._output_type is None:
             return cast(StreamOutputT, self._message.text)
-        return cast(
-            StreamOutputT, self._output_type.model_validate_json(self._message.text)
-        )
+        return cast(StreamOutputT, self._message.get_output(self._output_type))
 
     def _aggregate_event(self, event: types.events.Event) -> dict[str, Any]:
         updates: dict[str, Any] = {}

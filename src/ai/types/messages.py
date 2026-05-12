@@ -236,3 +236,7 @@ class Message(pydantic.BaseModel):
     @property
     def videos(self) -> list[FilePart]:
         return [p for p in self.files if p.media_type.startswith("video/")]
+
+    def get_output[T: pydantic.BaseModel](self, output_type: type[T]) -> T:
+        """Parse the message's text content as a JSON instance of ``output_type``."""
+        return output_type.model_validate_json(self.text)
