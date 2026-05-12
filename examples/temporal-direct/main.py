@@ -131,6 +131,8 @@ async def llm_call_activity(params: LLMParams) -> LLMResult:
 
 
 class WeatherAgent(ai.Agent):
+    TOOLS = [get_weather, get_population]
+
     async def loop(self, context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
         tool_schemas = [
             {"name": t.name, "args": t.args.model_dump(mode="json")}
@@ -169,7 +171,7 @@ class WeatherAgent(ai.Agent):
                 context.add(tr.get_tool_message())
 
 
-weather_agent = WeatherAgent(tools=[get_weather, get_population])
+weather_agent = WeatherAgent()
 
 
 def _activity_tool_call(

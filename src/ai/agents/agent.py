@@ -20,6 +20,7 @@ from contextlib import AbstractAsyncContextManager
 from typing import (
     Annotated,
     Any,
+    ClassVar,
     Generic,
     Protocol,
     Self,
@@ -1054,12 +1055,24 @@ async def _aggregate_from[T, S, R](
 class Agent:
     """Bag of configuration: model + tools + loop."""
 
+    TOOLS: ClassVar[list[AgentTool]] = []
+    """Class-level default tools.
+
+    Subclasses can declare a fixed tool set here::
+
+        class WeatherAgent(ai.Agent):
+            TOOLS = [get_weather, get_population]
+
+    Tools passed to ``__init__`` are appended to ``TOOLS``, so callers can
+    extend the class-level set per instance.
+    """
+
     def __init__(
         self,
         *,
         tools: list[AgentTool] | None = None,
     ) -> None:
-        self._tools: list[AgentTool] = tools or []
+        self._tools: list[AgentTool] = [*self.TOOLS, *(tools or [])]
 
     @property
     def tools(self) -> list[AgentTool]:
