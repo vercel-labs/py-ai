@@ -467,7 +467,7 @@ def tool[**P, T, R](
         return wrap(fn)
 
 
-class ToolCall:
+class BoundToolCall:
     """Callable that binds a :class:`ToolCallPart` to its :class:`AgentTool`.
 
     Calling it executes the tool and returns a ``role="tool"`` message.
@@ -583,7 +583,7 @@ class ToolCall:
         return await chain(call)
 
 
-class GatedCall:
+class GatedToolCall:
     """ToolCall-shaped wrapper that awaits an approval hook before executing.
 
     ``ToolRunner.schedule`` only consumes the ``__call__`` shape of
@@ -591,7 +591,7 @@ class GatedCall:
     the hook await + denial path before the underlying tool runs.
     """
 
-    def __init__(self, tc: ToolCallLike) -> None:
+    def __init__(self, tc: ToolCall) -> None:
         self._tc = tc
 
     @property
@@ -641,7 +641,7 @@ class ToolCallCallable(Protocol):
     def __call__(self) -> Coroutine[Any, Any, events_.ToolCallResult]: ...
 
 
-class ToolCallLike(ToolCallCallable, Protocol):
+class ToolCall(ToolCallCallable, Protocol):
     """Something with all the key information for a tool call."""
 
     @property
@@ -781,16 +781,16 @@ class Context(pydantic.BaseModel):
         return last_message.replay or last_message.role not in ("assistant", "internal")
 
     @overload
-    def resolve(self, tool_part: types.messages.ToolCallPart) -> ToolCallLike: ...
+    def resolve(self, tool_part: types.messages.ToolCallPart) -> ToolCall: ...
     @overload
     def resolve(
         self, tool_part: Sequence[types.messages.ToolCallPart]
-    ) -> list[ToolCallLike]: ...
+    ) -> list[ToolCall]: ...
 
     def resolve(
         self,
         tool_part: types.messages.ToolCallPart | Sequence[types.messages.ToolCallPart],
-    ) -> ToolCallLike | list[ToolCallLike]:
+    ) -> ToolCall | list[ToolCall]:
         """Resolve ToolCallPart(s) into callable ToolCall object(s)."""
         if isinstance(tool_part, types.messages.ToolCallPart):
             tool = self._agent_tools_by_name.get(tool_part.tool_name)
@@ -798,9 +798,9 @@ class Context(pydantic.BaseModel):
                 raise KeyError(
                     f"No agent executor registered for tool {tool_part.tool_name!r}"
                 )
-            tc = ToolCall(part=tool_part, tool=tool)
+            tc = BoundToolCall(part=tool_part, tool=tool)
             if tool.require_approval:
-                return GatedCall(tc)
+                return GatedToolCall(tc)
             return tc
         return [self.resolve(tp) for tp in tool_part]
 
