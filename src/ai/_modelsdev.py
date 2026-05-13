@@ -10,24 +10,37 @@ if TYPE_CHECKING:
 
 _ENV_REFERENCE_RE = re.compile(r"\$\{?([A-Z_][A-Z0-9_]*)\}?")
 _SECRET_ENV_MARKERS = ("API_KEY", "TOKEN", "SECRET", "BEARER")
+_PROVIDER_ID_ALIASES = {"ai-gateway": "vercel"}
 
 
 def parse_model_id(model_id: str) -> modelsdotdev.ModelRef:
     import modelsdotdev
 
-    return modelsdotdev.parse_model_id(model_id)
+    return modelsdotdev.parse_model_id(_canonical_model_id(model_id))
 
 
 def get_provider_by_id(provider_id: str) -> modelsdotdev.Provider | None:
     import modelsdotdev
 
-    return modelsdotdev.get_provider_by_id(provider_id)
+    return modelsdotdev.get_provider_by_id(_canonical_provider_id(provider_id))
 
 
 def get_model_by_id(model_id: str) -> modelsdotdev.Model | None:
     import modelsdotdev
 
-    return modelsdotdev.get_model_by_id(model_id)
+    return modelsdotdev.get_model_by_id(_canonical_model_id(model_id))
+
+
+def _canonical_provider_id(provider_id: str) -> str:
+    return _PROVIDER_ID_ALIASES.get(provider_id, provider_id)
+
+
+def _canonical_model_id(model_id: str) -> str:
+    for separator in (":", "/"):
+        prefix, sep, rest = model_id.partition(separator)
+        if sep and prefix in _PROVIDER_ID_ALIASES:
+            return f"{_PROVIDER_ID_ALIASES[prefix]}{separator}{rest}"
+    return model_id
 
 
 def provider_base_url(

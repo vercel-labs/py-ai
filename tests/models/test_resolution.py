@@ -55,6 +55,18 @@ def test_provider_from_id_resolves_gateway_provider() -> None:
     assert models.Provider.from_id("vercel") is ai_gateway
 
 
+def test_provider_from_id_resolves_gateway_alias() -> None:
+    assert models.Provider.from_id("ai-gateway") is ai_gateway
+
+
+def test_get_resolves_gateway_alias() -> None:
+    model = models.get_model("ai-gateway:alibaba/qwen-3-14b")
+
+    assert model.id == "alibaba/qwen-3-14b"
+    assert model.adapter == "ai-gateway-v3"
+    assert model.provider is ai_gateway
+
+
 def test_get_uses_model_provider_config_for_anthropic_compatibility() -> None:
     model = models.get_model("azure:claude-sonnet-4-5")
 
