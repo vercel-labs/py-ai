@@ -11,6 +11,7 @@ dependencies = [
     "anthropic>=0.83.0",
     "httpx>=0.28.1",
     "mcp>=1.18.0",
+    "modelsdotdev @ git+https://github.com/vercel-labs/modelsdotdev-python",
     "openai>=2.14.0",
     "pydantic>=2.12.5",
     "typing-extensions>=4.15.0",

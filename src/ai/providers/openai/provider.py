@@ -1,10 +1,16 @@
 """OpenAI-compatible providers."""
 
+from __future__ import annotations
+
 from collections.abc import Iterable
 from types import ModuleType
+from typing import TYPE_CHECKING, ClassVar
 
 from ...models import core
 from .. import base
+
+if TYPE_CHECKING:
+    import modelsdotdev
 
 _BASE_URL = "https://api.openai.com/v1"
 _BASE_URL_ENV = "OPENAI_BASE_URL"
@@ -17,6 +23,12 @@ class OpenAICompatibleProvider(base.Provider):
     ``provider("gpt-5.4")`` returns a :class:`Model` that uses the OpenAI
     chat-completions adapter.
     """
+
+    handles: ClassVar[tuple[str, ...]] = (
+        "openai",
+        "@ai-sdk/openai",
+        "@ai-sdk/openai-compatible",
+    )
 
     def __init__(
         self,
@@ -33,6 +45,26 @@ class OpenAICompatibleProvider(base.Provider):
             base_url=default_base_url,
             api_key_env=api_key_env,
             base_url_env=base_url_env,
+            config_envs=config_envs,
+        )
+
+    @classmethod
+    def from_modelsdev_provider(
+        cls,
+        provider: modelsdotdev.Provider,
+        *,
+        model_provider_config: modelsdotdev.ModelProviderConfig | None = None,
+    ) -> base.Provider:
+        if provider.id == "openai" and model_provider_config is None:
+            return openai
+        base_url = base.provider_base_url(provider, model_provider_config)
+        if base_url is None:
+            raise ValueError(f"provider {provider.id!r} does not declare an API URL")
+        api_key_env, config_envs = base.provider_config(provider, model_provider_config)
+        return cls(
+            name=provider.id,
+            default_base_url=base_url,
+            api_key_env=api_key_env,
             config_envs=config_envs,
         )
 

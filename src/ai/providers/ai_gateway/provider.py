@@ -2,11 +2,16 @@
 
 Defines the callable :data:`ai_gateway` provider."""
 
+from __future__ import annotations
+
 from types import ModuleType
-from typing import Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from ...models import core
 from .. import base
+
+if TYPE_CHECKING:
+    import modelsdotdev
 
 _BASE_URL = "https://ai-gateway.vercel.sh/v3/ai"
 _API_KEY_ENV = "AI_GATEWAY_API_KEY"
@@ -15,6 +20,8 @@ _API_KEY_ENV = "AI_GATEWAY_API_KEY"
 class _AIGateway(base.Provider):
     """Callable provider factory for the Vercel AI Gateway."""
 
+    handles: ClassVar[tuple[str, ...]] = ("vercel", "@ai-sdk/gateway")
+
     def __init__(self) -> None:
         super().__init__(
             name="ai-gateway",
@@ -22,6 +29,15 @@ class _AIGateway(base.Provider):
             base_url=_BASE_URL,
             api_key_env=_API_KEY_ENV,
         )
+
+    @classmethod
+    def from_modelsdev_provider(
+        cls,
+        provider: modelsdotdev.Provider,
+        *,
+        model_provider_config: modelsdotdev.ModelProviderConfig | None = None,
+    ) -> base.Provider:
+        return ai_gateway
 
     @property
     def tools(self) -> ModuleType:

@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, ClassVar
+
+from .. import _modelsdev
+from ..errors import UnsupportedProviderError
 
 if TYPE_CHECKING:
+    import modelsdotdev
+
     from ..models.core.client import Client
     from ..models.core.model import Model
 
@@ -22,6 +27,16 @@ class Provider:
     Implementations must be **callable** — ``provider(model_id)`` returns
     a :class:`Model`.
     """
+
+    handles: ClassVar[tuple[str, ...]] = ()
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        for handle in cls.handles:
+            existing = _PROVIDER_REGISTRY.get(handle)
+            if existing is not None and existing is not cls:
+                raise RuntimeError(f"duplicate provider handle: {handle!r}")
+            _PROVIDER_REGISTRY[handle] = cls
 
     def __init__(
         self,
@@ -127,3 +142,57 @@ class Provider:
 
     def __repr__(self) -> str:
         return self.name
+
+    @classmethod
+    def from_id(
+        cls,
+        known_id: str,
+        *,
+        model_provider_config: modelsdotdev.ModelProviderConfig | None = None,
+    ) -> Provider:
+        """Return a concrete provider for a models.dev provider ID."""
+        provider = _modelsdev.get_provider_by_id(known_id)
+        if provider is None:
+            raise ValueError(f"unknown provider id: {known_id!r}")
+
+        for handle in (
+            provider.id,
+            _modelsdev.provider_npm(provider, model_provider_config),
+        ):
+            provider_type = _PROVIDER_REGISTRY.get(handle)
+            if provider_type is not None:
+                return provider_type.from_modelsdev_provider(
+                    provider,
+                    model_provider_config=model_provider_config,
+                )
+
+        raise UnsupportedProviderError(provider.id)
+
+    @classmethod
+    def from_modelsdev_provider(
+        cls,
+        provider: modelsdotdev.Provider,
+        *,
+        model_provider_config: modelsdotdev.ModelProviderConfig | None = None,
+    ) -> Provider:
+        """Construct this provider implementation from models.dev metadata."""
+        raise NotImplementedError
+
+
+_PROVIDER_REGISTRY: dict[str, type[Provider]] = {}
+
+
+def provider_config(
+    provider: modelsdotdev.Provider,
+    model_provider_config: modelsdotdev.ModelProviderConfig | None = None,
+) -> tuple[str | None, tuple[str, ...]]:
+    """Return ``api_key_env`` and non-secret config envs from models.dev data."""
+    return _modelsdev.provider_config(provider, model_provider_config)
+
+
+def provider_base_url(
+    provider: modelsdotdev.Provider,
+    model_provider_config: modelsdotdev.ModelProviderConfig | None = None,
+) -> str | None:
+    """Return model-specific API URL override or provider API URL."""
+    return _modelsdev.provider_base_url(provider, model_provider_config)

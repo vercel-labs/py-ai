@@ -44,7 +44,7 @@ from .core.api import (
     stream,
 )
 from .core.client import Client
-from .core.model import Model
+from .core.model import Model, get_model
 from .core.params import GenerateParams, ImageParams, VideoParams
 from .core.proto import CheckConnFn, GenerateFn, StreamFn
 
@@ -71,5 +71,6 @@ __all__ = [
     # Public API
     "check_connection",
     "generate",
+    "get_model",
     "stream",
 ]
