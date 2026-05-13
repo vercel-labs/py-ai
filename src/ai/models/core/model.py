@@ -33,8 +33,8 @@ def get_model(model_id: str | None = None, *, client: Client | None = None) -> M
     Args:
         model_id:
             Model ID, optionally in the format of ``"provider:model"``.
-            When the provider is omitted, the model is routed through the
-            gateway. Examples: ``"openai:gpt-5"`` or
+            When the provider is omitted, the model is routed through
+            Vercel AI Gateway. Examples: ``"openai:gpt-5"`` or
             ``"anthropic/claude-sonnet-4"``. When omitted, reads
             ``AI_SDK_DEFAULT_MODEL`` from the environment.
         client:
