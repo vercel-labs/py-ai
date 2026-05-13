@@ -230,3 +230,40 @@ def _function_args(tool: ai.AgentTool) -> ai.tools.FunctionToolArgs:
     args = tool.tool.args
     assert isinstance(args, ai.tools.FunctionToolArgs)
     return args
+
+
+# Module-level model so get_type_hints() can resolve it when @ai.tool
+# inspects the decorated function's annotations.
+class _NestedItem(pydantic.BaseModel):
+    key: str
+    value: str
+
+
+async def test_tool_call_with_nested_pydantic_model() -> None:
+    """Tools whose parameters include nested Pydantic models receive model
+    instances, not plain dicts.  Regression test for the model_dump() bug
+    where _validate_kwargs serialised nested models to dicts before passing
+    them to the tool function."""
+
+    received: list[_NestedItem] = []
+
+    @ai.tool
+    async def store(items: list[_NestedItem]) -> str:
+        """Store items."""
+        received.extend(items)
+        return "ok"
+
+    part = ai.messages.ToolCallPart(
+        tool_call_id="tc-nested",
+        tool_name="store",
+        tool_args='{"items": [{"key": "a", "value": "1"}, {"key": "b", "value": "2"}]}',
+    )
+    result = await ai.ToolCall(part=part, tool=store)()
+
+    assert not result.results[0].is_error
+    assert len(received) == 2
+    assert all(isinstance(item, _NestedItem) for item in received), (
+        f"expected _NestedItem instances, got {[type(i) for i in received]}"
+    )
+    assert received[0].key == "a"
+    assert received[1].value == "2"

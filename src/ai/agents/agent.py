@@ -376,7 +376,7 @@ def _validate_kwargs(
     """Validate kwargs and return normalized Python values."""
     if tool.validator is not None:
         validated = tool.validator.model_validate(kwargs)
-        return dict(validated.model_dump())
+        return {f: getattr(validated, f) for f in type(validated).model_fields}
     return kwargs
 
 
