@@ -42,8 +42,8 @@ def get_model(model_id: str | None = None, *, client: Client | None = None) -> M
             from its default base URL and environment variables.
 
     Raises:
-        Raises :class:`ai.ConfigurationError` when ``model_id`` is omitted and
-        ``AI_SDK_DEFAULT_MODEL`` is not set.
+        Raises :class:`ai.ConfigurationError` when ``model_id`` and
+        ``AI_SDK_DEFAULT_MODEL`` is empty or malformed.
         Raises a :class:`ai.UnsupportedProviderError` when the provider is
         unrecognized or otherwise unsupported.
     """
@@ -51,9 +51,12 @@ def get_model(model_id: str | None = None, *, client: Client | None = None) -> M
         model_id = os.environ.get(_DEFAULT_MODEL_ENV)
         if not model_id:
             raise ConfigurationError(
-                f"{_DEFAULT_MODEL_ENV} must be set to call get_model() "
-                "without arguments"
+                f"{_DEFAULT_MODEL_ENV} must be set when ai.get_model() "
+                "is called without arguments"
             )
+
+    if not model_id:
+        raise ConfigurationError(f"get_model: malformed model_id: {model_id!r}")
 
     if ":" not in model_id:
         model_id = f"gateway:{model_id}"
@@ -66,7 +69,9 @@ def get_model(model_id: str | None = None, *, client: Client | None = None) -> M
     model_info = _modelsdev.get_model_by_id(f"{provider_id}:{provider_model_id}")
     model_provider_config = None if model_info is None else model_info.provider_config
 
-    return base.Provider.from_id(
+    provider = base.Provider.from_id(
         provider_id,
         model_provider_config=model_provider_config,
-    )(provider_model_id, client=client)
+    )
+
+    return provider(provider_model_id, client=client)

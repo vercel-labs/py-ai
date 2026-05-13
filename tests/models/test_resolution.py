@@ -1,7 +1,7 @@
 import pytest
 
 import ai
-from ai import models
+from ai import ConfigurationError, models
 from ai.providers import ai_gateway, anthropic, openai
 
 
@@ -153,5 +153,5 @@ def test_get_rejects_unsupported_provider_package() -> None:
 
 
 def test_get_rejects_empty_model_id() -> None:
-    with pytest.raises(ValueError, match="must not be empty"):
+    with pytest.raises(ConfigurationError, match="malformed model_id: ''"):
         models.get_model("")

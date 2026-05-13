@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    import modelsdotdev
+import modelsdotdev
 
 _ENV_REFERENCE_RE = re.compile(r"\$\{?([A-Z_][A-Z0-9_]*)\}?")
 _SECRET_ENV_MARKERS = ("API_KEY", "TOKEN", "SECRET", "BEARER")
@@ -14,20 +12,14 @@ _PROVIDER_ID_ALIASES = {"ai-gateway": "vercel", "gateway": "vercel"}
 
 
 def parse_model_id(model_id: str) -> modelsdotdev.ModelRef:
-    import modelsdotdev
-
     return modelsdotdev.parse_model_id(_canonical_model_id(model_id))
 
 
 def get_provider_by_id(provider_id: str) -> modelsdotdev.Provider | None:
-    import modelsdotdev
-
     return modelsdotdev.get_provider_by_id(_canonical_provider_id(provider_id))
 
 
 def get_model_by_id(model_id: str) -> modelsdotdev.Model | None:
-    import modelsdotdev
-
     return modelsdotdev.get_model_by_id(_canonical_model_id(model_id))
 
 
