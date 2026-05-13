@@ -17,9 +17,9 @@ import { OneTwoSection } from "./components/one-two-section";
 import { Templates } from "./components/templates";
 import { TextGridSection } from "./components/text-grid-section";
 
-const title = "Geistdocs";
+const title = "AI SDK for Python";
 const description =
-  "A Vercel documentation template built with Next.js and Fumadocs. Designed for spinning up documentation sites quickly and consistently.";
+  "A toolkit for building LLM-powered applications and agent loops.";
 
 export const metadata: Metadata = {
   title,
@@ -71,7 +71,7 @@ const COMMAND_FOR_AGENTS = "npx @vercel/geistdocs init --agent";
 const HomePage = () => (
   <div className="container mx-auto max-w-5xl">
     <Hero
-      badge="Geistdocs is now in beta"
+      badge="Alpha is out now"
       description={description}
       title={title}
     >
