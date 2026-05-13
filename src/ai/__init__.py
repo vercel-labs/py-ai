@@ -22,7 +22,6 @@ from .agents import (
 )
 from .errors import AIError, ConfigurationError, UnsupportedProviderError
 from .models import (
-    Client,
     ImageParams,
     Model,
     Provider,
@@ -33,7 +32,7 @@ from .models import (
     get_model,
     stream,
 )
-from .providers import ai_gateway, anthropic, anthropic_like, openai, openai_like
+from .providers import get_provider
 from .types import events, messages, tools
 from .types.builders import (
     assistant_message,
@@ -64,20 +63,14 @@ __all__ = [
     "Provider",
     "ImageParams",
     "VideoParams",
-    "Client",
     "Stream",
     "check_connection",
     "stream",
     "generate",
     "get_model",
+    "get_provider",
     "models",
     "providers",
-    # Provider factories
-    "openai",
-    "openai_like",
-    "anthropic",
-    "anthropic_like",
-    "ai_gateway",
     # Agents — primary API
     "Agent",
     "agent",

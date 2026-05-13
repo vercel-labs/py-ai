@@ -3,29 +3,29 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from .. import _modelsdev
 from ..errors import UnsupportedProviderError
 
 if TYPE_CHECKING:
+    import anthropic
+    import httpx
     import modelsdotdev
+    import openai
 
-    from ..models.core.client import Client
-    from ..models.core.model import Model
+    ProviderClient = httpx.AsyncClient | openai.AsyncOpenAI | anthropic.AsyncAnthropic
+else:
+    ProviderClient = Any
 
 
 class Provider:
     """Base class for model providers.
 
-    A provider carries all provider-specific configuration and behaviour:
-    API endpoint, authentication, client creation, connection checks, and
-    model enumeration. Model objects hold only pure metadata (``id``,
-    ``adapter``) plus a back-reference to their provider.
-
-    Implementations must be **callable** — ``provider(model_id)`` returns
-    a :class:`Model`.
+    A provider carries provider-specific configuration and shared HTTP state:
+    API endpoint, authentication, and model enumeration. Model objects hold
+    metadata (``id``, ``adapter``) plus a back-reference to their provider.
     """
 
     handles: ClassVar[tuple[str, ...]] = ()
@@ -44,16 +44,25 @@ class Provider:
         name: str,
         adapter: str,
         base_url: str,
+        api_key: str | None = None,
         api_key_env: str | None = None,
         base_url_env: str | None = None,
         config_envs: Iterable[str] | None = None,
+        env: Mapping[str, str] | None = None,
+        client: httpx.AsyncClient | None = None,
     ) -> None:
+        if type(self) is Provider:
+            raise TypeError("Provider is a base class; implement a subclass instead")
         self._name = name
         self._adapter = adapter
         self._base_url = base_url
+        self._api_key = api_key
         self._api_key_env = api_key_env
         self._base_url_env = base_url_env
         self._config_envs = tuple(config_envs or ())
+        self._env = dict(env or {})
+        self._http: httpx.AsyncClient | None = client
+        self._owns_http = client is None
 
     @property
     def api_key_env(self) -> str | None:
@@ -74,15 +83,51 @@ class Provider:
     def base_url(self) -> str:
         """Default base URL for the provider API."""
         if self._base_url_env:
-            base_url = os.environ.get(self._base_url_env) or self._base_url
+            base_url = (
+                self._env.get(self._base_url_env)
+                or os.environ.get(
+                    self._base_url_env,
+                )
+                or self._base_url
+            )
         else:
             base_url = self._base_url
         for env in self._config_envs:
-            value = os.environ.get(env)
+            value = self._env.get(env) or os.environ.get(env)
             if value is not None:
                 base_url = base_url.replace(f"${{{env}}}", value)
                 base_url = base_url.replace(f"${env}", value)
         return base_url
+
+    @property
+    def api_key(self) -> str | None:
+        """API key configured directly or via the provider's env var."""
+        if self._api_key is not None:
+            return self._api_key
+        if self.api_key_env is None:
+            return None
+        return self._env.get(self.api_key_env) or os.environ.get(self.api_key_env)
+
+    @property
+    def http(self) -> httpx.AsyncClient:
+        """Shared HTTP client for this provider."""
+        import httpx as _httpx
+
+        if self._http is None or self._http.is_closed:
+            self._http = _httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=_httpx.Timeout(timeout=300.0, connect=10.0),
+            )
+            self._owns_http = True
+        assert self._http is not None
+        return self._http
+
+    async def aclose(self) -> None:
+        """Close the provider-owned HTTP client, if any."""
+        if self._http is not None and self._owns_http and not self._http.is_closed:
+            await self._http.aclose()
+        if self._owns_http:
+            self._http = None
 
     @property
     def adapter(self) -> str:
@@ -99,46 +144,9 @@ class Provider:
         """Human-readable provider name (for repr, error messages)."""
         return self._name
 
-    def client(self) -> Client:
-        """Create a :class:`Client` from the provider's default config.
-
-        Reads ``api_key_env`` from the environment and uses ``base_url``
-        as the endpoint.
-        """
-        from ..models.core import client as client_
-
-        return client_.Client(
-            base_url=self.base_url,
-            api_key=os.environ.get(self.api_key_env) if self.api_key_env else None,
-        )
-
-    async def check(self, client: Client, model: Model) -> bool:
-        """Check whether *client* can reach this provider and *model* exists.
-
-        Returns ``True`` when credentials are valid **and** the model is
-        available. Non-auth transport errors should be raised.
-        """
-        raise NotImplementedError
-
-    async def list(self, *, client: Client | None = None) -> list[str]:
+    async def list(self) -> list[str]:
         """List available model IDs from the provider API."""
         raise NotImplementedError
-
-    def __call__(
-        self,
-        model_id: str,
-        *,
-        client: Client | None = None,
-    ) -> Model:
-        """Create a :class:`Model` for the given *model_id*."""
-        from ..models.core import model as model_
-
-        return model_.Model(
-            id=model_id,
-            adapter=self.adapter,
-            provider=self,
-            client=client,
-        )
 
     def __repr__(self) -> str:
         return self.name
@@ -149,24 +157,32 @@ class Provider:
         known_id: str,
         *,
         model_provider_config: modelsdotdev.ModelProviderConfig | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        env: Mapping[str, str] | None = None,
+        client: Any | None = None,
     ) -> Provider:
         """Return a concrete provider for a models.dev provider ID."""
-        provider = _modelsdev.get_provider_by_id(known_id)
-        if provider is None:
+        modelsdev_provider = _modelsdev.get_provider_by_id(known_id)
+        if modelsdev_provider is None:
             raise ValueError(f"unknown provider id: {known_id!r}")
 
         for handle in (
-            provider.id,
-            _modelsdev.provider_npm(provider, model_provider_config),
+            modelsdev_provider.id,
+            _modelsdev.provider_npm(modelsdev_provider, model_provider_config),
         ):
             provider_type = _PROVIDER_REGISTRY.get(handle)
             if provider_type is not None:
                 return provider_type.from_modelsdev_provider(
-                    provider,
+                    modelsdev_provider,
                     model_provider_config=model_provider_config,
+                    base_url=base_url,
+                    api_key=api_key,
+                    env=env,
+                    client=client,
                 )
 
-        raise UnsupportedProviderError(provider.id)
+        raise UnsupportedProviderError(modelsdev_provider.id)
 
     @classmethod
     def from_modelsdev_provider(
@@ -174,12 +190,34 @@ class Provider:
         provider: modelsdotdev.Provider,
         *,
         model_provider_config: modelsdotdev.ModelProviderConfig | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        env: Mapping[str, str] | None = None,
+        client: Any | None = None,
     ) -> Provider:
         """Construct this provider implementation from models.dev metadata."""
         raise NotImplementedError
 
 
 _PROVIDER_REGISTRY: dict[str, type[Provider]] = {}
+
+
+def get_provider(
+    id: str,
+    *,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    env: Mapping[str, str] | None = None,
+    client: ProviderClient | None = None,
+) -> Provider:
+    """Create a provider from a models.dev provider ID."""
+    return Provider.from_id(
+        id,
+        base_url=base_url,
+        api_key=api_key,
+        env=env,
+        client=client,
+    )
 
 
 def provider_config(

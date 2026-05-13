@@ -1,15 +1,20 @@
-"""AI Gateway v3 HTTP API"""
+"""Minimal async AI Gateway client used by the provider implementation."""
+
+from __future__ import annotations
 
 import json
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlparse
 
 import httpx
 
-from ...models import core
-from . import errors
+from .. import errors
+
+if TYPE_CHECKING:
+    from ....models.core import model as model_
+    from ...base import Provider
 
 _PROTOCOL_VERSION = "0.0.1"
 
@@ -17,17 +22,24 @@ ModelType = Literal["language", "image", "video"]
 
 
 class GatewayClient:
+    """Small async HTTP client for Gateway provider endpoints.
+
+    This intentionally implements only the calls used by the current provider:
+    config/credits reads, language streaming, image JSON generation, and video
+    SSE generation.
+    """
+
     def __init__(
         self,
-        client: core.client.Client,
-        model: core.model.Model | None = None,
+        provider: Provider,
+        model: model_.Model | None = None,
     ) -> None:
-        self._client = client
+        self._provider = provider
         self._model = model
 
     @property
     def base_url(self) -> str:
-        return self._client.base_url.rstrip("/")
+        return self._provider.base_url.rstrip("/")
 
     def url(self, path: str) -> str:
         return f"{self.base_url}/{path.lstrip('/')}"
@@ -37,11 +49,11 @@ class GatewayClient:
         return f"{parsed.scheme}://{parsed.netloc}/{path.lstrip('/')}"
 
     def protocol_headers(self) -> dict[str, str]:
-        headers: dict[str, str] = {
+        headers = {
             "ai-gateway-protocol-version": _PROTOCOL_VERSION,
         }
-        if self._client.api_key:
-            headers["Authorization"] = f"Bearer {self._client.api_key}"
+        if self._provider.api_key:
+            headers["Authorization"] = f"Bearer {self._provider.api_key}"
             headers["ai-gateway-auth-method"] = "api-key"
         return headers
 
@@ -84,7 +96,7 @@ class GatewayClient:
         headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         url = self.origin_url(path) if origin else self.url(path)
-        return await self._client.http.get(
+        return await self._provider.http.get(
             url,
             headers=headers or self.protocol_headers(),
         )
@@ -97,16 +109,19 @@ class GatewayClient:
         model_type: ModelType,
         timeout: httpx.Timeout | float | None = None,
     ) -> httpx.Response:
-        kwargs: dict[str, Any] = {}
-        if timeout is not None:
-            kwargs["timeout"] = timeout
-
-        response = await self._client.http.post(
-            self.url(path),
-            json=body,
-            headers=self.model_headers(model_type),
-            **kwargs,
-        )
+        if timeout is None:
+            response = await self._provider.http.post(
+                self.url(path),
+                json=body,
+                headers=self.model_headers(model_type),
+            )
+        else:
+            response = await self._provider.http.post(
+                self.url(path),
+                json=body,
+                headers=self.model_headers(model_type),
+                timeout=timeout,
+            )
         await self.raise_for_error(response)
         return response
 
@@ -122,9 +137,6 @@ class GatewayClient:
         headers: dict[str, str] | None = None,
         timeout: httpx.Timeout | float | None = None,
     ) -> AsyncIterator[httpx.Response]:
-        kwargs: dict[str, Any] = {}
-        if timeout is not None:
-            kwargs["timeout"] = timeout
         request_headers = self.model_headers(
             model_type,
             streaming=streaming,
@@ -133,13 +145,24 @@ class GatewayClient:
         if headers:
             request_headers.update(headers)
 
-        async with self._client.http.stream(
-            "POST",
-            self.url(path),
-            json=body,
-            headers=request_headers,
-            **kwargs,
-        ) as response:
+        stream = (
+            self._provider.http.stream(
+                "POST",
+                self.url(path),
+                json=body,
+                headers=request_headers,
+            )
+            if timeout is None
+            else self._provider.http.stream(
+                "POST",
+                self.url(path),
+                json=body,
+                headers=request_headers,
+                timeout=timeout,
+            )
+        )
+
+        async with stream as response:
             await self.raise_for_error(response)
             yield response
 
@@ -151,7 +174,7 @@ class GatewayClient:
         raise errors.create_gateway_error(
             response_body=response.text,
             status_code=response.status_code,
-            api_key_provided=bool(self._client.api_key),
+            api_key_provided=bool(self._provider.api_key),
         )
 
     async def iter_sse(
@@ -166,6 +189,8 @@ class GatewayClient:
             if payload == "[DONE]":
                 break
             try:
-                yield json.loads(payload)
+                value = json.loads(payload)
             except json.JSONDecodeError:
                 continue
+            if isinstance(value, dict):
+                yield value

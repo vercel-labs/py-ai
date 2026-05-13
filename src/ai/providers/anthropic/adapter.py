@@ -1,7 +1,7 @@
 """Anthropic adapter — messages API.
 
 Message/tool conversion and streaming via the official ``anthropic`` SDK.
-The SDK client is constructed from :class:`Client` params on each call.
+The SDK client is constructed from provider configuration on each call.
 """
 
 import json
@@ -14,6 +14,7 @@ import pydantic
 from ... import types
 from ...models import core
 from ...types import events
+from . import provider as provider_
 from . import tools as anthropic_tools
 
 PROVIDER_NAME = "anthropic"
@@ -332,12 +333,26 @@ def _to_content_list(content: Any) -> list[dict[str, Any]]:
 
 
 def _make_client(
-    client: core.client.Client,
+    model: core.model.Model,
 ) -> anthropic.AsyncAnthropic:
-    """Construct an ``AsyncAnthropic`` from our generic ``Client``."""
+    """Construct an ``AsyncAnthropic`` from the model's provider."""
+    provider = model.provider
+    if isinstance(provider, provider_.AnthropicCompatibleProvider):
+        client = provider.sdk_client
+        if client is not None:
+            return client
     return anthropic.AsyncAnthropic(
-        base_url=client.base_url,
-        api_key=client.api_key or "",
+        base_url=provider.base_url,
+        api_key=provider.api_key or "",
+        http_client=provider.http,
+    )
+
+
+def _owns_client(model: core.model.Model, client: anthropic.AsyncAnthropic) -> bool:
+    provider = model.provider
+    return not (
+        isinstance(provider, provider_.AnthropicCompatibleProvider)
+        and provider.sdk_client is client
     )
 
 
@@ -386,7 +401,6 @@ def _result_block_content(block: Any) -> Any:
 
 
 async def stream(
-    client: core.client.Client,
     model: core.model.Model,
     messages: list[types.messages.Message],
     *,
@@ -403,7 +417,8 @@ async def stream(
     ``params`` may be a raw dict of Anthropic SDK kwargs. Provider-specific
     request options are forwarded without local validation or translation.
     """
-    sdk_client = _make_client(client)
+    sdk_client = _make_client(model)
+    owns_client = _owns_client(model, sdk_client)
     stream_params = _coerce_params(kwargs.get("params"))
     system_prompt, anthropic_messages = await _messages_to_anthropic(messages)
 
@@ -588,4 +603,5 @@ async def stream(
             )
             yield events.StreamEnd(usage=usage)
     finally:
-        await sdk_client.close()
+        if owns_client:
+            await sdk_client.close()

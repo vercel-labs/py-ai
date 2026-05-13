@@ -18,7 +18,6 @@ from ... import types
 from ...providers.base import Provider as Provider
 
 if TYPE_CHECKING:
-    from .client import Client
     from .model import Model
 
 __all__ = ["CheckConnFn", "GenerateFn", "Provider", "StreamFn"]
@@ -34,7 +33,6 @@ class StreamFn(Protocol):
 
     def __call__(
         self,
-        client: Client,
         model: Model,
         messages: list[types.messages.Message],
         *,
@@ -55,7 +53,6 @@ class GenerateFn(Protocol):
 
     async def __call__(
         self,
-        client: Client,
         model: Model,
         messages: list[types.messages.Message],
         params: Any,
@@ -66,8 +63,8 @@ class GenerateFn(Protocol):
 class CheckConnFn(Protocol):
     """Protocol for connection-check functions.
 
-    A check function verifies that *client* can reach the provider and that
-    *model* is available there.  Returns ``True`` when the credentials are
+    A check function verifies that *model* can reach its provider and that it
+    is available there.  Returns ``True`` when the credentials are
     valid **and** the model exists on the remote side.
 
     The check must be **free** — it should only hit metadata / listing
@@ -80,6 +77,5 @@ class CheckConnFn(Protocol):
 
     async def __call__(
         self,
-        client: Client,
         model: Model,
     ) -> bool: ...

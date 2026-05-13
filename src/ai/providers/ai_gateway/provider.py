@@ -4,30 +4,41 @@ Defines the callable :data:`ai_gateway` provider."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from ...models import core
 from .. import base
 
 if TYPE_CHECKING:
+    import httpx
     import modelsdotdev
 
 _BASE_URL = "https://ai-gateway.vercel.sh/v3/ai"
 _API_KEY_ENV = "AI_GATEWAY_API_KEY"
 
 
-class _AIGateway(base.Provider):
-    """Callable provider factory for the Vercel AI Gateway."""
+class GatewayProvider(base.Provider):
+    """Provider configuration for the Vercel AI Gateway."""
 
     handles: ClassVar[tuple[str, ...]] = ("vercel", "@ai-sdk/gateway")
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        base_url: str = _BASE_URL,
+        env: Mapping[str, str] | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
         super().__init__(
             name="ai-gateway",
             adapter="ai-gateway-v3",
-            base_url=_BASE_URL,
+            base_url=base_url,
+            api_key=api_key,
             api_key_env=_API_KEY_ENV,
+            env=env,
+            client=client,
         )
 
     @classmethod
@@ -36,8 +47,17 @@ class _AIGateway(base.Provider):
         provider: modelsdotdev.Provider,
         *,
         model_provider_config: modelsdotdev.ModelProviderConfig | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        env: Mapping[str, str] | None = None,
+        client: httpx.AsyncClient | None = None,
     ) -> base.Provider:
-        return ai_gateway
+        return cls(
+            api_key=api_key,
+            base_url=base_url or _BASE_URL,
+            env=env,
+            client=client,
+        )
 
     @property
     def tools(self) -> ModuleType:
@@ -51,24 +71,15 @@ class _AIGateway(base.Provider):
 
         return tools_module
 
-    async def check(self, client: core.client.Client, model: core.model.Model) -> bool:
-        """Delegate to :func:`ai_gateway.check.check`."""
-        from . import check as check_
-
-        return await check_.check(client, model)
-
-    async def list(self, *, client: core.client.Client | None = None) -> list[str]:
+    async def list(self) -> list[str]:
         """List available model IDs from the AI Gateway."""
-        from . import sdk
+        from . import client as gateway_client
 
-        c = client or self.client()
-        gateway = sdk.GatewayClient(c)
+        gateway = gateway_client.GatewayClient(self)
         response = await gateway.get("config")
         response.raise_for_status()
         data: dict[str, Any] = response.json()
         return sorted(str(m["id"]) for m in data.get("models", []))
 
 
-ai_gateway = _AIGateway()
-
-__all__ = ["ai_gateway"]
+__all__ = ["GatewayProvider"]

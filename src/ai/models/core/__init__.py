@@ -14,14 +14,12 @@ from .api import (
     generate,
     stream,
 )
-from .client import Client
 from .model import Model, get_model
 from .params import GenerateParams, ImageParams, VideoParams
 from .proto import CheckConnFn, GenerateFn, StreamFn
 
 __all__ = [
     "CheckConnFn",
-    "Client",
     "Executor",
     "GenerateExecutor",
     "GenerateFn",

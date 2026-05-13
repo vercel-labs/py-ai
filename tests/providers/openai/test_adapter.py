@@ -12,8 +12,7 @@ import pydantic
 import pytest
 
 import ai
-from ai import models
-from ai.providers.openai import adapter, openai
+from ai.providers.openai import adapter
 from ai.providers.openai import tools as openai_tools
 from ai.types import messages
 
@@ -53,14 +52,13 @@ class _FakeOpenAIClient:
         self.closed = True
 
 
-_TEST_CLIENT = models.Client(base_url="https://openai.test", api_key="sk-test")
-_MODEL = openai("gpt-5.4")
+_MODEL = ai.Model("gpt-5.4", provider=ai.get_provider("openai"))
 
 
 def _patch(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     captured: dict[str, Any] = {}
     fake = _FakeOpenAIClient(captured)
-    monkeypatch.setattr(adapter, "_make_client", lambda client: fake)
+    monkeypatch.setattr(adapter, "_make_client", lambda model: fake)
     return captured
 
 
@@ -76,7 +74,6 @@ async def test_system_messages_use_openai_system_role(
 
     await _drain(
         adapter.stream(
-            _TEST_CLIENT,
             _MODEL,
             [ai.system_message("rules"), ai.user_message("Hi")],
         )
@@ -92,7 +89,6 @@ async def test_raw_params_pass_through_to_sdk_kwargs(
 
     await _drain(
         adapter.stream(
-            _TEST_CLIENT,
             _MODEL,
             [ai.user_message("Hi")],
             params={
@@ -121,7 +117,6 @@ async def test_strict_json_schema_flows_into_response_format(
 
     await _drain(
         adapter.stream(
-            _TEST_CLIENT,
             _MODEL,
             [ai.user_message("Hi")],
             output_type=_Answer,
@@ -137,7 +132,6 @@ async def test_non_dict_params_rejected_by_adapter(
     _patch(monkeypatch)
 
     stream = adapter.stream(
-        _TEST_CLIENT,
         _MODEL,
         [ai.user_message("Hi")],
         params=[{"reasoning_effort": "high"}],
@@ -154,7 +148,6 @@ async def test_builtin_tool_in_request_raises(
     _patch(monkeypatch)
 
     stream = adapter.stream(
-        _TEST_CLIENT,
         _MODEL,
         [ai.user_message("Hi")],
         tools=[openai_tools.web_search()],
@@ -184,4 +177,4 @@ async def test_builtin_part_in_messages_raises(
     ]
 
     with pytest.raises(NotImplementedError, match="BuiltinTool"):
-        await _drain(adapter.stream(_TEST_CLIENT, _MODEL, convo))
+        await _drain(adapter.stream(_MODEL, convo))

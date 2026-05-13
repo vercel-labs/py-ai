@@ -15,7 +15,8 @@ from ... import types
 from ...models import core
 from ..anthropic import tools as anthropic_tools
 from ..openai import tools as openai_tools
-from . import errors, sdk
+from . import client as gateway_client
+from . import errors
 from . import tools as gateway_tools
 
 # ---------------------------------------------------------------------------
@@ -468,7 +469,6 @@ def _parse_stream_part(
 
 
 async def stream(
-    client: core.client.Client,
     model: core.model.Model,
     messages: list[types.messages.Message],
     *,
@@ -484,7 +484,7 @@ async def stream(
         output_type=output_type,
         params=stream_params,
     )
-    gateway = sdk.GatewayClient(client, model)
+    gateway = gateway_client.GatewayClient(model.provider, model)
 
     try:
         async with gateway.stream(
@@ -518,7 +518,6 @@ async def stream(
 
 
 async def _generate_image(
-    client: core.client.Client,
     model: core.model.Model,
     messages: list[types.messages.Message],
     params: core.ImageParams,
@@ -534,7 +533,7 @@ async def _generate_image(
     if input_files:
         body["files"] = [_file_part_to_wire(f) for f in input_files]
 
-    gateway = sdk.GatewayClient(client, model)
+    gateway = gateway_client.GatewayClient(model.provider, model)
     response = await gateway.post_json("image-model", body, model_type="image")
 
     data = response.json()
@@ -556,7 +555,6 @@ async def _generate_image(
 
 
 async def _generate_video(
-    client: core.client.Client,
     model: core.model.Model,
     messages: list[types.messages.Message],
     params: core.VideoParams,
@@ -572,7 +570,7 @@ async def _generate_video(
     if input_files:
         body["image"] = _file_part_to_wire(input_files[0])
 
-    gateway = sdk.GatewayClient(client, model)
+    gateway = gateway_client.GatewayClient(model.provider, model)
 
     async with gateway.stream(
         "video-model",
@@ -620,12 +618,11 @@ async def _generate_video(
 
 
 async def generate(
-    client: core.client.Client,
     model: core.model.Model,
     messages: list[types.messages.Message],
     params: core.GenerateParams,
 ) -> types.messages.Message:
     """Generate media through the AI Gateway."""
     if isinstance(params, core.VideoParams):
-        return await _generate_video(client, model, messages, params)
-    return await _generate_image(client, model, messages, params)
+        return await _generate_video(model, messages, params)
+    return await _generate_image(model, messages, params)

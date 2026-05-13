@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import httpx
 
-from ai.models.core import client as client_
-from ai.providers.ai_gateway import ai_gateway
+import ai
 
 
 async def test_list_gets_config_with_gateway_headers_and_sorts_ids() -> None:
@@ -23,13 +22,17 @@ async def test_list_gets_config_with_gateway_headers_and_sorts_ids() -> None:
             },
         )
 
-    client = client_.Client(base_url="https://gateway.test/v3/ai", api_key="sk-test")
-    client._http = httpx.AsyncClient(transport=httpx.MockTransport(_handler))
+    provider = ai.get_provider(
+        "vercel",
+        base_url="https://gateway.test/v3/ai",
+        api_key="sk-test",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(_handler)),
+    )
 
     try:
-        ids = await ai_gateway.list(client=client)
+        ids = await provider.list()
     finally:
-        await client.aclose()
+        await provider.aclose()
 
     assert captured_urls == ["https://gateway.test/v3/ai/config"]
     assert captured_headers["authorization"] == "Bearer sk-test"

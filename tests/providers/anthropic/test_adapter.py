@@ -11,8 +11,7 @@ from typing import Any
 import pytest
 
 import ai
-from ai import models
-from ai.providers.anthropic import adapter, anthropic
+from ai.providers.anthropic import adapter
 from ai.types import messages
 
 from .conftest import FakeAnthropicClient
@@ -23,12 +22,11 @@ def _patch_client(
 ) -> tuple[FakeAnthropicClient, dict[str, Any]]:
     captured: dict[str, Any] = {}
     fake = FakeAnthropicClient(captured)
-    monkeypatch.setattr(adapter, "_make_client", lambda client: fake)
+    monkeypatch.setattr(adapter, "_make_client", lambda model: fake)
     return fake, captured
 
 
-_TEST_CLIENT = models.Client(base_url="https://anthropic.test", api_key="sk-test")
-_MODEL = anthropic("claude-sonnet-4-6")
+_MODEL = ai.Model("claude-sonnet-4-6", provider=ai.get_provider("anthropic"))
 
 
 async def _drain(stream: Any) -> None:
@@ -43,7 +41,6 @@ async def test_raw_params_pass_through_to_sdk_kwargs(
 
     await _drain(
         adapter.stream(
-            _TEST_CLIENT,
             _MODEL,
             [ai.user_message("Hi")],
             params={
@@ -85,7 +82,6 @@ async def test_non_dict_params_rejected_by_adapter(
     _patch_client(monkeypatch)
 
     stream = adapter.stream(
-        _TEST_CLIENT,
         _MODEL,
         [ai.user_message("Hi")],
         params=[{"speed": "fast"}],
@@ -102,7 +98,6 @@ async def test_reasoning_signature_round_trips_from_provider_metadata(
 
     await _drain(
         adapter.stream(
-            _TEST_CLIENT,
             _MODEL,
             [
                 ai.assistant_message(
@@ -158,7 +153,7 @@ async def test_builtin_tool_parts_round_trip(
         ai.user_message("Thanks"),
     ]
 
-    await _drain(adapter.stream(_TEST_CLIENT, _MODEL, convo))
+    await _drain(adapter.stream(_MODEL, convo))
 
     assistant = next(m for m in captured["messages"] if m["role"] == "assistant")
     assert assistant["content"] == [

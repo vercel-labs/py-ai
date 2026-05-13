@@ -12,32 +12,34 @@ from typing import Any
 
 import httpx
 
-from ai.models.core import client as client_
-from ai.providers.anthropic import anthropic, anthropic_like, check
-
-_MODEL = anthropic("claude-opus-4-6")
+import ai
+from ai.providers.anthropic import AnthropicCompatibleProvider, check
 
 
 def _client_with_mock(
     status_code: int = 200,
     json_body: Any = None,
     base_url: str = "https://anthropic.test",
-) -> client_.Client:
+) -> ai.Model:
     def _handler(request: httpx.Request) -> httpx.Response:
         body = json.dumps(json_body or {}).encode()
         return httpx.Response(status_code, content=body)
 
-    client = client_.Client(base_url=base_url, api_key="sk-test-key")
-    client._http = httpx.AsyncClient(
+    provider = ai.get_provider(
+        "anthropic",
         base_url=base_url,
-        transport=httpx.MockTransport(_handler),
+        api_key="sk-test-key",
+        client=httpx.AsyncClient(
+            base_url=base_url,
+            transport=httpx.MockTransport(_handler),
+        ),
     )
-    return client
+    return ai.Model("claude-opus-4-6", provider=provider)
 
 
 async def test_200_returns_true() -> None:
-    client = _client_with_mock(200, {"id": "claude-opus-4-6", "type": "model"})
-    assert await check.check(client, _MODEL) is True
+    model = _client_with_mock(200, {"id": "claude-opus-4-6", "type": "model"})
+    assert await check.check(model) is True
 
 
 async def test_custom_anthropic_version_header() -> None:
@@ -48,16 +50,16 @@ async def test_custom_anthropic_version_header() -> None:
         body = json.dumps({"id": "custom-model", "type": "model"}).encode()
         return httpx.Response(200, content=body)
 
-    provider = anthropic_like(
+    provider = AnthropicCompatibleProvider(
         name="custom-anthropic",
-        base_url="https://anthropic.test",
+        default_base_url="https://anthropic.test",
+        api_key="sk-test-key",
         anthropic_version="2024-01-01",
-    )
-    client = client_.Client(base_url="https://anthropic.test", api_key="sk-test-key")
-    client._http = httpx.AsyncClient(
-        base_url="https://anthropic.test",
-        transport=httpx.MockTransport(_handler),
+        client=httpx.AsyncClient(
+            base_url="https://anthropic.test",
+            transport=httpx.MockTransport(_handler),
+        ),
     )
 
-    assert await check.check(client, provider("custom-model")) is True
+    assert await check.check(ai.Model("custom-model", provider=provider)) is True
     assert captured_headers["anthropic-version"] == "2024-01-01"

@@ -14,15 +14,15 @@ Both endpoints are free — no tokens or credits are consumed.
 from typing import Any
 
 from ...models import core
-from . import sdk
+from . import client as gateway_client
 
 # HTTP status codes that indicate bad auth.
 _FAIL_STATUSES = frozenset({401, 403})
 
 
-async def check(client: core.client.Client, model: core.model.Model) -> bool:
+async def check(model: core.model.Model) -> bool:
     """Return ``True`` if *client* can reach the gateway and *model* exists."""
-    gateway = sdk.GatewayClient(client, model)
+    gateway = gateway_client.GatewayClient(model.provider, model)
 
     # 1. Verify credentials via /v1/credits (requires valid auth).
     auth_resp = await gateway.get("v1/credits", origin=True)
