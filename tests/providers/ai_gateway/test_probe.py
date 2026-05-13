@@ -38,19 +38,19 @@ def _gateway_client(
 async def test_auth_ok_model_present() -> None:
     config = {"models": [{"id": "anthropic/claude-opus-4-6"}]}
     model = _gateway_client(config_body=config)
-    assert await model.provider.check(model) is True
+    assert await model.provider.probe(model) is True
 
 
 async def test_auth_ok_model_absent() -> None:
     config = {"models": [{"id": "openai/gpt-5.4"}]}
     model = _gateway_client(config_body=config)
-    assert await model.provider.check(model) is False
+    assert await model.provider.probe(model) is False
 
 
 @pytest.mark.parametrize("status", [401, 403])
 async def test_credits_auth_error_returns_false(status: int) -> None:
     model = _gateway_client(credits_status=status)
-    assert await model.provider.check(model) is False
+    assert await model.provider.probe(model) is False
 
 
 async def test_missing_configuration_returns_false(
@@ -59,10 +59,10 @@ async def test_missing_configuration_returns_false(
     monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
 
     model = _gateway_client(api_key=None)
-    assert await model.provider.check(model) is False
+    assert await model.provider.probe(model) is False
 
 
 async def test_credits_500_raises() -> None:
     model = _gateway_client(credits_status=500)
     with pytest.raises(httpx.HTTPStatusError):
-        await model.provider.check(model)
+        await model.provider.probe(model)

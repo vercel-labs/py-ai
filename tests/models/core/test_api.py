@@ -269,7 +269,7 @@ class _CheckProvider(MockProvider):
         super().__init__(adapter="mock-check")
         self.checked_model: models.Model | None = None
 
-    async def check(self, model: models.Model) -> bool:
+    async def probe(self, model: models.Model) -> bool:
         self.checked_model = model
         return True
 

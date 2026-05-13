@@ -1,7 +1,7 @@
-"""Anthropic ``check`` tests.
+"""Anthropic ``probe`` tests.
 
 The status-code handling is shared with OpenAI and exhaustively tested
-in ``tests/providers/openai/test_check.py``. This file only confirms the
+in ``tests/providers/openai/test_probe.py``. This file only confirms the
 provider-specific 200 path so we know URL routing is wired up.
 """
 
@@ -39,7 +39,7 @@ def _client_with_mock(
 
 async def test_200_returns_true() -> None:
     model = _client_with_mock(200, {"id": "claude-opus-4-6", "type": "model"})
-    assert await model.provider.check(model) is True
+    assert await model.provider.probe(model) is True
 
 
 async def test_custom_anthropic_version_header() -> None:
@@ -62,5 +62,5 @@ async def test_custom_anthropic_version_header() -> None:
     )
 
     model = ai.Model("custom-model", provider=provider)
-    assert await provider.check(model) is True
+    assert await provider.probe(model) is True
     assert captured_headers["anthropic-version"] == "2024-01-01"

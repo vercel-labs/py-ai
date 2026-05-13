@@ -100,7 +100,7 @@ class GatewayProvider(base.Provider[gateway_client.GatewayClient]):
         data: dict[str, Any] = response.json()
         return sorted(str(m["id"]) for m in data.get("models", []))
 
-    async def check(self, model: model_.Model) -> bool:
+    async def probe(self, model: model_.Model) -> bool:
         """Return ``True`` when gateway credentials are valid and model exists."""
         if not self.is_configured():
             return False

@@ -150,7 +150,7 @@ class AnthropicCompatibleProvider(base.Provider[anthropic.AsyncAnthropic]):
         sdk_models = await self.sdk_client.models.list()
         return sorted(str(m.id) for m in sdk_models.data)
 
-    async def check(self, model: model_.Model) -> bool:
+    async def probe(self, model: model_.Model) -> bool:
         """Return ``True`` when credentials are valid and the model exists."""
         if not self.is_configured():
             return False

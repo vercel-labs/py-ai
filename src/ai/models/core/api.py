@@ -474,4 +474,4 @@ async def generate(
 
 async def check_connection(model: model_.Model) -> bool:
     """Check whether the model's provider is reachable and the model exists."""
-    return await model.check()
+    return await model.probe()

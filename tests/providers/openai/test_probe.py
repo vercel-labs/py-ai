@@ -33,19 +33,19 @@ def _client_with_mock(
 
 async def test_200_returns_true() -> None:
     model = _client_with_mock(200, {"id": "gpt-5.4", "object": "model"})
-    assert await model.provider.check(model) is True
+    assert await model.provider.probe(model) is True
 
 
 @pytest.mark.parametrize("status", [401, 403, 404])
 async def test_client_error_returns_false(status: int) -> None:
     model = _client_with_mock(status)
-    assert await model.provider.check(model) is False
+    assert await model.provider.probe(model) is False
 
 
 async def test_500_raises() -> None:
     model = _client_with_mock(500)
     with pytest.raises(openai.APIStatusError):
-        await model.provider.check(model)
+        await model.provider.probe(model)
 
 
 async def test_no_api_key_returns_false(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -53,4 +53,4 @@ async def test_no_api_key_returns_false(monkeypatch: pytest.MonkeyPatch) -> None
 
     provider = ai.get_provider("openai", base_url="https://openai.test/v1")
     model = ai.Model("gpt-5.4", provider=provider)
-    assert await provider.check(model) is False
+    assert await provider.probe(model) is False

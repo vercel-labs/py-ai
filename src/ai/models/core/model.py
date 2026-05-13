@@ -45,14 +45,14 @@ class Model:
     def __hash__(self) -> int:
         return hash((self.id, self.adapter, id(self.provider)))
 
-    async def check(self) -> bool:
-        """Check whether this model is reachable and available.
+    async def probe(self) -> bool:
+        """Probe whether this model is reachable and available.
 
         Returns ``True`` when credentials are valid and the model exists.
         Non-auth transport errors are raised so callers can distinguish
         misconfiguration from provider outages.
         """
-        return await self.provider.check(self)
+        return await self.provider.probe(self)
 
 
 def get_model(model_id: str | None = None) -> Model:
