@@ -1,20 +1,20 @@
 ---
 title: Getting Started
-description: Build LLM-powered apps and agents in Python with the ai SDK.
+description: Build LLM-powered apps and agents in Python with the AI SDK.
 type: guide
-summary: Install the ai SDK, configure provider credentials, and stream your first agent run.
+summary: Install the AI SDK, configure provider credentials, and stream your first agent run.
 ---
 
-# Getting Started
-
-The AI SDK for Python is toolkit for building LLM-powered applications and
-agent loops. It provides composable primitives — models, messages, tools,
-agents, and hooks, that you wire together with plain Python.
+The AI SDK for Python is a toolkit for building large language model (LLM)
+applications and agent loops. It gives you composable primitives: models,
+messages, streams, tools, agents, and hooks. You wire them together with plain
+async Python.
 
 ## Prerequisites
 
-- **Python 3.12+**
-- **uv** (recommended), **pip**, or other dependency manager.
+- **Python 3.12 or later.**
+- **uv**, **pip**, or another Python dependency manager.
+- **An AI Gateway API key.**
 
 ## Install
 
@@ -22,7 +22,13 @@ agents, and hooks, that you wire together with plain Python.
 uv add ai
 ```
 
-Then import the package:
+Set your AI Gateway API key:
+
+```bash title="Terminal"
+export AI_GATEWAY_API_KEY=your_api_key_here
+```
+
+Then import the package in Python:
 
 ```python
 import ai
@@ -30,7 +36,7 @@ import ai
 
 ## Your first agent
 
-This example defines one tool and lets the default agent loop drive it:
+This example defines one tool and lets the default agent loop run it:
 
 ```python title="hello_agent.py"
 import asyncio
@@ -64,18 +70,21 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-Run it:
+Run the file:
 
 ```bash title="Terminal"
 uv run hello_agent.py
 ```
 
-You'll see the model's reply stream to the terminal, with the `contact_mothership`
-tool called transparently when the model decides it needs the data.
+The agent streams text to the terminal. When the model requests
+`contact_mothership`, the default loop executes the tool, appends the tool
+result to the message history, and continues until the model returns a final
+assistant message.
 
 ## Streaming without an agent
 
-If you don't need a tool-execution loop, call `ai.stream` directly:
+If you want the model response without a tool-execution loop, call `ai.stream`
+directly:
 
 ```python title="stream.py"
 import asyncio
@@ -86,7 +95,7 @@ async def main() -> None:
     model = ai.ai_gateway("anthropic/claude-sonnet-4")
     messages = [
         ai.system_message("Be concise."),
-        ai.user_message("Explain why the sky is blue in two sentences."),
+        ai.user_message("Explain why the robots keep asking about batteries."),
     ]
 
     async with ai.stream(model, messages) as s:
@@ -99,15 +108,16 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-After iteration, `s.text`, `s.tool_calls`, `s.output`, and `s.usage` are all
-populated.
+After iteration, `s.message`, `s.text`, `s.tool_calls`, `s.output`, and
+`s.usage` are populated.
 
 ## What's next
 
-- **Samples** — focused, single-file examples live in
+- **Core concepts**: Learn the small set of primitives that shape the SDK.
+- **Streaming**: Stream model responses and inspect events.
+- **Agents**: Add tools, customize the loop, and handle approvals.
+- **Samples**: Focused, single-file examples live in
   [`examples/samples/`](https://github.com/vercel-labs/ai-python/tree/main/examples/samples).
-- **End-to-end demos** — `fastapi-vite` (web chat with human-in-the-loop
+- **End-to-end demos**: `fastapi-vite` (web chat with human-in-the-loop
   approval), `multiagent-textual` (parallel agents with a terminal UI),
   `temporal-direct` (durable agent runs).
-- **Concepts to explore next** — structured output, streaming tools,
-  custom agent loops, hooks, and MCP integration.

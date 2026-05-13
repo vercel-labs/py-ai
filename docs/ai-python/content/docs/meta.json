@@ -3,6 +3,9 @@
   "description": "Documentation",
   "root": true,
   "pages": [
-    "index"
+    "index",
+    "concepts",
+    "streaming",
+    "agents"
   ]
 }
