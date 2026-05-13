@@ -264,24 +264,24 @@ async def replay_message_events(
 # ---------------------------------------------------------------------------
 
 
-class Aggregator[Item, Result, ModelResult]:
+class Aggregator[Item, Result, ModelInput]:
     @abc.abstractmethod
     def feed(self, item: Item) -> None: ...
 
     @abc.abstractmethod
     def snapshot(self) -> Result: ...
 
-    def get_model_output(self) -> ModelResult:
+    def get_model_input(self) -> ModelInput:
         """Return the model-facing value derived from this aggregator's state.
 
-        Default implementation defers to :meth:`to_model_output`; subclasses
+        Default implementation defers to :meth:`to_model_input`; subclasses
         with non-trivial state may override either or both.
         """
-        return type(self).to_model_output(self.snapshot())
+        return type(self).to_model_input(self.snapshot())
 
     @classmethod
     @abc.abstractmethod
-    def to_model_output(cls, snapshot: Result) -> ModelResult:
+    def to_model_input(cls, snapshot: Result) -> ModelInput:
         """Stateless conversion: snapshot -> model-facing value.
 
         Called on inbound (when a tool result round-trips back from the

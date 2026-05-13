@@ -38,7 +38,7 @@ class ToolResultPart(pydantic.BaseModel):
     # Value the LLM sees on its next turn.  For most tools this is
     # identical to ``result``; for aggregator-backed tools (sub-agents,
     # streaming-text) it's derived from the aggregator's
-    # ``get_model_output``.  Not part of the wire model: it's populated
+    # ``get_model_input``.  Not part of the wire model: it's populated
     # by tool execution and by ``Agent.run`` (which has the tool
     # registry) rather than carried across serialization.  ``default_factory``
     # preserves singleton identity so the unset sentinel survives pydantic's
