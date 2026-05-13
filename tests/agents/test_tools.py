@@ -258,7 +258,7 @@ async def test_tool_call_with_nested_pydantic_model() -> None:
         tool_name="store",
         tool_args='{"items": [{"key": "a", "value": "1"}, {"key": "b", "value": "2"}]}',
     )
-    result = await ai.ToolCall(part=part, tool=store)()
+    result = await ai.agents.ToolCall(part=part, tool=store)()
 
     assert not result.results[0].is_error
     assert len(received) == 2
