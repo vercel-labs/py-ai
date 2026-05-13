@@ -492,6 +492,11 @@ wheels = [
 ]
 
 [[package]]
+name = "modelsdotdev"
+version = "0.0.0"
+source = { git = "https://github.com/vercel-labs/modelsdotdev-python#8e57c6a97b05fcc72866bf36081b7bbf80c34bb0" }
+
+[[package]]
 name = "mypy"
 version = "1.19.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1034,6 +1039,7 @@ dependencies = [
     { name = "anthropic" },
     { name = "httpx" },
     { name = "mcp" },
+    { name = "modelsdotdev" },
     { name = "openai" },
     { name = "pydantic" },
     { name = "typing-extensions" },
@@ -1057,6 +1063,7 @@ requires-dist = [
     { name = "anthropic", specifier = ">=0.83.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "mcp", specifier = ">=1.18.0" },
+    { name = "modelsdotdev", git = "https://github.com/vercel-labs/modelsdotdev-python" },
     { name = "openai", specifier = ">=2.14.0" },
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "typing-extensions", specifier = ">=4.15.0" },

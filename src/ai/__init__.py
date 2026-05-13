@@ -1,4 +1,4 @@
-from . import models, providers, util
+from . import errors, models, providers, util
 from .agents import (
     Agent,
     AgentTool,
@@ -20,6 +20,7 @@ from .agents import (
     tool_result,
     yield_from,
 )
+from .errors import AIError, ConfigurationError, UnsupportedProviderError
 from .models import (
     Client,
     ImageParams,
@@ -29,6 +30,7 @@ from .models import (
     VideoParams,
     check_connection,
     generate,
+    get_model,
     stream,
 )
 from .providers import ai_gateway, anthropic, anthropic_like, openai, openai_like
@@ -55,6 +57,9 @@ __all__ = [
     "file_part",
     "thinking",
     # Models (from models/)
+    "AIError",
+    "ConfigurationError",
+    "UnsupportedProviderError",
     "Model",
     "Provider",
     "ImageParams",
@@ -64,6 +69,7 @@ __all__ = [
     "check_connection",
     "stream",
     "generate",
+    "get_model",
     "models",
     "providers",
     # Provider factories
@@ -94,6 +100,7 @@ __all__ = [
     "abort_pending_hook",
     # Submodules
     "events",
+    "errors",
     "messages",
     "mcp",
     "tools",

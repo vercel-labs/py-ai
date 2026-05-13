@@ -1,10 +1,16 @@
 """Anthropic-compatible providers."""
 
+from __future__ import annotations
+
 from collections.abc import Iterable
 from types import ModuleType
+from typing import TYPE_CHECKING, ClassVar
 
 from ...models import core
 from .. import base
+
+if TYPE_CHECKING:
+    import modelsdotdev
 
 _BASE_URL = "https://api.anthropic.com"
 _BASE_URL_ENV = "ANTHROPIC_BASE_URL"
@@ -14,6 +20,8 @@ _ANTHROPIC_VERSION = "2023-06-01"
 
 class AnthropicCompatibleProvider(base.Provider):
     """Callable provider for Anthropic-compatible APIs."""
+
+    handles: ClassVar[tuple[str, ...]] = ("anthropic", "@ai-sdk/anthropic")
 
     def __init__(
         self,
@@ -34,6 +42,26 @@ class AnthropicCompatibleProvider(base.Provider):
             config_envs=config_envs,
         )
         self.anthropic_version = anthropic_version
+
+    @classmethod
+    def from_modelsdev_provider(
+        cls,
+        provider: modelsdotdev.Provider,
+        *,
+        model_provider_config: modelsdotdev.ModelProviderConfig | None = None,
+    ) -> base.Provider:
+        if provider.id == "anthropic" and model_provider_config is None:
+            return anthropic
+        base_url = base.provider_base_url(provider, model_provider_config)
+        if base_url is None:
+            raise ValueError(f"provider {provider.id!r} does not declare an API URL")
+        api_key_env, config_envs = base.provider_config(provider, model_provider_config)
+        return cls(
+            name=provider.id,
+            default_base_url=base_url,
+            api_key_env=api_key_env,
+            config_envs=config_envs,
+        )
 
     @property
     def tools(self) -> ModuleType:
