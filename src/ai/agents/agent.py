@@ -756,6 +756,7 @@ class Context(pydantic.BaseModel):
     output_type: type[pydantic.BaseModel] | None = pydantic.Field(
         default=None, exclude=True, repr=False
     )
+    params: Any = pydantic.Field(default=None, exclude=True, repr=False)
 
     _agent_tools_by_name: dict[str, AgentTool] = pydantic.PrivateAttr(
         default_factory=dict
@@ -1108,6 +1109,7 @@ class Agent:
         model: models.Model,
         messages: list[types.messages.Message],
         *,
+        params: Any = None,
         middleware: list[middleware_.Middleware] | None = None,
     ) -> AbstractAsyncContextManager[AgentStream[str]]: ...
     @overload
@@ -1117,6 +1119,7 @@ class Agent:
         messages: list[types.messages.Message],
         *,
         output_type: type[T],
+        params: Any = None,
         middleware: list[middleware_.Middleware] | None = None,
     ) -> AbstractAsyncContextManager[AgentStream[T]]: ...
     def run(
@@ -1125,6 +1128,7 @@ class Agent:
         messages: list[types.messages.Message],
         *,
         output_type: type[pydantic.BaseModel] | None = None,
+        params: Any = None,
         middleware: list[middleware_.Middleware] | None = None,
     ) -> AbstractAsyncContextManager[AgentStream[Any]]:
         """Run the agent loop, yielding events to the consumer.
@@ -1152,7 +1156,11 @@ class Agent:
         ``PartialToolCallResult`` rather than on individual messages.
         """
         return self._run(
-            model, messages, output_type=output_type, middleware=middleware
+            model,
+            messages,
+            output_type=output_type,
+            params=params,
+            middleware=middleware,
         )
 
     @contextlib.asynccontextmanager
@@ -1162,6 +1170,7 @@ class Agent:
         messages: list[types.messages.Message],
         *,
         output_type: type[pydantic.BaseModel] | None,
+        params: Any,
         middleware: list[middleware_.Middleware] | None,
     ) -> AsyncIterator[AgentStream[Any]]:
         context = Context(
@@ -1169,6 +1178,7 @@ class Agent:
             messages=list(messages),
             tools=[t.tool for t in self._tools],
             output_type=output_type,
+            params=params,
         )
         context._agent_tools_by_name = {t.name: t for t in self._tools}
         _populate_model_inputs(context.messages, context._agent_tools_by_name)

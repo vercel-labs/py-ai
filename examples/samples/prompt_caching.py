@@ -135,16 +135,24 @@ windowsills and laundry piles.
 """
 
 
+agent = ai.agent()
+
+
 async def _run(user_text: str) -> ai.types.usage.Usage | None:
     messages = [
         ai.system_message(SYSTEM_PROMPT),
         ai.user_message(user_text),
     ]
     params = {"providerOptions": {"gateway": {"caching": "auto"}}}
-    async with ai.stream(model, messages, params=params) as s:
-        async for _event in s:
+    async with agent.run(model, messages, params=params) as stream:
+        async for _event in stream:
             pass
-        return s.usage
+        # Sum usage across any assistant messages produced by the run.
+        total: ai.types.usage.Usage | None = None
+        for m in stream.messages:
+            if m.usage is not None:
+                total = m.usage if total is None else total + m.usage
+        return total
 
 
 def _show(label: str, usage: ai.types.usage.Usage | None) -> None:
