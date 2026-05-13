@@ -19,8 +19,8 @@ messages = [
 async def _run(name: str, provider: ai.Provider, model_id: str) -> None:
     print(f"\n{name} / {model_id}")
 
-    if provider.api_key is None:
-        print(f"[SKIP] {provider.api_key_env} not set")
+    if not provider.is_configured():
+        print(f"[SKIP] {provider.name} provider is not configured")
         return
 
     model = ai.Model(model_id, provider=provider)

@@ -51,6 +51,14 @@ async def test_credits_auth_error_returns_false(status: int) -> None:
     assert await check.check(_gateway_client(credits_status=status)) is False
 
 
+async def test_missing_configuration_returns_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
+
+    assert await check.check(_gateway_client(api_key=None)) is False
+
+
 async def test_credits_500_raises() -> None:
     with pytest.raises(httpx.HTTPStatusError):
         await check.check(_gateway_client(credits_status=500))

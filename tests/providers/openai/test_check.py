@@ -46,6 +46,8 @@ async def test_500_raises() -> None:
         await check.check(_client_with_mock(500))
 
 
-async def test_no_api_key_returns_false() -> None:
+async def test_no_api_key_returns_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
     provider = ai.get_provider("openai", base_url="https://openai.test/v1")
     assert await check.check(ai.Model("gpt-5.4", provider=provider)) is False

@@ -11,8 +11,8 @@ from ai.providers.anthropic import tools as anthropic_tools
 
 provider = ai.get_provider("anthropic")
 
-if provider.api_key is None:
-    print(f"[SKIP] {provider.api_key_env} not set")
+if not provider.is_configured():
+    print(f"[SKIP] {provider.name} provider is not configured")
     sys.exit(0)
 
 model = ai.get_model("anthropic:claude-sonnet-4-6")

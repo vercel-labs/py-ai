@@ -49,6 +49,7 @@ async def test_get_provider_accepts_openai_sdk_client() -> None:
     try:
         assert isinstance(provider, OpenAICompatibleProvider)
         assert provider.sdk_client is sdk_client
+        assert provider.is_configured() is True
         model = ai.Model("gpt-5.4", provider=provider)
         assert adapter._make_client(model) is sdk_client
     finally:
@@ -77,6 +78,16 @@ def test_provider_uses_openai_base_url_env(
     provider = ai.get_provider("openai")
     assert provider.base_url == "https://proxy.example.com/v1"
     assert provider.api_key == "sk-test"
+    assert provider.is_configured() is True
+
+
+def test_provider_is_configured_requires_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    assert ai.get_provider("openai").is_configured() is False
+    assert ai.get_provider("openai", api_key="sk-test").is_configured() is True
 
 
 def test_get_provider_accepts_base_url_and_api_key() -> None:
@@ -91,6 +102,7 @@ def test_get_provider_accepts_base_url_and_api_key() -> None:
     assert provider.adapter == "openai"
     assert provider.base_url == "https://custom.example.com/v1"
     assert provider.api_key == "sk-custom"
+    assert provider.is_configured() is True
     assert model.id == "custom-model"
     assert model.adapter == "openai"
     assert model.provider is provider
@@ -116,6 +128,28 @@ def test_get_provider_expands_config_envs_in_base_url() -> None:
     assert provider.base_url == (
         "https://api.cloudflare.com/client/v4/accounts/account-123/ai/v1"
     )
-    assert provider.base_url == (
+
+
+def test_provider_is_configured_requires_config_envs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CLOUDFLARE_API_KEY", raising=False)
+    monkeypatch.delenv("CLOUDFLARE_ACCOUNT_ID", raising=False)
+
+    missing_account = ai.get_provider(
+        "cloudflare-workers-ai",
+        env={"CLOUDFLARE_API_KEY": "sk-test"},
+    )
+    configured = ai.get_provider(
+        "cloudflare-workers-ai",
+        env={
+            "CLOUDFLARE_API_KEY": "sk-test",
+            "CLOUDFLARE_ACCOUNT_ID": "account-123",
+        },
+    )
+
+    assert missing_account.is_configured() is False
+    assert configured.is_configured() is True
+    assert configured.base_url == (
         "https://api.cloudflare.com/client/v4/accounts/account-123/ai/v1"
     )

@@ -50,6 +50,7 @@ async def test_get_provider_accepts_anthropic_sdk_client() -> None:
     try:
         assert isinstance(provider, AnthropicCompatibleProvider)
         assert provider.sdk_client is sdk_client
+        assert provider.is_configured() is True
         model = ai.Model("claude-sonnet-4-6", provider=provider)
         assert adapter._make_client(model) is sdk_client
     finally:
@@ -78,6 +79,16 @@ def test_provider_uses_anthropic_base_url_env(
     provider = ai.get_provider("anthropic")
     assert provider.base_url == "https://proxy.example.com"
     assert provider.api_key == "sk-test"
+    assert provider.is_configured() is True
+
+
+def test_provider_is_configured_requires_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    assert ai.get_provider("anthropic").is_configured() is False
+    assert ai.get_provider("anthropic", api_key="sk-test").is_configured() is True
 
 
 def test_get_provider_accepts_base_url_and_api_key() -> None:
@@ -92,6 +103,7 @@ def test_get_provider_accepts_base_url_and_api_key() -> None:
     assert provider.adapter == "anthropic"
     assert provider.base_url == "https://custom.example.com"
     assert provider.api_key == "sk-custom"
+    assert provider.is_configured() is True
     assert model.id == "custom-model"
     assert model.adapter == "anthropic"
     assert model.provider is provider

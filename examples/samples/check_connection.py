@@ -21,8 +21,8 @@ def _fail(msg: str) -> None:
 
 
 async def _check(name: str, provider: ai.Provider, model_id: str) -> None:
-    if provider.api_key is None:
-        print(f"  [SKIP]  {provider.api_key_env} not set")
+    if not provider.is_configured():
+        print(f"  [SKIP]  {provider.name} provider is not configured")
         return
     model = ai.Model(model_id, provider=provider)
     try:
@@ -36,7 +36,7 @@ async def _check(name: str, provider: ai.Provider, model_id: str) -> None:
 
 
 async def _list_models(name: str, provider: ai.Provider) -> None:
-    if provider.api_key is None:
+    if not provider.is_configured():
         return
     try:
         ids: list[str] = await provider.list()

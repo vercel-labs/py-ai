@@ -75,6 +75,13 @@ class OpenAICompatibleProvider(base.Provider):
         """User-provided OpenAI SDK client, if configured."""
         return self._sdk_client
 
+    def is_configured(self) -> bool:
+        if self.sdk_client is not None:
+            return True
+        if not self.api_key:
+            return False
+        return super().is_configured()
+
     @classmethod
     def from_modelsdev_provider(
         cls,

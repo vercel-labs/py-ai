@@ -108,6 +108,15 @@ class Provider:
             return None
         return self._env.get(self.api_key_env) or os.environ.get(self.api_key_env)
 
+    def is_configured(self) -> bool:
+        """Return ``True`` when all required provider config is available."""
+        if self.api_key_env is not None and not self.api_key:
+            return False
+        return all(self._config_value(env) for env in self.config_envs)
+
+    def _config_value(self, env: str) -> str | None:
+        return self._env.get(env) or os.environ.get(env)
+
     @property
     def http(self) -> httpx.AsyncClient:
         """Shared HTTP client for this provider."""

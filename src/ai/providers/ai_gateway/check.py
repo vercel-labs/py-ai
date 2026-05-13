@@ -22,6 +22,9 @@ _FAIL_STATUSES = frozenset({401, 403})
 
 async def check(model: core.model.Model) -> bool:
     """Return ``True`` if *client* can reach the gateway and *model* exists."""
+    if not model.provider.is_configured():
+        return False
+
     gateway = gateway_client.GatewayClient(model.provider, model)
 
     # 1. Verify credentials via /v1/credits (requires valid auth).

@@ -29,10 +29,13 @@ async def check(model: core.model.Model) -> bool:
                 raise
             return True
 
-    if not provider.api_key:
+    if not provider.is_configured():
+        return False
+    api_key = provider.api_key
+    if not api_key:
         return False
     url = f"{provider.base_url.rstrip('/')}/models/{model.id}"
-    headers = {"Authorization": f"Bearer {provider.api_key}"}
+    headers = {"Authorization": f"Bearer {api_key}"}
     response = await provider.http.get(url, headers=headers)
     if response.status_code == 200:
         return True

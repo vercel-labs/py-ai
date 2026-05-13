@@ -33,12 +33,15 @@ async def check(model: core.model.Model) -> bool:
                 raise
             return True
 
-    if not provider.api_key:
+    if not provider.is_configured():
+        return False
+    api_key = provider.api_key
+    if not api_key:
         return False
     url = f"{provider.base_url.rstrip('/')}/v1/models/{model.id}"
     anthropic_version = getattr(model.provider, "anthropic_version", _ANTHROPIC_VERSION)
     headers = {
-        "x-api-key": provider.api_key,
+        "x-api-key": api_key,
         "anthropic-version": anthropic_version,
     }
     response = await provider.http.get(url, headers=headers)
