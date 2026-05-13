@@ -330,7 +330,7 @@ async def _replay_tool_calls(
 
 @runtime_checkable
 class StreamContext(Protocol):
-    """Anything that exposes ``model``/``messages``/``tools``/``output_type``.
+    """Anything that exposes the fields :func:`stream` reads off a context.
 
     Used to let callers pass an ``agents.Context`` to :func:`stream`
     without an import-time circular dependency.
@@ -344,6 +344,8 @@ class StreamContext(Protocol):
     def tools(self) -> list[types.tools.Tool]: ...
     @property
     def output_type(self) -> type[pydantic.BaseModel] | None: ...
+    @property
+    def params(self) -> Any: ...
 
 
 @overload
@@ -413,6 +415,8 @@ def stream(
         tools = context.tools
         if output_type is None:
             output_type = context.output_type
+        if params is None:
+            params = context.params
     elif model is None or messages is None:
         raise TypeError("stream() requires either model and messages or context=")
 
