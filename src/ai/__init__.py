@@ -7,7 +7,7 @@ from .agents import (
     StreamingTextTool,
     SubAgentTool,
     Tool,
-    ToolCallLike,
+    ToolCall,
     ToolRunner,
     abort_pending_hook,
     agent,
@@ -79,7 +79,7 @@ __all__ = [
     # Agents — tools
     "AgentTool",
     "Tool",
-    "ToolCallLike",
+    "ToolCall",
     "ToolRunner",
     "tool",
     "StreamingTextTool",

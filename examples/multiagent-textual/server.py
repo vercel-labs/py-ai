@@ -70,7 +70,7 @@ MODEL = ai.ai_gateway("anthropic/claude-sonnet-4")
 # ---------------------------------------------------------------------------
 
 
-class GatedCall:
+class GatedToolCall:
     """ToolCall-shaped wrapper that awaits a per-branch approval hook.
 
     ``ToolRunner.schedule`` accepts any zero-arg callable returning a
@@ -78,7 +78,7 @@ class GatedCall:
     path before the underlying tool runs.
     """
 
-    def __init__(self, tc: ai.ToolCallLike, label: str) -> None:
+    def __init__(self, tc: ai.ToolCall, label: str) -> None:
         self._tc = tc
         self._label = label
 
@@ -118,7 +118,7 @@ def _gated_agent(
                         if isinstance(event, ai.events.ToolEnd):
                             tc = context.resolve(event.tool_call)
                             if tc.name == approval_tool:
-                                tr.schedule(GatedCall(tc, label))
+                                tr.schedule(GatedToolCall(tc, label))
                             else:
                                 tr.schedule(tc)
 
