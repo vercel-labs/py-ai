@@ -97,7 +97,7 @@ type Joined = Annotated[AsyncGenerator[str], ai.agents.Aggregate(ai.agents.Conca
 
 Or pass the factory as a keyword argument: `@ai.tool(aggregator=ai.agents.LastAggregator)`. Specifying both an annotation marker and the kwarg raises `TypeError`.
 
-Built-in aggregators: `ai.agents.ConcatAggregator`, `ai.agents.LastAggregator`, `ai.agents.MessageAggregator`. Subclass `ai.agents.SimpleAggregator[Item, Result]` (in/out same type) or `ai.events.Aggregator[Item, Result, ModelResult]` (separate model output) for custom ones.
+Built-in aggregators: `ai.agents.ConcatAggregator`, `ai.agents.LastAggregator`, `ai.agents.MessageAggregator`. Subclass `ai.agents.SimpleAggregator[Item, Result]` (in/out same type) or `ai.events.Aggregator[Item, Result, ModelInput]` (separate model input) for custom ones.
 
 ## Custom agent loops
 

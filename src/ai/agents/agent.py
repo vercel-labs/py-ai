@@ -159,12 +159,12 @@ def _populate_model_inputs(
             agg_cls = _aggregator_cls(tool.aggregator)
             if agg_cls is None:
                 continue
-            part.set_model_input(agg_cls.to_model_output(part.result))
+            part.set_model_input(agg_cls.to_model_input(part.result))
 
 
 class SimpleAggregator[Item, Result](events_.Aggregator[Item, Result, Result]):
     @classmethod
-    def to_model_output(cls, snapshot: Result) -> Result:
+    def to_model_input(cls, snapshot: Result) -> Result:
         return snapshot
 
 
@@ -214,7 +214,9 @@ class MessageAggregator(events_.Aggregator[events_.AgentEvent, MessageBundle, st
         return MessageBundle(messages=tuple(self._messages))
 
     @classmethod
-    def to_model_output(cls, snapshot: MessageBundle) -> str:
+    def to_model_input(cls, snapshot: MessageBundle | Any) -> str:
+        if not isinstance(snapshot, MessageBundle):
+            snapshot = MessageBundle.model_validate(snapshot)
         for m in reversed(snapshot.messages):
             if m.role == "assistant" and m.text:
                 return m.text
@@ -552,7 +554,7 @@ class BoundToolCall:
                         aggregator=tool.aggregator,
                     )
                     result = agg.snapshot()
-                    model_input = agg.get_model_output()
+                    model_input = agg.get_model_input()
                 else:
                     result = await tool.fn(**kwargs)
                     model_input = result
@@ -1017,7 +1019,7 @@ async def yield_from[T, S, R](
         tool_call_id=tool_call_id,
         label=label,
     )
-    return agg.get_model_output()
+    return agg.get_model_input()
 
 
 async def _aggregate_from[T, S, R](
