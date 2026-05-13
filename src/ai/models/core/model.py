@@ -55,20 +55,17 @@ def get_model(model_id: str | None = None, *, client: Client | None = None) -> M
                 "without arguments"
             )
 
-    if not model_id:
-        raise ValueError("model_id must not be empty")
-    if ":" in model_id:
-        ref = _modelsdev.parse_model_id(model_id)
-        if ref.provider_id is None:
-            raise ValueError("model_id must include a known provider id")
-        provider_id = ref.provider_id
-        provider_model_id = ref.model_id
-    else:
-        provider_id = "gateway"
-        provider_model_id = model_id
+    if ":" not in model_id:
+        model_id = f"gateway:{model_id}"
+
+    ref = _modelsdev.parse_model_id(model_id)
+    assert ref.provider_id is not None  # guaranteed to be fully-qualified here
+    provider_id = ref.provider_id
+    provider_model_id = ref.model_id
 
     model_info = _modelsdev.get_model_by_id(f"{provider_id}:{provider_model_id}")
     model_provider_config = None if model_info is None else model_info.provider_config
+
     return base.Provider.from_id(
         provider_id,
         model_provider_config=model_provider_config,
