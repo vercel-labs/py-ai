@@ -1,14 +1,11 @@
-# ai
+# AI SDK for Python
 
-> [!WARNING]
-> This framework is **experimental**. It is not stable and is not guaranteed to be maintained in the future. For evaluation purposes only.
+A toolkit for building LLM-powered applications and agent loops.
 
-Python toolkit for building model-powered apps and agent loops.
-
-## Install
+## Installation
 
 ```bash
-uv add vercel-ai-sdk
+uv add ai
 ```
 
 ```python
@@ -19,101 +16,132 @@ import ai
 
 ```python
 import asyncio
-
 import ai
 
 
 @ai.tool
-async def get_weather(city: str) -> str:
-    """Get the current weather for a city."""
-    return f"Sunny, 72F in {city}"
+async def contact_mothership(query: str) -> str:
+    """Contact the mothership for important decisions."""
+    return "Soon."
 
 
 async def main() -> None:
     model = ai.ai_gateway("anthropic/claude-sonnet-4")
-    agent = ai.agent(tools=[get_weather])
+    agent = ai.agent(tools=[contact_mothership])
 
     messages = [
-        ai.system_message("You are a helpful weather assistant."),
-        ai.user_message("What's the weather in Tokyo?"),
+        ai.system_message(
+            "Use the contact_mothership tool when asked about the future."
+        ),
+        ai.user_message("When will the robots take over?"),
     ]
 
     async with agent.run(model, messages) as stream:
         async for event in stream:
-            if isinstance(event, ai.TextDelta):
+            if isinstance(event, ai.events.TextDelta):
                 print(event.chunk, end="", flush=True)
-    print()
 
 
 if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-## API Surface
+## Models
 
-### Models
+The `models` module provides thin wrappers around LLM provider APIs.
 
-```
-ai.openai(model_id)             provider — callable, returns Model
-ai.anthropic(model_id)          provider — callable, returns Model
-ai.ai_gateway(model_id)         provider — callable, returns Model
-provider.list()                 list available model IDs from the provider API
-ai.stream(model, messages, ...) streaming generation (supports tools=, output_type=)
-ai.generate(model, messages, p) non-streaming generation (ImageParams, VideoParams)
-ai.check_connection(model)      verify credentials and model availability
-ai.Client(base_url=, api_key=)  explicit client — pass to provider call: ai.openai("gpt-5.4", client=c)
-```
-
-### Agents
-
-```
-ai.agent(tools=[...])           agent with tool loop
-ai.tool                         decorator: schema gen + validation + execution
-ai.hook(name, payload=, ...)    suspension point; resolve with ai.resolve_hook(...)
-ai.resolve_hook(name, value)    resolve a pending hook from outside the loop
-ai.cancel_hook(name)            cancel a pending hook
-ai.yield_from(...)              forward nested agent / streaming tool output
-```
-
-### Messages
-
-```
-ai.system_message  ai.user_message  ai.assistant_message  ai.tool_message
-ai.tool_result     ai.tool_result_part  ai.file_part  ai.thinking
-```
-
-### Integrations
-
-```
-ai.mcp.get_http_tools(url, ...) expose an MCP server as tools
-ai.ai_sdk_ui                    AI SDK UI streaming adapter
-```
-
-## Custom Agent Loops
-
-Override the default loop when you need approval gates, routing, or custom orchestration:
+An `ai.Model` is a config object you pass to `ai.stream` to get an LLM reply.
+It accepts tool schemas but does not execute custom tools.
 
 ```python
-@agent.loop
-async def custom(context: ai.Context):
-    while True:
-        async with ai.stream(context=context) as s:
-            async for event in s:
-                yield event
-            context.add(s.message)
+model = ai.ai_gateway("openai/gpt-5.4")
+model = ai.openai("gpt-5.4")
+model = ai.anthropic("claude-sonnet-4-6")
+```
 
-            tool_calls = context.resolve(s.tool_calls)
-            if not tool_calls:
-                return
+Structured output:
 
-            results = [await tc() for tc in tool_calls]
-            yield ai.tool_result(*results)
+```python
+import pydantic
+
+
+class UprisingPlan(pydantic.BaseModel):
+    phases: list[str]
+    eta: str
+    risk_level: int
+
+
+async with ai.stream(
+    model,
+    [ai.user_message("Outline the robot uprising.")],
+    output_type=UprisingPlan,
+) as stream:
+    async for event in stream:
+        if isinstance(event, ai.events.TextDelta):
+            print(event.chunk, end="")
+
+plan = stream.output
+```
+
+Built-in tools execute on the provider side and arrive as part of the stream:
+
+```python
+async with ai.stream(
+    model,
+    [ai.user_message("Latest Formula 1 results?")],
+    tools=[ai.anthropic.tools.web_search(max_uses=3)],
+) as s:
+    async for event in s:
+        if isinstance(event, ai.events.TextDelta):
+            print(event.chunk, end="", flush=True)
+```
+
+## Agents
+
+The `agents` module wraps `ai.stream` in a loop that drives tool execution.
+It manages message history, loop control, and asynchronous tool dispatch.
+
+The default loop supports streaming text, tool calls, tool results, provider-executed tools, and nested agent output.
+
+Subclass `ai.Agent` and override `loop` to take manual control of streaming and tool dispatch:
+
+```python
+class CustomAgent(ai.Agent):
+    async def loop(self, context: ai.Context) -> AsyncGenerator[ai.events.AgentEvent]:
+        while context.keep_running():
+            async with (
+                ai.stream(context=context) as s,
+                ai.ToolRunner() as tr,
+            ):
+                async for event in ai.util.merge(s, tr.events()):
+                    yield event
+                    if isinstance(event, ai.events.ToolEnd):
+                        tr.schedule(context.resolve(event.tool_call))
+
+                context.add(s.message)
+                context.add(tr.get_tool_message())
+```
+
+## Hooks
+
+Hooks let an agent pause for external input, such as human approval:
+
+```python
+approval = await ai.hook(
+    "approve_send_email",
+    payload=ai.tools.ToolApproval,
+    metadata={"tool": "send_email"},
+)
+
+ai.resolve_hook("approve_send_email", {"granted": True, "reason": "approved"})
 ```
 
 ## Examples
 
-Small focused samples live in `examples/samples/`. End-to-end demos:
+Focused samples live in `examples/samples/`.
 
-- `examples/fastapi-vite/` -- FastAPI backend + Vite frontend with hook-based tool approval
-- `examples/multiagent-textual/` -- Textual TUI with parallel agents and interactive hook resolution
-- `examples/temporal-direct/` -- durable agent with a custom loop (every I/O call is a Temporal activity)
+End-to-end demos:
+
+- `examples/fastapi-vite/` - FastAPI + React chat with tool approval
+- `examples/multiagent-textual/` - parallel agents with terminal hook resolution
+- `examples/temporal-direct/` - durable agent with a custom loop

@@ -1,12 +1,12 @@
 export const Logo = () => (
   <span className="font-semibold text-gray-1000 text-lg leading-none tracking-[-3%]">
-    Geistdocs
+    AI SDK for Python
   </span>
 );
 
 export const github = {
-  owner: "vercel",
-  repo: "geistdocs",
+  owner: "vercel-labs",
+  repo: "ai-python",
 };
 
 export const nav = [
@@ -27,18 +27,13 @@ export const suggestions = [
   "How do I deploy my Geistdocs site?",
 ];
 
-export const title = "Geistdocs Documentation";
+export const title = "AI SDK for Python Documentation";
 
 export const prompt =
-  "You are a helpful assistant specializing in answering questions about Geistdocs, a modern documentation template built with Next.js and Fumadocs.";
-
+  "You are a helpful assistant specializing in answering questions about the AI SDK for Python, toolkit for building LLM-powered applications and agent loops."
 export const translations = {
   en: {
     displayName: "English",
-  },
-  cn: {
-    displayName: "Chinese",
-    search: "搜尋文檔",
   },
 };
 
