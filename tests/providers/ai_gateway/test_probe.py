@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 import ai
-from ai.providers.ai_gateway import errors
+from ai.providers.ai_gateway.client import errors
 
 _MODEL_ID = "anthropic/claude-opus-4-6"
 

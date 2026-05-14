@@ -13,7 +13,8 @@ import httpx
 from ... import errors as ai_errors
 from .. import base
 from . import client as gateway_client
-from . import errors, mapping
+from . import errors
+from .client import errors as client_errors
 
 if TYPE_CHECKING:
     import modelsdotdev
@@ -98,8 +99,8 @@ class GatewayProvider(base.Provider[gateway_client.GatewayClient]):
         """List available model IDs from the AI Gateway."""
         try:
             return await self.client.list_model_ids()
-        except errors.GatewayError as exc:
-            raise mapping.map_error(exc) from exc
+        except client_errors.GatewayError as exc:
+            raise errors.map_error(exc) from exc
 
     async def probe(self, model: model_.Model) -> None:
         """Raise unless gateway credentials are valid and the model exists."""
@@ -111,8 +112,8 @@ class GatewayProvider(base.Provider[gateway_client.GatewayClient]):
 
         try:
             await self.client.probe_model(model.id)
-        except errors.GatewayError as exc:
-            raise mapping.map_error(exc) from exc
+        except client_errors.GatewayError as exc:
+            raise errors.map_error(exc) from exc
 
 
 __all__ = ["GatewayProvider"]

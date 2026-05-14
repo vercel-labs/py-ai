@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from .. import errors
+from . import errors
 
 if TYPE_CHECKING:
     from ....models.core import model as model_

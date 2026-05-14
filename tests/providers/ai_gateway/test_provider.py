@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 import ai
-from ai.providers.ai_gateway import errors
+from ai.providers.ai_gateway.client import errors
 
 
 async def test_list_gets_config_with_gateway_headers_and_sorts_ids() -> None:

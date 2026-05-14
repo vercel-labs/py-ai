@@ -16,8 +16,9 @@ from ...models import core
 from ..anthropic import tools as anthropic_tools
 from ..openai import tools as openai_tools
 from . import client as gateway_client
-from . import errors, mapping
+from . import errors
 from . import tools as gateway_tools
+from .client import errors as client_errors
 
 # ---------------------------------------------------------------------------
 # Shared request helpers
@@ -504,16 +505,16 @@ async def stream(
                     data, streamed_tool_ids, provider_executed_ids
                 ):
                     yield event
-    except errors.GatewayError as exc:
-        raise mapping.map_error(exc) from exc
+    except client_errors.GatewayError as exc:
+        raise errors.map_error(exc) from exc
     except httpx.TimeoutException as exc:
-        timeout_error = errors.GatewayTimeoutError()
-        raise mapping.map_error(timeout_error) from exc
+        timeout_error = client_errors.GatewayTimeoutError()
+        raise errors.map_error(timeout_error) from exc
     except Exception as exc:
-        response_error = errors.GatewayResponseError(
+        response_error = client_errors.GatewayResponseError(
             message=f"Unexpected error during streaming: {exc}",
         )
-        raise mapping.map_error(response_error) from exc
+        raise errors.map_error(response_error) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -596,12 +597,12 @@ async def _generate_video(
             break
 
     if not event_data:
-        raise errors.GatewayResponseError(
+        raise client_errors.GatewayResponseError(
             "SSE stream ended without any data events",
         )
 
     if event_data.get("type") == "error":
-        raise errors.GatewayInvalidRequestError(
+        raise client_errors.GatewayInvalidRequestError(
             message=event_data.get("message", "unknown error"),
             status_code=event_data.get("statusCode", 400),
         )
@@ -638,5 +639,5 @@ async def generate(
         if isinstance(params, core.VideoParams):
             return await _generate_video(model, messages, params)
         return await _generate_image(model, messages, params)
-    except errors.GatewayError as exc:
-        raise mapping.map_error(exc) from exc
+    except client_errors.GatewayError as exc:
+        raise errors.map_error(exc) from exc

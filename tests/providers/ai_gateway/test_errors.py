@@ -11,49 +11,54 @@ from __future__ import annotations
 import json
 
 import ai
-from ai.providers.ai_gateway import errors, mapping
+from ai.providers.ai_gateway import errors
+from ai.providers.ai_gateway.client import errors as client_errors
 
 
 class TestGatewayErrorBase:
     """Base class behaviour that all concrete errors inherit."""
 
     def test_generation_id_in_message(self) -> None:
-        err = errors.GatewayInternalServerError("boom", generation_id="gen-123")
+        err = client_errors.GatewayInternalServerError("boom", generation_id="gen-123")
         assert "[gen-123]" in str(err)
         assert err.generation_id == "gen-123"
 
     def test_gateway_errors_are_independent(self) -> None:
-        assert isinstance(errors.GatewayAuthenticationError(), errors.GatewayError)
-        assert not isinstance(errors.GatewayAuthenticationError(), ai.ProviderError)
-        assert errors.GatewayAuthenticationError().status_code == 401
+        assert isinstance(
+            client_errors.GatewayAuthenticationError(), client_errors.GatewayError
+        )
+        assert not isinstance(
+            client_errors.GatewayAuthenticationError(), ai.ProviderError
+        )
+        assert client_errors.GatewayAuthenticationError().status_code == 401
 
     def test_gateway_errors_map_to_provider_hierarchy(self) -> None:
         assert isinstance(
-            mapping.map_error(errors.GatewayAuthenticationError()),
+            errors.map_error(client_errors.GatewayAuthenticationError()),
             ai.ProviderAuthenticationError,
         )
         assert isinstance(
-            mapping.map_error(errors.GatewayInvalidRequestError()),
+            errors.map_error(client_errors.GatewayInvalidRequestError()),
             ai.ProviderBadRequestError,
         )
         assert isinstance(
-            mapping.map_error(errors.GatewayRateLimitError()),
+            errors.map_error(client_errors.GatewayRateLimitError()),
             ai.ProviderRateLimitError,
         )
         assert isinstance(
-            mapping.map_error(errors.GatewayModelNotFoundError()),
+            errors.map_error(client_errors.GatewayModelNotFoundError()),
             ai.ProviderModelNotFoundError,
         )
         assert isinstance(
-            mapping.map_error(errors.GatewayInternalServerError()),
+            errors.map_error(client_errors.GatewayInternalServerError()),
             ai.ProviderInternalServerError,
         )
         assert isinstance(
-            mapping.map_error(errors.GatewayResponseError()),
+            errors.map_error(client_errors.GatewayResponseError()),
             ai.ProviderResponseError,
         )
         assert isinstance(
-            mapping.map_error(errors.GatewayTimeoutError()),
+            errors.map_error(client_errors.GatewayTimeoutError()),
             ai.ProviderTimeoutError,
         )
 
@@ -70,12 +75,12 @@ class TestCreateGatewayError:
                 }
             }
         )
-        err = errors.create_gateway_error(
+        err = client_errors.create_gateway_error(
             response_body=body,
             status_code=401,
             api_key_provided=True,
         )
-        assert isinstance(err, errors.GatewayAuthenticationError)
+        assert isinstance(err, client_errors.GatewayAuthenticationError)
         assert err.status_code == 401
         # contextual message includes the key URL
         assert "vercel.com/d?to=" in str(err)
@@ -87,8 +92,8 @@ class TestCreateGatewayError:
                 "type": "invalid_request_error",
             }
         }
-        err = errors.create_gateway_error(response_body=body, status_code=400)
-        assert isinstance(err, errors.GatewayInvalidRequestError)
+        err = client_errors.create_gateway_error(response_body=body, status_code=400)
+        assert isinstance(err, client_errors.GatewayInvalidRequestError)
         assert err.status_code == 400
 
     def test_rate_limit_error(self) -> None:
@@ -98,8 +103,8 @@ class TestCreateGatewayError:
                 "type": "rate_limit_exceeded",
             }
         }
-        err = errors.create_gateway_error(response_body=body, status_code=429)
-        assert isinstance(err, errors.GatewayRateLimitError)
+        err = client_errors.create_gateway_error(response_body=body, status_code=429)
+        assert isinstance(err, client_errors.GatewayRateLimitError)
 
     def test_model_not_found_extracts_model_id(self) -> None:
         body = {
@@ -109,8 +114,8 @@ class TestCreateGatewayError:
                 "param": {"modelId": "xyz"},
             }
         }
-        err = errors.create_gateway_error(response_body=body, status_code=404)
-        assert isinstance(err, errors.GatewayModelNotFoundError)
+        err = client_errors.create_gateway_error(response_body=body, status_code=404)
+        assert isinstance(err, client_errors.GatewayModelNotFoundError)
         assert err.model_id == "xyz"
 
     def test_model_not_found_without_param(self) -> None:
@@ -120,8 +125,8 @@ class TestCreateGatewayError:
                 "type": "model_not_found",
             }
         }
-        err = errors.create_gateway_error(response_body=body, status_code=404)
-        assert isinstance(err, errors.GatewayModelNotFoundError)
+        err = client_errors.create_gateway_error(response_body=body, status_code=404)
+        assert isinstance(err, client_errors.GatewayModelNotFoundError)
         assert err.model_id is None
 
     def test_internal_server_error(self) -> None:
@@ -131,8 +136,8 @@ class TestCreateGatewayError:
                 "type": "internal_server_error",
             }
         }
-        err = errors.create_gateway_error(response_body=body, status_code=500)
-        assert isinstance(err, errors.GatewayInternalServerError)
+        err = client_errors.create_gateway_error(response_body=body, status_code=500)
+        assert isinstance(err, client_errors.GatewayInternalServerError)
 
     def test_unknown_type_falls_back_to_internal(self) -> None:
         body = {
@@ -141,17 +146,19 @@ class TestCreateGatewayError:
                 "type": "alien_error",
             }
         }
-        err = errors.create_gateway_error(response_body=body, status_code=500)
-        assert isinstance(err, errors.GatewayInternalServerError)
+        err = client_errors.create_gateway_error(response_body=body, status_code=500)
+        assert isinstance(err, client_errors.GatewayInternalServerError)
 
     def test_malformed_json_string(self) -> None:
-        err = errors.create_gateway_error(response_body="Not JSON", status_code=500)
-        assert isinstance(err, errors.GatewayResponseError)
+        err = client_errors.create_gateway_error(
+            response_body="Not JSON", status_code=500
+        )
+        assert isinstance(err, client_errors.GatewayResponseError)
 
     def test_missing_error_field(self) -> None:
         body = {"ferror": {"message": "oops"}}
-        err = errors.create_gateway_error(response_body=body, status_code=404)
-        assert isinstance(err, errors.GatewayResponseError)
+        err = client_errors.create_gateway_error(response_body=body, status_code=404)
+        assert isinstance(err, client_errors.GatewayResponseError)
 
     def test_generation_id_extracted(self) -> None:
         body = {
@@ -161,12 +168,12 @@ class TestCreateGatewayError:
             },
             "generationId": "gen-abc",
         }
-        err = errors.create_gateway_error(response_body=body, status_code=429)
+        err = client_errors.create_gateway_error(response_body=body, status_code=429)
         assert err.generation_id == "gen-abc"
 
     def test_response_error_mapping_preserves_response_body(self) -> None:
-        err = errors.GatewayResponseError("bad", response_body={"raw": True})
-        mapped = mapping.map_error(err)
+        err = client_errors.GatewayResponseError("bad", response_body={"raw": True})
+        mapped = errors.map_error(err)
         assert isinstance(mapped, ai.ProviderResponseError)
         assert mapped.body == {"raw": True}
         assert mapped.http_context is not None
