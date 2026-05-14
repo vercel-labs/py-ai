@@ -6,7 +6,7 @@ behind user confirmation before execution.
 
 ## Stack
 
-- **Backend:** FastAPI + vercel-ai-sdk (Python 3.12)
+- **Backend:** FastAPI + AI SDK for Python (Python 3.12)
 - **Frontend:** Vite + React + AI SDK UI + AI Elements
 
 ## Human-in-the-Loop
@@ -55,8 +55,8 @@ The frontend dev server proxies `/api` requests to the backend at `localhost:800
 
 ## Environment Variables
 
-| Variable | Description |
-|----------|-------------|
+| Variable             | Description               |
+| -------------------- | ------------------------- |
 | `AI_GATEWAY_API_KEY` | Vercel AI Gateway API key |
 
 ## Storage

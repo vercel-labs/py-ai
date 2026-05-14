@@ -712,7 +712,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "fastapi", extra = ["standard"] },
     { name = "textual" },
-    { name = "vercel-ai-sdk" },
+    { name = "ai" },
     { name = "websockets" },
 ]
 
@@ -720,7 +720,7 @@ dependencies = [
 requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = ">=0.128.1" },
     { name = "textual", specifier = ">=3.0" },
-    { name = "vercel-ai-sdk", editable = "../../" },
+    { name = "ai", editable = "../../" },
     { name = "websockets", specifier = ">=15.0" },
 ]
 
@@ -1385,7 +1385,7 @@ wheels = [
 ]
 
 [[package]]
-name = "vercel-ai-sdk"
+name = "ai"
 version = "0.0.1.dev10"
 source = { editable = "../../" }
 dependencies = [

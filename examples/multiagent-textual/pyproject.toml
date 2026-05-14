@@ -5,10 +5,10 @@ description = "Multi-agent hook resolution demo with Textual TUI"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi[standard]>=0.128.1",
-    "vercel-ai-sdk",
+    "ai",
     "textual>=3.0",
     "websockets>=15.0",
 ]
 
 [tool.uv.sources]
-vercel-ai-sdk = { path = "../..", editable = true }
+ai = { path = "../..", editable = true }

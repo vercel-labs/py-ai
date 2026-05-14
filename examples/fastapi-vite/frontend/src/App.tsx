@@ -61,9 +61,9 @@ export default function App() {
       <div className="flex h-screen flex-col bg-background">
         <header className="border-b px-4 py-3">
           <div className="mx-auto w-full max-w-3xl">
-            <h1 className="text-lg font-semibold">Python AI SDK Chat Demo</h1>
+            <h1 className="text-lg font-semibold">AI SDK Python Chat Demo</h1>
             <p className="text-sm text-muted-foreground">
-              Powered by vercel-ai-sdk + FastAPI
+              Powered by AI SDK for Python and FastAPI
             </p>
           </div>
         </header>
