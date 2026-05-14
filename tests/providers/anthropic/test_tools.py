@@ -12,12 +12,13 @@ The adapter must:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
+import anthropic
 import pytest
 
 import ai
-from ai.providers.anthropic import adapter
+from ai.providers.anthropic import protocol
 from ai.providers.anthropic import tools as anthropic_tools
 
 from .conftest import FakeAnthropicClient
@@ -31,17 +32,16 @@ async def _capture_tools(
     *,
     params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    _ = monkeypatch
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(
-        adapter,
-        "_make_client",
-        lambda model: FakeAnthropicClient(captured),
-    )
-    stream = adapter.stream(
+    fake = cast(anthropic.AsyncAnthropic, FakeAnthropicClient(captured))
+    stream = protocol.stream(
+        fake,
         _MODEL,
         [ai.user_message("Hi")],
         tools=tools,
         params=params,
+        provider="anthropic",
     )
     async for _ in stream:
         pass

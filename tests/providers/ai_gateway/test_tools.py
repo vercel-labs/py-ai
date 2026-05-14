@@ -15,7 +15,6 @@ import pydantic
 import pytest
 
 from ai import types
-from ai.providers.ai_gateway import adapter
 from ai.providers.ai_gateway import tools as gateway_tools
 from ai.providers.anthropic import tools as anthropic_tools
 from ai.providers.openai import tools as openai_tools
@@ -39,7 +38,7 @@ class TestGatewayBuiltins:
         captured: dict[str, Any] = {}
         model = mock_model(httpx.MockTransport(_capture_body_handler(captured)))
 
-        async for _ in adapter.stream(
+        async for _ in model.provider.stream(
             model,
             [user_msg("hi")],
             tools=[anthropic_tools.web_search(max_uses=3)],
@@ -59,7 +58,7 @@ class TestGatewayBuiltins:
         captured: dict[str, Any] = {}
         model = mock_model(httpx.MockTransport(_capture_body_handler(captured)))
 
-        async for _ in adapter.stream(
+        async for _ in model.provider.stream(
             model,
             [user_msg("hi")],
             tools=[
@@ -87,7 +86,7 @@ class TestGatewayBuiltins:
         captured: dict[str, Any] = {}
         model = mock_model(httpx.MockTransport(_capture_body_handler(captured)))
 
-        async for _ in adapter.stream(
+        async for _ in model.provider.stream(
             model,
             [user_msg("hi")],
             tools=[
@@ -115,7 +114,7 @@ class TestGatewayBuiltins:
         captured: dict[str, Any] = {}
         model = mock_model(httpx.MockTransport(_capture_body_handler(captured)))
 
-        async for _ in adapter.stream(
+        async for _ in model.provider.stream(
             model,
             [user_msg("hi")],
             tools=[
@@ -150,8 +149,9 @@ class TestGatewayBuiltins:
         def handler(req: httpx.Request) -> httpx.Response:
             raise AssertionError("request should not be sent")
 
-        stream = adapter.stream(
-            mock_model(httpx.MockTransport(handler)),
+        model = mock_model(httpx.MockTransport(handler))
+        stream = model.provider.stream(
+            model,
             [user_msg("hi")],
             tools=[
                 types.tools.Tool(

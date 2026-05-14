@@ -9,11 +9,14 @@ also exercise event aggregation in ``core.api``.
 
 from __future__ import annotations
 
+from typing import cast
+
+import anthropic
 import pytest
 
 import ai
 from ai import models
-from ai.providers.anthropic import adapter
+from ai.providers.anthropic import protocol
 from ai.types import events, messages
 
 from .conftest import (
@@ -30,8 +33,15 @@ _MODEL = ai.Model("claude-sonnet-4-6", provider=ai.get_provider("anthropic"))
 
 async def _drain(stream: FakeStream, monkeypatch: pytest.MonkeyPatch) -> models.Stream:
     fake = FakeAnthropicClient(stream=stream)
-    monkeypatch.setattr(adapter, "_make_client", lambda model: fake)
-    s = models.Stream(adapter.stream(_MODEL, [ai.user_message("Hi")]))
+    _ = monkeypatch
+    s = models.Stream(
+        protocol.stream(
+            cast(anthropic.AsyncAnthropic, fake),
+            _MODEL,
+            [ai.user_message("Hi")],
+            provider="anthropic",
+        )
+    )
     async for _ in s:
         pass
     return s
@@ -120,10 +130,15 @@ async def test_event_kinds_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
         block_stop(0),
     ]
     fake = FakeAnthropicClient(stream=FakeStream(sdk_events))
-    monkeypatch.setattr(adapter, "_make_client", lambda model: fake)
+    _ = monkeypatch
 
     seen: list[type] = []
-    async for event in adapter.stream(_MODEL, [ai.user_message("Hi")]):
+    async for event in protocol.stream(
+        cast(anthropic.AsyncAnthropic, fake),
+        _MODEL,
+        [ai.user_message("Hi")],
+        provider="anthropic",
+    ):
         seen.append(type(event))
 
     assert seen == [
@@ -145,10 +160,17 @@ async def test_builtin_tool_end_carries_call_part(
         block_stop(0),
     ]
     fake = FakeAnthropicClient(stream=FakeStream(sdk_events))
-    monkeypatch.setattr(adapter, "_make_client", lambda model: fake)
+    _ = monkeypatch
 
     end_event: events.BuiltinToolEnd | None = None
-    s = models.Stream(adapter.stream(_MODEL, [ai.user_message("Hi")]))
+    s = models.Stream(
+        protocol.stream(
+            cast(anthropic.AsyncAnthropic, fake),
+            _MODEL,
+            [ai.user_message("Hi")],
+            provider="anthropic",
+        )
+    )
     async for event in s:
         if isinstance(event, events.BuiltinToolEnd):
             end_event = event

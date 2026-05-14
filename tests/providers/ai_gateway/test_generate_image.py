@@ -23,7 +23,6 @@ import pytest
 
 import ai
 from ai.models.core.params import ImageParams
-from ai.providers.ai_gateway.adapter import generate
 from ai.types import messages
 
 from .conftest import mock_model, user_msg
@@ -55,7 +54,7 @@ class TestGenerate:
             )
 
         model = mock_model(httpx.MockTransport(handler), model_id=_IMAGE_MODEL_ID)
-        msg = await generate(model, [user_msg("A sunset over Tokyo")], ImageParams())
+        msg = await ai.generate(model, [user_msg("A sunset over Tokyo")], ImageParams())
 
         assert msg.role == "assistant"
         assert len(msg.images) == 1
@@ -73,7 +72,7 @@ class TestGenerate:
                 json={"images": [_PNG_B64, _JPEG_B64, _PNG_B64]},
             )
 
-        msg = await generate(
+        msg = await ai.generate(
             mock_model(httpx.MockTransport(handler), model_id=_IMAGE_MODEL_ID),
             [user_msg("Three cats")],
             params=ImageParams(n=3),
@@ -96,7 +95,7 @@ class TestGenerate:
                 },
             )
 
-        msg = await generate(
+        msg = await ai.generate(
             mock_model(httpx.MockTransport(handler), model_id=_IMAGE_MODEL_ID),
             [user_msg("a dog")],
             ImageParams(),
@@ -125,7 +124,7 @@ class TestRequest:
             api_key="sk-test",
             model_id="openai/gpt-image-1",
         )
-        await generate(model, [user_msg("Hi")], ImageParams())
+        await ai.generate(model, [user_msg("Hi")], ImageParams())
 
         assert captured["authorization"] == "Bearer sk-test"
         assert captured["ai-image-model-specification-version"] == "3"
@@ -146,7 +145,7 @@ class TestRequest:
                 messages.FilePart(data=_PNG_B64, media_type="image/png"),
             ],
         )
-        await generate(
+        await ai.generate(
             mock_model(httpx.MockTransport(handler), model_id=_IMAGE_MODEL_ID),
             [msg],
             params=ImageParams(
@@ -176,7 +175,7 @@ class TestRequest:
             captured_url.append(str(req.url))
             return httpx.Response(200, json={"images": [_PNG_B64]})
 
-        await generate(
+        await ai.generate(
             mock_model(httpx.MockTransport(handler), model_id=_IMAGE_MODEL_ID),
             [user_msg("test")],
             ImageParams(),
@@ -204,7 +203,7 @@ class TestErrors:
             )
 
         with pytest.raises(ai.ProviderAuthenticationError):
-            await generate(
+            await ai.generate(
                 mock_model(httpx.MockTransport(handler), model_id=_IMAGE_MODEL_ID),
                 [user_msg("test")],
                 ImageParams(),
@@ -223,7 +222,7 @@ class TestErrors:
             )
 
         with pytest.raises(ai.ProviderRateLimitError):
-            await generate(
+            await ai.generate(
                 mock_model(httpx.MockTransport(handler), model_id=_IMAGE_MODEL_ID),
                 [user_msg("test")],
                 ImageParams(),
@@ -235,7 +234,7 @@ class TestErrors:
         def handler(req: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json={"images": []})
 
-        msg = await generate(
+        msg = await ai.generate(
             mock_model(httpx.MockTransport(handler), model_id=_IMAGE_MODEL_ID),
             [user_msg("test")],
             ImageParams(),

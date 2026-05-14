@@ -11,7 +11,7 @@ from ai import models
 from ai.types import events as events_
 from ai.types import messages as messages_
 
-from ...conftest import MOCK_MODEL, MockProvider, mock_llm, text_msg
+from ...conftest import MOCK_MODEL, MOCK_PROVIDER, MockProvider, mock_llm, text_msg
 
 
 def _test_provider_metadata(marker: str) -> dict[str, Any]:
@@ -60,7 +60,7 @@ async def test_stream_tool_end_includes_aggregated_tool_call() -> None:
         )
         yield events_.StreamEnd()
 
-    models.register_stream("mock", _tool_stream)
+    MOCK_PROVIDER._stream_impl = _tool_stream
 
     tool_end: events_.ToolEnd | None = None
     async with models.stream(MOCK_MODEL, [ai.user_message("Check weather")]) as stream:
@@ -178,7 +178,7 @@ async def test_stream_forwards_output_type_and_request_params() -> None:
         yield events_.StreamStart()
         yield events_.StreamEnd()
 
-    models.register_stream("mock", _spy_stream)
+    MOCK_PROVIDER._stream_impl = _spy_stream
 
     params = {"raw": "ok"}
     async with models.stream(
@@ -252,7 +252,7 @@ async def test_generate_dispatches_to_registered_adapter() -> None:
         called = True
         return sentinel
 
-    models.register_generate("mock-generate", _generate)
+    provider._generate_impl = _generate
 
     result = await models.generate(
         model,
@@ -299,7 +299,7 @@ async def test_stream_replays_marked_last_assistant_with_tool_calls() -> None:
         yield events_.StreamStart()
         yield events_.StreamEnd()
 
-    models.register_stream("mock", _spy_stream)
+    MOCK_PROVIDER._stream_impl = _spy_stream
 
     assistant_msg = messages_.Message(
         role="assistant",
@@ -366,7 +366,7 @@ async def test_stream_does_not_replay_when_assistant_is_unmarked() -> None:
         yield events_.StreamStart()
         yield events_.StreamEnd()
 
-    models.register_stream("mock", _spy_stream)
+    MOCK_PROVIDER._stream_impl = _spy_stream
 
     assistant_text_only = messages_.Message(
         role="assistant",

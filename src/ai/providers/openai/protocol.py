@@ -1,7 +1,7 @@
-"""OpenAI adapter — chat completions API.
+"""OpenAI protocol — chat completions API.
 
 Message/tool conversion and streaming via the official ``openai`` SDK.
-OpenAI-compatible providers own the SDK client used by this adapter.
+OpenAI-compatible providers own the SDK client used by this protocol.
 """
 
 from collections.abc import AsyncGenerator, Mapping, Sequence
@@ -13,7 +13,6 @@ import pydantic
 from ... import types
 from ...models import core
 from . import errors
-from . import provider as provider_
 
 # ---------------------------------------------------------------------------
 # Message / tool conversion — internal types → OpenAI wire format
@@ -141,11 +140,11 @@ async def _messages_to_openai(
                             | types.messages.BuiltinToolReturnPart()
                         ):
                             raise NotImplementedError(
-                                "OpenAI chat-completions adapter does not "
+                                "OpenAI chat-completions protocol does not "
                                 "support BuiltinToolCallPart or "
                                 "BuiltinToolReturnPart in the message history. "
                                 "Route via the AI Gateway provider until a "
-                                "native Responses adapter ships."
+                                "native Responses protocol ships."
                             )
 
                 entry: dict[str, Any] = {"role": "assistant"}
@@ -201,29 +200,6 @@ async def _messages_to_openai(
 
 
 # ---------------------------------------------------------------------------
-# SDK client factory
-# ---------------------------------------------------------------------------
-
-
-def _make_client(model: core.model.Model) -> openai.AsyncOpenAI:
-    """Return an ``AsyncOpenAI`` for the model's provider."""
-    provider = model.provider
-    if isinstance(provider, provider_.OpenAICompatibleProvider):
-        return provider.sdk_client
-    return openai.AsyncOpenAI(
-        base_url=provider.base_url,
-        api_key=provider.api_key or "",
-    )
-
-
-def _owns_client(model: core.model.Model, client: openai.AsyncOpenAI) -> bool:
-    provider = model.provider
-    return not (
-        isinstance(provider, provider_.OpenAICompatibleProvider)
-        and provider.sdk_client is client
-    )
-
-
 def _coerce_params(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
@@ -232,39 +208,26 @@ def _coerce_params(value: Any) -> dict[str, Any]:
     raise TypeError("openai stream params must be a dict")
 
 
-# ---------------------------------------------------------------------------
-# Public adapter function
-# ---------------------------------------------------------------------------
-
-
 async def stream(
+    sdk_client: openai.AsyncOpenAI,
     model: core.model.Model,
     messages: list[types.messages.Message],
     *,
     tools: Sequence[types.tools.Tool] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
-    **kwargs: Any,
+    params: Any = None,
+    provider: str,
 ) -> AsyncGenerator[types.events.Event]:
-    """Stream an LLM response via the OpenAI chat completions API.
-
-    Yields :class:`~ai.types.events.Event` objects as the response streams in.
-    Pure delta emitter — the :class:`~ai.models.Stream` wrapper aggregates
-    parts into the final :class:`~ai.types.messages.Message`.
-
-    ``params`` may be a raw dict of OpenAI SDK kwargs. Provider-specific
-    request options are forwarded without local validation or translation.
-    """
+    """Stream through the OpenAI chat completions protocol using *sdk_client*."""
     if tools and any(t.kind == "provider" for t in tools):
         raise NotImplementedError(
             "OpenAI built-in tools require the Responses API. "
-            "The chat-completions adapter does not support them. "
+            "The chat-completions protocol does not support them. "
             "Route via the AI Gateway provider until a native Responses "
-            "adapter ships."
+            "protocol ships."
         )
 
-    sdk_client = _make_client(model)
-    owns_client = _owns_client(model, sdk_client)
-    stream_params = _coerce_params(kwargs.get("params"))
+    stream_params = _coerce_params(params)
     openai_messages = await _messages_to_openai(messages)
     openai_tools = _tools_to_openai(tools) if tools else None
 
@@ -331,7 +294,6 @@ async def stream(
             choice = chunk.choices[0]
             delta = choice.delta
 
-            # Reasoning / thinking content
             reasoning_value = None
             if hasattr(delta, "reasoning") and delta.reasoning:
                 reasoning_value = delta.reasoning
@@ -343,7 +305,8 @@ async def stream(
                     reasoning_started = True
                     yield types.events.ReasoningStart(block_id="reasoning")
                 yield types.events.ReasoningDelta(
-                    chunk=reasoning_value, block_id="reasoning"
+                    chunk=reasoning_value,
+                    block_id="reasoning",
                 )
 
             if delta.content:
@@ -377,7 +340,8 @@ async def stream(
                             if not tc_state[idx]["started"] and tid:
                                 tc_state[idx]["started"] = True
                                 yield types.events.ToolStart(
-                                    tool_call_id=tid, tool_name=tname
+                                    tool_call_id=tid,
+                                    tool_name=tname,
                                 )
 
                             if tid:
@@ -405,9 +369,6 @@ async def stream(
     except openai.OpenAIError as exc:
         raise errors.map_error(
             exc,
-            provider=model.provider.name,
+            provider=provider,
             model_id=model.id,
         ) from exc
-    finally:
-        if owns_client:
-            await sdk_client.close()

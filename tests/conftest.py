@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, AsyncIterable, Sequence
-from typing import Any
+from typing import Any, cast
 
 import pydantic
 
@@ -34,9 +34,45 @@ class MockProvider(models.Provider):
             base_url=base_url,
             api_key_env=api_key_env,
         )
+        self._stream_impl: Any | None = None
+        self._generate_impl: Any | None = None
 
-    async def list(self) -> list[str]:
+    async def list_models(self) -> list[str]:
         return []
+
+    def stream(
+        self,
+        model: models.Model,
+        messages: list[messages_.Message],
+        *,
+        tools: Sequence[ai.tools.Tool] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
+        params: Any = None,
+    ) -> AsyncGenerator[events_.Event]:
+        if self._stream_impl is None:
+            raise RuntimeError("MockProvider: no stream implementation configured")
+        return cast(
+            AsyncGenerator[events_.Event],
+            self._stream_impl(
+                model,
+                messages,
+                tools=tools,
+                output_type=output_type,
+                params=params,
+            ),
+        )
+
+    async def generate(
+        self,
+        model: models.Model,
+        messages: list[messages_.Message],
+        params: Any,
+    ) -> messages_.Message:
+        if self._generate_impl is None:
+            raise RuntimeError("MockProvider: no generate implementation configured")
+        return cast(
+            messages_.Message, await self._generate_impl(model, messages, params)
+        )
 
 
 MOCK_PROVIDER = MockProvider()
@@ -134,12 +170,12 @@ class MockAdapter:
 
 
 def mock_llm(responses: list[list[messages_.Message]]) -> MockAdapter:
-    """Create a MockAdapter and register it in the models adapter registry.
+    """Create a MockAdapter and attach it to the shared mock provider.
 
     Returns the adapter so tests can inspect ``call_count``.
     """
     adapter = MockAdapter(responses)
-    models.register_stream("mock", adapter.stream)
+    MOCK_PROVIDER._stream_impl = adapter.stream
     return adapter
 
 
@@ -180,12 +216,12 @@ class MockGenerateAdapter:
 
 
 def mock_generate(responses: list[messages_.Message]) -> MockGenerateAdapter:
-    """Create a MockGenerateAdapter and register it.
+    """Create a MockGenerateAdapter and attach it to the shared mock provider.
 
     Returns the adapter so tests can inspect ``call_count``.
     """
     adapter = MockGenerateAdapter(responses)
-    models.register_generate("mock", adapter.generate)
+    MOCK_PROVIDER._generate_impl = adapter.generate
     return adapter
 
 

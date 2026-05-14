@@ -36,7 +36,7 @@ async def _list_models(name: str, provider: ai.Provider) -> None:
     if not provider.is_configured():
         return
     try:
-        ids: list[str] = await provider.list()
+        ids: list[str] = await provider.list_models()
         print(f"  {name}: {len(ids)} models (last: {ids[-1]})")
     except Exception as exc:
         _fail(f"  {name}: [ERR] {exc}")

@@ -29,11 +29,10 @@ Usage::
         ...
 
     # list available models
-    ids = await ai.get_provider("openai").list()
+    ids = await ai.get_provider("openai").list_models()
 """
 
 from ..providers.base import Provider
-from .core.adapters import register_generate, register_stream
 from .core.api import (
     Executor,
     GenerateExecutor,
@@ -47,13 +46,11 @@ from .core.api import (
 )
 from .core.model import Model, get_model
 from .core.params import GenerateParams, ImageParams, VideoParams
-from .core.proto import GenerateFn, StreamFn
 
 __all__ = [
     # Core types
     "Executor",
     "GenerateExecutor",
-    "GenerateFn",
     "GenerateParams",
     "GenerateRequest",
     "ImageParams",
@@ -61,12 +58,8 @@ __all__ = [
     "Provider",
     "Stream",
     "StreamExecutor",
-    "StreamFn",
     "StreamRequest",
     "VideoParams",
-    # Adapter registration
-    "register_generate",
-    "register_stream",
     # Public API
     "generate",
     "get_model",

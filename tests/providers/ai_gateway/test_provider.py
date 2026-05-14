@@ -7,7 +7,7 @@ import ai
 from ai.providers.ai_gateway.client import errors
 
 
-async def test_list_gets_config_with_gateway_headers_and_sorts_ids() -> None:
+async def test_list_models_gets_config_with_gateway_headers_and_sorts_ids() -> None:
     captured_urls: list[str] = []
     captured_headers: dict[str, str] = {}
 
@@ -33,7 +33,7 @@ async def test_list_gets_config_with_gateway_headers_and_sorts_ids() -> None:
     )
 
     try:
-        ids = await provider.list()
+        ids = await provider.list_models()
     finally:
         await provider.aclose()
 
@@ -44,7 +44,7 @@ async def test_list_gets_config_with_gateway_headers_and_sorts_ids() -> None:
     assert ids == ["anthropic/claude-a", "openai/gpt-z"]
 
 
-async def test_list_remaps_gateway_errors() -> None:
+async def test_list_models_remaps_gateway_errors() -> None:
     def _handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             401,
@@ -60,7 +60,7 @@ async def test_list_remaps_gateway_errors() -> None:
 
     try:
         with pytest.raises(ai.ProviderAuthenticationError) as exc_info:
-            await provider.list()
+            await provider.list_models()
     finally:
         await provider.aclose()
 

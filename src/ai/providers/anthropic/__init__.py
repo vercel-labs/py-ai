@@ -8,7 +8,7 @@ Usage::
     model = ai.get_model("anthropic:claude-sonnet-4-6")
     provider = ai.get_provider("anthropic", base_url="https://anthropic.example.com")
     model = ai.Model("claude-sonnet-4-6", provider=provider)
-    ids = await ai.get_provider("anthropic").list()
+    ids = await ai.get_provider("anthropic").list_models()
 
     # built-in tools
     async with ai.stream(
@@ -17,19 +17,10 @@ Usage::
     ) as s:
         ...
 
-The adapter module is loaded lazily to avoid pulling in the ``anthropic``
-SDK at import time.
+The protocol module is loaded lazily by provider methods.
 """
 
 from . import tools
 from .provider import AnthropicCompatibleProvider
 
 __all__ = ["AnthropicCompatibleProvider", "tools"]
-
-
-def __getattr__(name: str) -> object:
-    if name == "stream":
-        from .adapter import stream
-
-        return stream
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

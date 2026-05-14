@@ -24,7 +24,6 @@ import pytest
 import ai
 from ai import models
 from ai.models.core import model as model_
-from ai.providers.ai_gateway import adapter
 from ai.types import events, messages
 
 from .conftest import mock_client, mock_model, sse, user_msg
@@ -41,7 +40,7 @@ async def _collect(
 ) -> list[events.Event]:
     """Drain ``stream()`` and return all yielded events."""
     result: list[events.Event] = []
-    async for event in adapter.stream(model, msgs, **kwargs):
+    async for event in model.provider.stream(model, msgs, **kwargs):
         result.append(event)
     return result
 
@@ -52,7 +51,7 @@ async def _final(
     **kwargs: Any,
 ) -> messages.Message:
     """Drain the adapter's event stream and return the aggregated message."""
-    s = models.Stream(adapter.stream(model, msgs, **kwargs))
+    s = models.Stream(model.provider.stream(model, msgs, **kwargs))
     async for _ in s:
         pass
     return s.message
@@ -253,10 +252,8 @@ class TestStreaming:
             return httpx.Response(200, text=body)
 
         events_seen: list[type] = []
-        async for event in adapter.stream(
-            mock_client(httpx.MockTransport(handler)),
-            [user_msg("hi")],
-        ):
+        model = mock_client(httpx.MockTransport(handler))
+        async for event in model.provider.stream(model, [user_msg("hi")]):
             events_seen.append(type(event))
 
         assert events.BuiltinToolStart in events_seen

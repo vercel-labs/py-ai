@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import AsyncGenerator, Iterable, Mapping, Sequence
 from types import ModuleType
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import anthropic
 import httpx
@@ -15,8 +15,12 @@ from . import errors
 
 if TYPE_CHECKING:
     import modelsdotdev
+    import pydantic
 
     from ...models.core import model as model_
+    from ...types import events
+    from ...types import messages as messages_
+    from ...types import tools as tools_
 
 AnthropicClient = httpx.AsyncClient | anthropic.AsyncAnthropic
 
@@ -108,6 +112,28 @@ class AnthropicCompatibleProvider(base.Provider[anthropic.AsyncAnthropic]):
         if self._close_client_on_aclose:
             await self.client.close()
 
+    def stream(
+        self,
+        model: model_.Model,
+        messages: list[messages_.Message],
+        *,
+        tools: Sequence[tools_.Tool] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
+        params: Any = None,
+    ) -> AsyncGenerator[events.Event]:
+        """Stream via the Anthropic messages protocol."""
+        from . import protocol
+
+        return protocol.stream(
+            self.sdk_client,
+            model,
+            messages,
+            tools=tools,
+            output_type=output_type,
+            params=params,
+            provider=self.name,
+        )
+
     @classmethod
     def from_modelsdev_provider(
         cls,
@@ -153,7 +179,7 @@ class AnthropicCompatibleProvider(base.Provider[anthropic.AsyncAnthropic]):
 
         return tools_module
 
-    async def list(self) -> list[str]:
+    async def list_models(self) -> list[str]:
         """List available model IDs from the Anthropic API."""
         try:
             sdk_models = await self.sdk_client.models.list()

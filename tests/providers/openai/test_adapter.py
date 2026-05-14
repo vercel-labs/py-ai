@@ -6,7 +6,7 @@ formatting, and explicit guards against unsupported built-in tool surfaces.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import openai
@@ -14,7 +14,7 @@ import pydantic
 import pytest
 
 import ai
-from ai.providers.openai import adapter
+from ai.providers.openai import protocol
 from ai.providers.openai import tools as openai_tools
 from ai.types import messages
 
@@ -79,11 +79,13 @@ class _RaisingOpenAIClient:
 _MODEL = ai.Model("gpt-5.4", provider=ai.get_provider("openai"))
 
 
-def _patch(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+def _patch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[openai.AsyncOpenAI, dict[str, Any]]:
+    _ = monkeypatch
     captured: dict[str, Any] = {}
     fake = _FakeOpenAIClient(captured)
-    monkeypatch.setattr(adapter, "_make_client", lambda model: fake)
-    return captured
+    return cast(openai.AsyncOpenAI, fake), captured
 
 
 async def _drain(stream: Any) -> None:
@@ -94,12 +96,14 @@ async def _drain(stream: Any) -> None:
 async def test_system_messages_use_openai_system_role(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured = _patch(monkeypatch)
+    fake, captured = _patch(monkeypatch)
 
     await _drain(
-        adapter.stream(
+        protocol.stream(
+            fake,
             _MODEL,
             [ai.system_message("rules"), ai.user_message("Hi")],
+            provider="openai",
         )
     )
 
@@ -109,10 +113,11 @@ async def test_system_messages_use_openai_system_role(
 async def test_raw_params_pass_through_to_sdk_kwargs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured = _patch(monkeypatch)
+    fake, captured = _patch(monkeypatch)
 
     await _drain(
-        adapter.stream(
+        protocol.stream(
+            fake,
             _MODEL,
             [ai.user_message("Hi")],
             params={
@@ -123,6 +128,7 @@ async def test_raw_params_pass_through_to_sdk_kwargs(
                 "extra_headers": {"x-openai-feature": "enabled"},
                 "stream_options": {"include_usage": False, "custom": True},
             },
+            provider="openai",
         )
     )
 
@@ -137,13 +143,15 @@ async def test_raw_params_pass_through_to_sdk_kwargs(
 async def test_strict_json_schema_flows_into_response_format(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured = _patch(monkeypatch)
+    fake, captured = _patch(monkeypatch)
 
     await _drain(
-        adapter.stream(
+        protocol.stream(
+            fake,
             _MODEL,
             [ai.user_message("Hi")],
             output_type=_Answer,
+            provider="openai",
         )
     )
 
@@ -153,12 +161,14 @@ async def test_strict_json_schema_flows_into_response_format(
 async def test_non_dict_params_rejected_by_adapter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _patch(monkeypatch)
+    fake, _ = _patch(monkeypatch)
 
-    stream = adapter.stream(
+    stream = protocol.stream(
+        fake,
         _MODEL,
         [ai.user_message("Hi")],
         params=[{"reasoning_effort": "high"}],
+        provider="openai",
     )
 
     with pytest.raises(TypeError, match="dict"):
@@ -169,12 +179,14 @@ async def test_builtin_tool_in_request_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Chat-completions adapter rejects OpenAI built-in tools at the boundary."""
-    _patch(monkeypatch)
+    fake, _ = _patch(monkeypatch)
 
-    stream = adapter.stream(
+    stream = protocol.stream(
+        fake,
         _MODEL,
         [ai.user_message("Hi")],
         tools=[openai_tools.web_search()],
+        provider="openai",
     )
 
     with pytest.raises(NotImplementedError, match="Responses API"):
@@ -185,7 +197,7 @@ async def test_builtin_part_in_messages_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``BuiltinToolCallPart`` cannot round-trip through chat-completions."""
-    _patch(monkeypatch)
+    fake, _ = _patch(monkeypatch)
 
     convo = [
         ai.user_message("Hi"),
@@ -201,12 +213,13 @@ async def test_builtin_part_in_messages_raises(
     ]
 
     with pytest.raises(NotImplementedError, match="BuiltinTool"):
-        await _drain(adapter.stream(_MODEL, convo))
+        await _drain(protocol.stream(fake, _MODEL, convo, provider="openai"))
 
 
 async def test_sdk_errors_are_mapped_to_provider_hierarchy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _ = monkeypatch
     response = httpx.Response(
         429,
         request=httpx.Request("POST", "https://openai.test/v1/chat/completions"),
@@ -218,10 +231,16 @@ async def test_sdk_errors_are_mapped_to_provider_hierarchy(
         body={"type": "rate_limit_error", "code": "rate_limit"},
     )
     fake = _RaisingOpenAIClient(sdk_error)
-    monkeypatch.setattr(adapter, "_make_client", lambda model: fake)
 
     with pytest.raises(ai.ProviderRateLimitError) as exc_info:
-        await _drain(adapter.stream(_MODEL, [ai.user_message("Hi")]))
+        await _drain(
+            protocol.stream(
+                cast(openai.AsyncOpenAI, fake),
+                _MODEL,
+                [ai.user_message("Hi")],
+                provider="openai",
+            )
+        )
 
     exc = exc_info.value
     assert exc.provider == "openai"
@@ -231,12 +250,12 @@ async def test_sdk_errors_are_mapped_to_provider_hierarchy(
     assert exc.http_context.response is response
     assert exc.request_id == "req-openai"
     assert exc.__cause__ is sdk_error
-    assert fake.closed is True
 
 
 async def test_model_404_is_mapped_to_model_not_found(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _ = monkeypatch
     response = httpx.Response(
         404,
         request=httpx.Request("POST", "https://openai.test/v1/chat/completions"),
@@ -247,10 +266,16 @@ async def test_model_404_is_mapped_to_model_not_found(
         body={"code": "model_not_found", "param": "model"},
     )
     fake = _RaisingOpenAIClient(sdk_error)
-    monkeypatch.setattr(adapter, "_make_client", lambda model: fake)
 
     with pytest.raises(ai.ProviderModelNotFoundError) as exc_info:
-        await _drain(adapter.stream(_MODEL, [ai.user_message("Hi")]))
+        await _drain(
+            protocol.stream(
+                cast(openai.AsyncOpenAI, fake),
+                _MODEL,
+                [ai.user_message("Hi")],
+                provider="openai",
+            )
+        )
 
     exc = exc_info.value
     assert isinstance(exc, ai.ProviderNotFoundError)

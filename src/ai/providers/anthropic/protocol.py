@@ -1,7 +1,7 @@
-"""Anthropic adapter — messages API.
+"""Anthropic protocol — messages API.
 
 Message/tool conversion and streaming via the official ``anthropic`` SDK.
-Anthropic-compatible providers own the SDK client used by this adapter.
+Anthropic-compatible providers own the SDK client used by this protocol.
 """
 
 import json
@@ -15,7 +15,6 @@ from ... import types
 from ...models import core
 from ...types import events
 from . import errors
-from . import provider as provider_
 from . import tools as anthropic_tools
 
 PROVIDER_NAME = "anthropic"
@@ -328,32 +327,6 @@ def _to_content_list(content: Any) -> list[dict[str, Any]]:
     return [{"type": "text", "text": content}]
 
 
-# ---------------------------------------------------------------------------
-# SDK client factory
-# ---------------------------------------------------------------------------
-
-
-def _make_client(
-    model: core.model.Model,
-) -> anthropic.AsyncAnthropic:
-    """Return an ``AsyncAnthropic`` for the model's provider."""
-    provider = model.provider
-    if isinstance(provider, provider_.AnthropicCompatibleProvider):
-        return provider.sdk_client
-    return anthropic.AsyncAnthropic(
-        base_url=provider.base_url,
-        api_key=provider.api_key or "",
-    )
-
-
-def _owns_client(model: core.model.Model, client: anthropic.AsyncAnthropic) -> bool:
-    provider = model.provider
-    return not (
-        isinstance(provider, provider_.AnthropicCompatibleProvider)
-        and provider.sdk_client is client
-    )
-
-
 def _coerce_params(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
@@ -394,19 +367,21 @@ def _result_block_content(block: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Public adapter function
+# Public protocol function
 # ---------------------------------------------------------------------------
 
 
 async def stream(
+    sdk_client: anthropic.AsyncAnthropic,
     model: core.model.Model,
     messages: list[types.messages.Message],
     *,
     tools: Sequence[types.tools.Tool] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
-    **kwargs: Any,
+    params: Any = None,
+    provider: str,
 ) -> AsyncGenerator[events.Event]:
-    """Stream an LLM response via the Anthropic messages API.
+    """Stream through the Anthropic messages protocol using *sdk_client*.
 
     Yields :class:`~ai.types.events.Event` objects as the response streams in.
     Pure delta emitter — the :class:`~ai.models.Stream` wrapper aggregates
@@ -415,9 +390,7 @@ async def stream(
     ``params`` may be a raw dict of Anthropic SDK kwargs. Provider-specific
     request options are forwarded without local validation or translation.
     """
-    sdk_client = _make_client(model)
-    owns_client = _owns_client(model, sdk_client)
-    stream_params = _coerce_params(kwargs.get("params"))
+    stream_params = _coerce_params(params)
     system_prompt, anthropic_messages = await _messages_to_anthropic(messages)
 
     custom_tools, builtin_tools = _split_tools(tools or ())
@@ -603,9 +576,6 @@ async def stream(
     except anthropic.AnthropicError as exc:
         raise errors.map_error(
             exc,
-            provider=model.provider.name,
+            provider=provider,
             model_id=model.id,
         ) from exc
-    finally:
-        if owns_client:
-            await sdk_client.close()
