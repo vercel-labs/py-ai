@@ -6,8 +6,8 @@ import sys
 import ai
 
 PROVIDERS: list[tuple[str, ai.Provider, str]] = [
-    ("ai_gateway", ai.get_provider("vercel"), "anthropic/claude-sonnet-4"),
-    ("anthropic", ai.get_provider("anthropic"), "claude-sonnet-4-20250514"),
+    ("ai_gateway", ai.get_provider("vercel"), "anthropic/claude-sonnet-4.6"),
+    ("anthropic", ai.get_provider("anthropic"), "claude-sonnet-4-6"),
     ("openai", ai.get_provider("openai"), "gpt-5.4-mini"),
 ]
 
