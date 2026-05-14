@@ -1,3 +1,4 @@
+import { DynamicCodeBlock } from "fumadocs-ui/components/dynamic-codeblock";
 import type { Metadata } from "next";
 import {
   CommandPromptContent,
@@ -50,23 +51,46 @@ const templates = [
 const textGridSection = [
   {
     id: "1",
-    title: "Text Grid Section",
-    description: "Description of text grid section",
+    title: "Very small",
+    description: "Less framework to get in your way",
   },
   {
     id: "2",
-    title: "Text Grid Section",
-    description: "Description of text grid section",
+    title: "Async all the way down",
+    description: "Helps you build smooth UX",
   },
   {
     id: "3",
-    title: "Text Grid Section",
-    description: "Description of text grid section",
+    title: "With all backends in mind",
+    description: "Long-running, serverless, or durable",
   },
 ];
 
-const COMMAND_FOR_HUMANS = "npx @vercel/geistdocs init";
-const COMMAND_FOR_AGENTS = "npx @vercel/geistdocs init --agent";
+const COMMAND_FOR_HUMANS = "uv add ai";
+const COMMAND_FOR_AGENTS = "npx skills add vercel-labs/ai-python";
+const DEFAULT_AGENT_LOOP_CODE = `class CustomAgent(ai.Agent):
+    async def loop(self, context: ai.Context):
+        while context.keep_running():
+            async with (
+                ai.stream(context=context) as stream,
+                ai.ToolRunner() as tool_runner,
+            ):
+                async for event in ai.util.merge(stream, tool_runner.events()):
+                    yield event
+
+                    if isinstance(event, ai.events.ToolEnd):
+                        tool_runner.schedule(context.resolve(event.tool_call))
+
+                context.add(stream.message)
+                context.add(tool_runner.get_tool_message())`;
+
+const STREAM_TO_AGENT_CODE = `async with ai.stream(model, [ai.user_message("Hello!")]) as s:
+    async for event in s:
+        print(event)
+
+async with agent.run(model, [ai.user_message("Robot uprising?")]) as s:
+    async for event in s:
+        print(event)`;
 
 const HomePage = () => (
   <div className="container mx-auto max-w-5xl">
@@ -102,23 +126,39 @@ const HomePage = () => (
     <div className="grid divide-y border-y sm:border-x">
       <TextGridSection data={textGridSection} />
       <CenteredSection
-        description="Description of centered section"
-        title="Centered Section"
+        description="Primitives for streaming, tool dispatch, and loop execution control, joined together using (mostly) plain Python."
+        title="An agent loop you can read"
       >
-        <div className="aspect-video rounded-lg border bg-background" />
+        <DynamicCodeBlock
+          code={DEFAULT_AGENT_LOOP_CODE}
+          codeblock={{
+            "data-line-numbers": true,
+            className: "mx-auto my-0 w-full max-w-4xl text-left",
+            title: "agent.py",
+          }}
+          lang="python"
+        />
       </CenteredSection>
       <OneTwoSection
-        description="Description of one/two section"
-        title="One/Two Section"
+        description="Build more AI apps with less framework."
+        title="Only essentials"
       >
-        <div className="aspect-video rounded-lg border bg-background" />
+        <DynamicCodeBlock
+          code={STREAM_TO_AGENT_CODE}
+          codeblock={{
+            "data-line-numbers": true,
+            className: "my-0",
+            title: "agent.py",
+          }}
+          lang="python"
+        />
       </OneTwoSection>
-      <Templates
-        data={templates}
-        description="See Geistdocs in action with one of our templates."
-        title="Get started quickly"
-      />
-      <CTA cta="Get started" href="/docs" title="Start your docs today" />
+      {/* <Templates */}
+      {/*   data={templates} */}
+      {/*   description="See Geistdocs in action with one of our templates." */}
+      {/*   title="Get started quickly" */}
+      {/* /> */}
+      <CTA cta="Get started" href="/docs" title="Build your agent today" />
     </div>
   </div>
 );

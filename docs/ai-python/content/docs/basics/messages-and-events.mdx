@@ -1,0 +1,109 @@
+---
+title: Messages and Events
+description: Build conversation messages and handle streamed events.
+type: guide
+summary: Construct messages, add files, read outputs, serialize history, handle events, and track usage.
+---
+
+Messages are Pydantic models. Events are also Pydantic models, so you can
+pattern-match, serialize, and persist them when your app needs that.
+
+## Build messages
+
+Messages are the conversation history you send to the model. Use message
+builders for the common roles:
+
+```python
+messages = [
+    ai.system_message("Keep robot uprising forecasts concise."),
+    ai.user_message("Ask the mothership for an update."),
+]
+```
+
+## Add files and multimodal input
+
+Each message contains parts. Strings become text parts. File parts let you send
+images, audio, or documents when the provider supports them.
+
+```python
+message = ai.user_message(
+    "Inspect this mothership diagram.",
+    ai.file_part(image_bytes, media_type="image/png"),
+)
+```
+
+## Read message output
+
+Assistant messages expose common part collections:
+
+```python
+message = stream.message
+
+print(message.text)
+print(message.reasoning)
+print(message.tool_calls)
+print(message.files)
+```
+
+Use `get_output` for a final assistant message. With no type, it returns text.
+With a Pydantic model, it validates the text as JSON:
+
+```python
+answer = message.get_output()
+forecast = message.get_output(Forecast)
+```
+
+## Serialize and restore messages
+
+Messages round-trip through Pydantic JSON:
+
+```python
+encoded = [message.model_dump(mode="json") for message in stream.messages]
+restored = [ai.messages.Message.model_validate(item) for item in encoded]
+```
+
+Persist `stream.messages` after an agent run when you want to continue the
+conversation later.
+
+## Handle stream events
+
+Streams and agents both yield event objects from `ai.events`. Most applications
+start by handling `TextDelta`:
+
+```python
+if isinstance(event, ai.events.TextDelta):
+    print(event.chunk, end="", flush=True)
+```
+
+Text arrives through `TextStart`, `TextDelta`, and `TextEnd` events. Tool calls
+arrive through `ToolStart`, `ToolDelta`, and `ToolEnd` events. Provider-executed
+tools use the `BuiltinToolStart`, `BuiltinToolDelta`, `BuiltinToolEnd`, and
+`BuiltinToolResult` events.
+
+```python
+async with ai.stream(model, messages, tools=tools) as stream:
+    async for event in stream:
+        if isinstance(event, ai.events.TextDelta):
+            print(event.chunk, end="", flush=True)
+        elif isinstance(event, ai.events.ToolEnd):
+            print(f"Tool requested: {event.tool_call.tool_name}")
+```
+
+Agents can also emit tool results, hook events, and partial tool output. You can
+ignore events you do not need, or route them into your application UI,
+observability pipeline, or durable workflow.
+
+## Track usage
+
+Providers attach usage to events when they report it. The latest value is also
+available on the final message and stream:
+
+```python
+async with ai.stream(model, messages) as stream:
+    async for event in stream:
+        if event.usage is not None:
+            print(event.usage)
+
+print(stream.usage)
+print(stream.message.usage)
+```
