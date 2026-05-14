@@ -1,4 +1,4 @@
-"""AI Gateway v3 adapter.
+"""AI Gateway v3 protocol.
 
 Converts internal messages to AI Gateway wire payloads and maps gateway
 responses back to public event/message types."""
@@ -470,24 +470,22 @@ def _parse_stream_part(
 
 
 async def stream(
+    gateway: gateway_client.GatewayClient,
     model: core.model.Model,
     messages: list[types.messages.Message],
     *,
     tools: Sequence[types.tools.Tool] | None = None,
     output_type: type[pydantic.BaseModel] | None = None,
-    **kwargs: Any,
+    params: Any = None,
 ) -> AsyncGenerator[types.events.Event]:
     """Stream an LLM response through the AI Gateway v3 protocol."""
-    stream_params = _coerce_params(kwargs.get("params"))
+    stream_params = _coerce_params(params)
     body = await _build_request_body(
         messages,
         tools=tools,
         output_type=output_type,
         params=stream_params,
     )
-    if not isinstance(model.provider.client, gateway_client.GatewayClient):
-        raise TypeError("AI Gateway adapter requires a GatewayClient")
-    gateway = model.provider.client
 
     try:
         async with gateway.stream(
@@ -523,6 +521,7 @@ async def stream(
 
 
 async def _generate_image(
+    gateway: gateway_client.GatewayClient,
     model: core.model.Model,
     messages: list[types.messages.Message],
     params: core.ImageParams,
@@ -538,9 +537,6 @@ async def _generate_image(
     if input_files:
         body["files"] = [_file_part_to_wire(f) for f in input_files]
 
-    if not isinstance(model.provider.client, gateway_client.GatewayClient):
-        raise TypeError("AI Gateway adapter requires a GatewayClient")
-    gateway = model.provider.client
     response = await gateway.post_json(
         "image-model", body, model=model, model_type="image"
     )
@@ -564,6 +560,7 @@ async def _generate_image(
 
 
 async def _generate_video(
+    gateway: gateway_client.GatewayClient,
     model: core.model.Model,
     messages: list[types.messages.Message],
     params: core.VideoParams,
@@ -578,10 +575,6 @@ async def _generate_video(
     }
     if input_files:
         body["image"] = _file_part_to_wire(input_files[0])
-
-    if not isinstance(model.provider.client, gateway_client.GatewayClient):
-        raise TypeError("AI Gateway adapter requires a GatewayClient")
-    gateway = model.provider.client
 
     async with gateway.stream(
         "video-model",
@@ -630,6 +623,7 @@ async def _generate_video(
 
 
 async def generate(
+    gateway: gateway_client.GatewayClient,
     model: core.model.Model,
     messages: list[types.messages.Message],
     params: core.GenerateParams,
@@ -637,7 +631,7 @@ async def generate(
     """Generate media through the AI Gateway."""
     try:
         if isinstance(params, core.VideoParams):
-            return await _generate_video(model, messages, params)
-        return await _generate_image(model, messages, params)
+            return await _generate_video(gateway, model, messages, params)
+        return await _generate_image(gateway, model, messages, params)
     except client_errors.GatewayError as exc:
         raise errors.map_error(exc) from exc

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import AsyncGenerator, Iterable, Mapping, Sequence
 from types import ModuleType
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import httpx
 import openai
@@ -15,8 +15,12 @@ from . import errors
 
 if TYPE_CHECKING:
     import modelsdotdev
+    import pydantic
 
     from ...models.core import model as model_
+    from ...types import events
+    from ...types import messages as messages_
+    from ...types import tools as tools_
 
 OpenAIClient = httpx.AsyncClient | openai.AsyncOpenAI
 
@@ -105,6 +109,28 @@ class OpenAICompatibleProvider(base.Provider[openai.AsyncOpenAI]):
         if self._close_client_on_aclose:
             await self.client.close()
 
+    def stream(
+        self,
+        model: model_.Model,
+        messages: list[messages_.Message],
+        *,
+        tools: Sequence[tools_.Tool] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
+        params: Any = None,
+    ) -> AsyncGenerator[events.Event]:
+        """Stream via the OpenAI chat completions protocol."""
+        from . import protocol
+
+        return protocol.stream(
+            self.sdk_client,
+            model,
+            messages,
+            tools=tools,
+            output_type=output_type,
+            params=params,
+            provider=self.name,
+        )
+
     @classmethod
     def from_modelsdev_provider(
         cls,
@@ -145,15 +171,15 @@ class OpenAICompatibleProvider(base.Provider[openai.AsyncOpenAI]):
         """The provider's built-in tool factories.
 
         Convenience accessor: ``openai.tools.web_search(...)``. The
-        chat-completions adapter currently raises if a built-in tool is
+        chat-completions protocol currently raises if a built-in tool is
         passed; route via the AI Gateway provider until a Responses
-        adapter ships.
+        protocol ships.
         """
         from . import tools as tools_module
 
         return tools_module
 
-    async def list(self) -> list[str]:
+    async def list_models(self) -> list[str]:
         """List available model IDs from the OpenAI-compatible API."""
         try:
             sdk_models = await self.sdk_client.models.list()

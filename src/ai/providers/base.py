@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable, Mapping
+from collections.abc import AsyncGenerator, Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, Generic
 
 from typing_extensions import TypeVar  # noqa: UP035 - default= is needed on 3.12
@@ -12,16 +12,14 @@ from .. import _modelsdev
 from ..errors import UnsupportedProviderError
 
 if TYPE_CHECKING:
-    import anthropic
-    import httpx
     import modelsdotdev
-    import openai
+    import pydantic
 
     from ..models.core import model as model_
-
-    ProviderClient = httpx.AsyncClient | openai.AsyncOpenAI | anthropic.AsyncAnthropic
-else:
-    ProviderClient = Any
+    from ..models.core import params as params_
+    from ..types import events
+    from ..types import messages as messages_
+    from ..types import tools as tools_
 
 ClientT = TypeVar("ClientT", default=Any)
 
@@ -145,7 +143,7 @@ class Provider(Generic[ClientT]):
 
     @property
     def adapter(self) -> str:
-        """Wire-protocol key used to look up stream/generate adapters."""
+        """Provider protocol key used in model metadata and reprs."""
         return self._adapter
 
     @property
@@ -158,9 +156,30 @@ class Provider(Generic[ClientT]):
         """Human-readable provider name (for repr, error messages)."""
         return self._name
 
-    async def list(self) -> list[str]:
+    async def list_models(self) -> list[str]:
         """List available model IDs from the provider API."""
         raise NotImplementedError
+
+    def stream(
+        self,
+        model: model_.Model,
+        messages: list[messages_.Message],
+        *,
+        tools: Sequence[tools_.Tool] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
+        params: Any = None,
+    ) -> AsyncGenerator[events.Event]:
+        """Stream a language-model response from this provider."""
+        raise NotImplementedError(f"provider {self.name!r} does not support stream()")
+
+    async def generate(
+        self,
+        model: model_.Model,
+        messages: list[messages_.Message],
+        params: params_.GenerateParams,
+    ) -> messages_.Message:
+        """Generate a non-streaming response from this provider."""
+        raise NotImplementedError(f"provider {self.name!r} does not support generate()")
 
     async def probe(self, model: model_.Model) -> None:
         """Probe if provider is online and can serve given model.
@@ -241,8 +260,8 @@ def get_provider(
     api_key: str | None = None,
     headers: Mapping[str, str] | None = None,
     env: Mapping[str, str] | None = None,
-    client: ProviderClient | None = None,
-) -> Provider[Any]:
+    client: ClientT | None = None,
+) -> Provider[ClientT]:
     """Create a provider from a models.dev provider ID."""
     return Provider.from_id(
         id,

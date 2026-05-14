@@ -5,10 +5,10 @@ import openai
 import pytest
 
 import ai
-from ai.providers.openai import OpenAICompatibleProvider, adapter
+from ai.providers.openai import OpenAICompatibleProvider
 
 
-async def test_list_gets_models_with_auth_header_and_sorts_ids() -> None:
+async def test_list_models_gets_models_with_auth_header_and_sorts_ids() -> None:
     captured_urls: list[str] = []
     captured_headers: dict[str, str] = {}
 
@@ -34,7 +34,7 @@ async def test_list_gets_models_with_auth_header_and_sorts_ids() -> None:
     )
 
     try:
-        ids = await provider.list()
+        ids = await provider.list_models()
     finally:
         await provider.aclose()
 
@@ -44,7 +44,7 @@ async def test_list_gets_models_with_auth_header_and_sorts_ids() -> None:
     assert ids == ["gpt-a", "gpt-z"]
 
 
-async def test_list_maps_sdk_errors_to_provider_hierarchy() -> None:
+async def test_list_models_maps_sdk_errors_to_provider_hierarchy() -> None:
     def _handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             429,
@@ -68,7 +68,7 @@ async def test_list_maps_sdk_errors_to_provider_hierarchy() -> None:
 
     try:
         with pytest.raises(ai.ProviderRateLimitError) as exc_info:
-            await provider.list()
+            await provider.list_models()
     finally:
         await provider.aclose()
 
@@ -85,7 +85,7 @@ async def test_list_maps_sdk_errors_to_provider_hierarchy() -> None:
     assert exc.param == "model"
 
 
-async def test_list_404_stays_generic_not_found() -> None:
+async def test_list_models_404_stays_generic_not_found() -> None:
     def _handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"error": {"message": "missing"}})
 
@@ -98,7 +98,7 @@ async def test_list_404_stays_generic_not_found() -> None:
 
     try:
         with pytest.raises(ai.ProviderNotFoundError) as exc_info:
-            await provider.list()
+            await provider.list_models()
     finally:
         await provider.aclose()
 
@@ -113,8 +113,6 @@ async def test_get_provider_accepts_openai_sdk_client() -> None:
         assert isinstance(provider, OpenAICompatibleProvider)
         assert provider.sdk_client is sdk_client
         assert provider.is_configured() is True
-        model = ai.Model("gpt-5.4", provider=provider)
-        assert adapter._make_client(model) is sdk_client
     finally:
         await sdk_client.close()
 

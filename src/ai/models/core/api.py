@@ -12,7 +12,6 @@ from typing_extensions import TypeVar  # noqa: UP035
 
 from ... import types
 from ...types import integrity
-from . import adapters
 from . import model as model_
 from . import params as params_
 
@@ -54,35 +53,34 @@ class GenerateExecutor(Protocol):
 
 
 class Executor:
-    """Default executor: dispatches to adapters via the local client."""
+    """Default executor: dispatches to the model's provider instance."""
 
     async def _do_stream(
         self,
         request: StreamRequest,
     ) -> AsyncGenerator[types.events.Event]:
-        fn = adapters.get_stream_adapter(request.model.adapter)
-        kwargs: dict[str, Any] = {}
-        if request.params is not None:
-            kwargs["params"] = request.params
-        async for ev in fn(
+        async for ev in request.model.provider.stream(
             request.model,
             request.messages,
             tools=request.tools,
             output_type=request.output_type,
-            **kwargs,
+            params=request.params,
         ):
             yield ev
 
     async def _do_generate(self, request: GenerateRequest) -> types.messages.Message:
-        fn = adapters.get_generate_adapter(request.model.adapter)
-        return await fn(request.model, request.messages, params=request.params)
+        return await request.model.provider.generate(
+            request.model,
+            request.messages,
+            request.params,
+        )
 
 
 _default_executor = Executor()
 
 
 class Stream(Generic[StreamOutputT]):
-    """Async-iterable wrapper around an adapter's event stream."""
+    """Async-iterable wrapper around a provider's event stream."""
 
     def __init__(
         self,

@@ -7,7 +7,7 @@ Usage::
     from ai.providers.anthropic import tools as anthropic_tools
 
     model = ai.get_model("gateway:anthropic/claude-sonnet-4")
-    ids = await ai.get_provider("vercel").list()
+    ids = await ai.get_provider("vercel").list_models()
 
     # Provider-specific request options pass through as raw Gateway body fields.
     async with ai.stream(
@@ -27,8 +27,8 @@ Usage::
     ) as s:
         ...
 
-The heavy ``.adapter`` module is loaded lazily so that ``import ai`` does
-not pull in ``httpx`` and other I/O libraries at import time.  This matters
+The heavy ``.protocol`` module is loaded lazily by provider methods so that
+``import ai`` does not pull in extra I/O code at import time.  This matters
 for sandboxed runtimes (e.g. Temporal workflow workers).
 """
 
@@ -40,15 +40,3 @@ __all__ = [
     "errors",
     "tools",
 ]
-
-
-def __getattr__(name: str) -> object:
-    if name == "generate":
-        from .adapter import generate
-
-        return generate
-    if name == "stream":
-        from .adapter import stream
-
-        return stream
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

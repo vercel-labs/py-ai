@@ -15,7 +15,7 @@ from ai.types import builders, messages
 from ai.types import events as events_
 from ai.types.integrity import IntegrityError, prepare_messages
 
-from ..conftest import MOCK_MODEL, mock_generate, mock_llm, text_msg
+from ..conftest import MOCK_MODEL, MOCK_PROVIDER, mock_generate, mock_llm, text_msg
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -510,7 +510,7 @@ async def test_stream_sanitizes_internal_messages() -> None:
         ):
             yield event
 
-    models.register_stream("mock", _spy_stream)
+    MOCK_PROVIDER._stream_impl = _spy_stream
 
     msgs = [
         ai.user_message("hi"),
@@ -559,7 +559,7 @@ async def test_generate_sanitizes_internal_messages() -> None:
         received.append(list(messages))
         return sentinel
 
-    models.register_generate("mock", _spy_gen)
+    MOCK_PROVIDER._generate_impl = _spy_gen
 
     msgs = [
         ai.user_message("A cat"),

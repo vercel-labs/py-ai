@@ -4,9 +4,9 @@ Defines the callable :data:`ai_gateway` provider."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from types import ModuleType
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import httpx
 
@@ -18,8 +18,13 @@ from .client import errors as client_errors
 
 if TYPE_CHECKING:
     import modelsdotdev
+    import pydantic
 
     from ...models.core import model as model_
+    from ...models.core import params as params_
+    from ...types import events
+    from ...types import messages as messages_
+    from ...types import tools as tools_
 
 _BASE_URL = "https://ai-gateway.vercel.sh/v3/ai"
 _API_KEY_ENV = "AI_GATEWAY_API_KEY"
@@ -69,6 +74,38 @@ class GatewayProvider(base.Provider[gateway_client.GatewayClient]):
         """Close the provider-owned Gateway client, if any."""
         await self.client.aclose()
 
+    def stream(
+        self,
+        model: model_.Model,
+        messages: list[messages_.Message],
+        *,
+        tools: Sequence[tools_.Tool] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
+        params: Any = None,
+    ) -> AsyncGenerator[events.Event]:
+        """Stream via the AI Gateway v3 protocol."""
+        from . import protocol
+
+        return protocol.stream(
+            self.client,
+            model,
+            messages,
+            tools=tools,
+            output_type=output_type,
+            params=params,
+        )
+
+    async def generate(
+        self,
+        model: model_.Model,
+        messages: list[messages_.Message],
+        params: params_.GenerateParams,
+    ) -> messages_.Message:
+        """Generate media via the AI Gateway v3 protocol."""
+        from . import protocol
+
+        return await protocol.generate(self.client, model, messages, params)
+
     @classmethod
     def from_modelsdev_provider(
         cls,
@@ -101,7 +138,7 @@ class GatewayProvider(base.Provider[gateway_client.GatewayClient]):
 
         return tools_module
 
-    async def list(self) -> list[str]:
+    async def list_models(self) -> list[str]:
         """List available model IDs from the AI Gateway."""
         try:
             return await self.client.list_model_ids()

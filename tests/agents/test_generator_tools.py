@@ -16,6 +16,7 @@ from ai.types import messages as messages_
 
 from ..conftest import (
     MOCK_MODEL,
+    MOCK_PROVIDER,
     emit_events_for_messages,
     mock_llm,
     text_msg,
@@ -143,7 +144,7 @@ async def test_yield_from_nested_agent() -> None:
     outer_reply = [text_msg("Summary: Mars has two moons.", id="outer-msg-2")]
 
     adapter = _CapturingAdapter([outer_call, inner_reply, outer_reply])
-    models.register_stream("mock", adapter.stream)
+    MOCK_PROVIDER._stream_impl = adapter.stream
 
     all_events: list[agent_events_.AgentEvent] = []
     async with outer.run(MOCK_MODEL, [ai.user_message("Tell me about Mars")]) as stream:

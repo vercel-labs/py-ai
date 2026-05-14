@@ -6,14 +6,14 @@ of provider-executed tool parts.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import anthropic
 import httpx
 import pytest
 
 import ai
-from ai.providers.anthropic import adapter
+from ai.providers.anthropic import protocol
 from ai.types import messages
 
 from .conftest import FakeAnthropicClient
@@ -38,11 +38,11 @@ class _RaisingAnthropicClient:
 
 def _patch_client(
     monkeypatch: pytest.MonkeyPatch,
-) -> tuple[FakeAnthropicClient, dict[str, Any]]:
+) -> tuple[anthropic.AsyncAnthropic, dict[str, Any]]:
+    _ = monkeypatch
     captured: dict[str, Any] = {}
     fake = FakeAnthropicClient(captured)
-    monkeypatch.setattr(adapter, "_make_client", lambda model: fake)
-    return fake, captured
+    return cast(anthropic.AsyncAnthropic, fake), captured
 
 
 _MODEL = ai.Model("claude-sonnet-4-6", provider=ai.get_provider("anthropic"))
@@ -56,10 +56,11 @@ async def _drain(stream: Any) -> None:
 async def test_raw_params_pass_through_to_sdk_kwargs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _, captured = _patch_client(monkeypatch)
+    fake, captured = _patch_client(monkeypatch)
 
     await _drain(
-        adapter.stream(
+        protocol.stream(
+            fake,
             _MODEL,
             [ai.user_message("Hi")],
             params={
@@ -77,6 +78,7 @@ async def test_raw_params_pass_through_to_sdk_kwargs(
                 "extra_body": {"future_option": {"enabled": True}},
                 "extra_headers": {"x-anthropic-feature": "enabled"},
             },
+            provider="anthropic",
         )
     )
 
@@ -98,12 +100,14 @@ async def test_raw_params_pass_through_to_sdk_kwargs(
 async def test_non_dict_params_rejected_by_adapter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _patch_client(monkeypatch)
+    fake, _ = _patch_client(monkeypatch)
 
-    stream = adapter.stream(
+    stream = protocol.stream(
+        fake,
         _MODEL,
         [ai.user_message("Hi")],
         params=[{"speed": "fast"}],
+        provider="anthropic",
     )
 
     with pytest.raises(TypeError, match="dict"):
@@ -113,10 +117,11 @@ async def test_non_dict_params_rejected_by_adapter(
 async def test_reasoning_signature_round_trips_from_provider_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _, captured = _patch_client(monkeypatch)
+    fake, captured = _patch_client(monkeypatch)
 
     await _drain(
-        adapter.stream(
+        protocol.stream(
+            fake,
             _MODEL,
             [
                 ai.assistant_message(
@@ -130,6 +135,7 @@ async def test_reasoning_signature_round_trips_from_provider_metadata(
                 ),
                 ai.user_message("Hi"),
             ],
+            provider="anthropic",
         )
     )
 
@@ -149,7 +155,7 @@ async def test_builtin_tool_parts_round_trip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``BuiltinToolCallPart``/``BuiltinToolReturnPart`` serialize back to wire."""
-    _, captured = _patch_client(monkeypatch)
+    fake, captured = _patch_client(monkeypatch)
 
     call = messages.BuiltinToolCallPart(
         tool_call_id="srvtoolu_1",
@@ -172,7 +178,7 @@ async def test_builtin_tool_parts_round_trip(
         ai.user_message("Thanks"),
     ]
 
-    await _drain(adapter.stream(_MODEL, convo))
+    await _drain(protocol.stream(fake, _MODEL, convo, provider="anthropic"))
 
     assistant = next(m for m in captured["messages"] if m["role"] == "assistant")
     assert assistant["content"] == [
@@ -193,6 +199,7 @@ async def test_builtin_tool_parts_round_trip(
 async def test_sdk_errors_are_mapped_to_provider_hierarchy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _ = monkeypatch
     response = httpx.Response(
         529,
         request=httpx.Request("POST", "https://anthropic.test/v1/messages"),
@@ -204,10 +211,16 @@ async def test_sdk_errors_are_mapped_to_provider_hierarchy(
         body={"error": {"type": "overloaded_error"}},
     )
     fake = _RaisingAnthropicClient(sdk_error)
-    monkeypatch.setattr(adapter, "_make_client", lambda model: fake)
 
     with pytest.raises(ai.ProviderOverloadedError) as exc_info:
-        await _drain(adapter.stream(_MODEL, [ai.user_message("Hi")]))
+        await _drain(
+            protocol.stream(
+                cast(anthropic.AsyncAnthropic, fake),
+                _MODEL,
+                [ai.user_message("Hi")],
+                provider="anthropic",
+            )
+        )
 
     exc = exc_info.value
     assert exc.provider == "anthropic"
@@ -218,12 +231,12 @@ async def test_sdk_errors_are_mapped_to_provider_hierarchy(
     assert exc.request_id == "req-anthropic"
     assert exc.type == "overloaded_error"
     assert exc.__cause__ is sdk_error
-    assert fake.closed is True
 
 
 async def test_model_404_is_mapped_to_model_not_found(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _ = monkeypatch
     response = httpx.Response(
         404,
         request=httpx.Request("POST", "https://anthropic.test/v1/messages"),
@@ -234,10 +247,16 @@ async def test_model_404_is_mapped_to_model_not_found(
         body={"error": {"type": "not_found_error"}},
     )
     fake = _RaisingAnthropicClient(sdk_error)
-    monkeypatch.setattr(adapter, "_make_client", lambda model: fake)
 
     with pytest.raises(ai.ProviderModelNotFoundError) as exc_info:
-        await _drain(adapter.stream(_MODEL, [ai.user_message("Hi")]))
+        await _drain(
+            protocol.stream(
+                cast(anthropic.AsyncAnthropic, fake),
+                _MODEL,
+                [ai.user_message("Hi")],
+                provider="anthropic",
+            )
+        )
 
     exc = exc_info.value
     assert isinstance(exc, ai.ProviderNotFoundError)
