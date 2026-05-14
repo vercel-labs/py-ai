@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlparse
@@ -33,10 +33,12 @@ class GatewayClient:
         *,
         base_url: str,
         api_key: str | None = None,
+        headers: Mapping[str, str] | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.base_url = base_url
         self.api_key = api_key
+        self.headers = dict(headers or {})
         self._http = client or httpx.AsyncClient(
             timeout=httpx.Timeout(timeout=300.0, connect=10.0),
         )
@@ -54,9 +56,8 @@ class GatewayClient:
         return f"{parsed.scheme}://{parsed.netloc}/{path.lstrip('/')}"
 
     def protocol_headers(self) -> dict[str, str]:
-        headers = {
-            "ai-gateway-protocol-version": _PROTOCOL_VERSION,
-        }
+        headers = dict(self.headers)
+        headers["ai-gateway-protocol-version"] = _PROTOCOL_VERSION
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
             headers["ai-gateway-auth-method"] = "api-key"
@@ -70,10 +71,8 @@ class GatewayClient:
         streaming: bool = False,
         accept: str | None = None,
     ) -> dict[str, str]:
-        headers = {
-            "Content-Type": "application/json",
-            **self.protocol_headers(),
-        }
+        headers = self.protocol_headers()
+        headers["Content-Type"] = "application/json"
 
         if model_type == "language":
             headers["ai-language-model-specification-version"] = "3"
@@ -99,10 +98,13 @@ class GatewayClient:
         headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         url = self.origin_url(path) if origin else self.url(path)
+        request_headers = self.protocol_headers()
+        if headers:
+            request_headers.update(headers)
         try:
             return await self._http.get(
                 url,
-                headers=headers or self.protocol_headers(),
+                headers=request_headers,
             )
         except httpx.TimeoutException as exc:
             raise errors.GatewayTimeoutError() from exc

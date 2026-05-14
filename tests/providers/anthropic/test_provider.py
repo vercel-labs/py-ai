@@ -29,6 +29,7 @@ async def test_list_gets_models_with_provider_headers_and_sorts_ids() -> None:
         "anthropic",
         base_url="https://anthropic.test",
         api_key="sk-test",
+        headers={"X-Custom-Header": "example"},
         client=httpx.AsyncClient(transport=httpx.MockTransport(_handler)),
     )
 
@@ -40,6 +41,7 @@ async def test_list_gets_models_with_provider_headers_and_sorts_ids() -> None:
     assert captured_urls == ["https://anthropic.test/v1/models"]
     assert captured_headers["x-api-key"] == "sk-test"
     assert captured_headers["anthropic-version"] == "2023-06-01"
+    assert captured_headers["x-custom-header"] == "example"
     assert ids == ["claude-a", "claude-z"]
 
 
@@ -149,6 +151,7 @@ def test_get_provider_accepts_base_url_and_api_key() -> None:
         "anthropic",
         base_url="https://custom.example.com",
         api_key="sk-custom",
+        headers={"X-Custom-Header": "example"},
     )
 
     model = ai.Model("custom-model", provider=provider)
@@ -156,6 +159,7 @@ def test_get_provider_accepts_base_url_and_api_key() -> None:
     assert provider.adapter == "anthropic"
     assert provider.base_url == "https://custom.example.com"
     assert provider.api_key == "sk-custom"
+    assert provider.headers == {"X-Custom-Header": "example"}
     assert provider.is_configured() is True
     assert model.id == "custom-model"
     assert model.adapter == "anthropic"

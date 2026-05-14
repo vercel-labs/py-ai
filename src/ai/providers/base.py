@@ -54,6 +54,7 @@ class Provider(Generic[ClientT]):
         api_key_env: str | None = None,
         base_url_env: str | None = None,
         config_envs: Iterable[str] | None = None,
+        headers: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         client: ClientT | None = None,
     ) -> None:
@@ -66,6 +67,7 @@ class Provider(Generic[ClientT]):
         self._api_key_env = api_key_env
         self._base_url_env = base_url_env
         self._config_envs = tuple(config_envs or ())
+        self._headers = dict(headers or {})
         self._env = dict(env or {})
         self._client = client
 
@@ -118,6 +120,11 @@ class Provider(Generic[ClientT]):
         if self.api_key_env is not None and not self.api_key:
             return False
         return all(self._config_value(env) for env in self.config_envs)
+
+    @property
+    def headers(self) -> dict[str, str]:
+        """Custom headers sent with provider API requests."""
+        return dict(self._headers)
 
     def _config_value(self, env: str) -> str | None:
         return self._env.get(env) or os.environ.get(env)
@@ -181,6 +188,7 @@ class Provider(Generic[ClientT]):
         model_provider_config: modelsdotdev.ModelProviderConfig | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
+        headers: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         client: Any | None = None,
     ) -> Provider[Any]:
@@ -200,6 +208,7 @@ class Provider(Generic[ClientT]):
                     model_provider_config=model_provider_config,
                     base_url=base_url,
                     api_key=api_key,
+                    headers=headers,
                     env=env,
                     client=client,
                 )
@@ -214,6 +223,7 @@ class Provider(Generic[ClientT]):
         model_provider_config: modelsdotdev.ModelProviderConfig | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
+        headers: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         client: Any | None = None,
     ) -> Provider[Any]:
@@ -229,6 +239,7 @@ def get_provider(
     *,
     base_url: str | None = None,
     api_key: str | None = None,
+    headers: Mapping[str, str] | None = None,
     env: Mapping[str, str] | None = None,
     client: ProviderClient | None = None,
 ) -> Provider[Any]:
@@ -237,6 +248,7 @@ def get_provider(
         id,
         base_url=base_url,
         api_key=api_key,
+        headers=headers,
         env=env,
         client=client,
     )

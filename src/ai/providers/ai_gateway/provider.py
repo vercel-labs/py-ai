@@ -35,6 +35,7 @@ class GatewayProvider(base.Provider[gateway_client.GatewayClient]):
         *,
         api_key: str | None = None,
         base_url: str = _BASE_URL,
+        headers: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
@@ -44,12 +45,14 @@ class GatewayProvider(base.Provider[gateway_client.GatewayClient]):
             base_url=base_url,
             api_key=api_key,
             api_key_env=_API_KEY_ENV,
+            headers=headers,
             env=env,
         )
         self._set_client(
             gateway_client.GatewayClient(
                 base_url=self.base_url,
                 api_key=self.api_key,
+                headers=self.headers,
                 client=client,
             )
         )
@@ -59,6 +62,7 @@ class GatewayProvider(base.Provider[gateway_client.GatewayClient]):
         client = super().client
         client.base_url = self.base_url
         client.api_key = self.api_key
+        client.headers = self.headers
         return client
 
     async def aclose(self) -> None:
@@ -73,12 +77,14 @@ class GatewayProvider(base.Provider[gateway_client.GatewayClient]):
         model_provider_config: modelsdotdev.ModelProviderConfig | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
+        headers: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> base.Provider[gateway_client.GatewayClient]:
         return cls(
             api_key=api_key,
             base_url=base_url or _BASE_URL,
+            headers=headers,
             env=env,
             client=client,
         )

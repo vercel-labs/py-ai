@@ -1,29 +1,41 @@
-"""Explicit provider — bring your own auth and base URL."""
+"""Explicit provider — use a local OpenAI-compatible server."""
 
 import asyncio
 import os
 
 import ai
 
+# Example for local OpenAI-compatible servers like LM Studio.
 provider = ai.get_provider(
-    "vercel",
-    base_url="https://ai-gateway.vercel.sh/v3/ai",
-    api_key=os.environ["AI_GATEWAY_API_KEY"],
+    "openai",
+    base_url=os.environ.get("LOCAL_OPENAI_BASE_URL", "http://localhost:1234/v1"),
+    api_key=os.environ.get("LOCAL_OPENAI_API_KEY", "some-key"),
+    headers={"X-Custom-Header": "example"},
 )
 
-model = ai.Model("anthropic/claude-sonnet-4", provider=provider)
+model = ai.Model(
+    os.environ.get("LOCAL_OPENAI_MODEL", "local-model"),
+    provider=provider,
+)
 
 messages = [ai.user_message("Hello!")]
 
 
 async def main() -> None:
     try:
+        try:
+            await ai.probe(model)
+        except ai.ProviderError as exc:
+            print(f"[SKIP] local OpenAI-compatible server is unavailable: {exc}")
+            return
+
         async with ai.stream(model, messages) as s:
             async for event in s:
                 if isinstance(event, ai.events.TextDelta):
                     print(event.chunk, end="", flush=True)
         print()
     finally:
+        # Explicit providers need explicit cleanup.
         await provider.aclose()
 
 

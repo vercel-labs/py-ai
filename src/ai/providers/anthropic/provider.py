@@ -41,6 +41,7 @@ class AnthropicCompatibleProvider(base.Provider[anthropic.AsyncAnthropic]):
         base_url_env: str | None = None,
         config_envs: Iterable[str] | None = None,
         anthropic_version: str = _ANTHROPIC_VERSION,
+        headers: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         client: AnthropicClient | None = None,
     ) -> None:
@@ -66,6 +67,7 @@ class AnthropicCompatibleProvider(base.Provider[anthropic.AsyncAnthropic]):
             api_key_env=api_key_env,
             base_url_env=base_url_env,
             config_envs=config_envs,
+            headers=headers,
             env=env,
         )
         self.anthropic_version = anthropic_version
@@ -83,7 +85,10 @@ class AnthropicCompatibleProvider(base.Provider[anthropic.AsyncAnthropic]):
             base_url=self.base_url,
             api_key=self.api_key or "",
             http_client=http_client,
-            default_headers={"anthropic-version": self.anthropic_version},
+            default_headers={
+                **self.headers,
+                "anthropic-version": self.anthropic_version,
+            },
         )
 
     @property
@@ -111,6 +116,7 @@ class AnthropicCompatibleProvider(base.Provider[anthropic.AsyncAnthropic]):
         model_provider_config: modelsdotdev.ModelProviderConfig | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
+        headers: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         client: AnthropicClient | None = None,
     ) -> base.Provider[anthropic.AsyncAnthropic]:
@@ -132,6 +138,7 @@ class AnthropicCompatibleProvider(base.Provider[anthropic.AsyncAnthropic]):
             if provider.id == "anthropic" and base_url is None
             else None,
             config_envs=config_envs,
+            headers=headers,
             env=env,
             client=client,
         )

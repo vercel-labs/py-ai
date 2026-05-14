@@ -64,6 +64,7 @@ async def test_custom_anthropic_version_header() -> None:
         default_base_url="https://anthropic.test",
         api_key="sk-test-key",
         anthropic_version="2024-01-01",
+        headers={"X-Custom-Header": "example"},
         client=httpx.AsyncClient(
             base_url="https://anthropic.test",
             transport=httpx.MockTransport(_handler),
@@ -73,3 +74,4 @@ async def test_custom_anthropic_version_header() -> None:
     model = ai.Model("custom-model", provider=provider)
     await provider.probe(model)
     assert captured_headers["anthropic-version"] == "2024-01-01"
+    assert captured_headers["x-custom-header"] == "example"

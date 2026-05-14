@@ -43,6 +43,7 @@ class OpenAICompatibleProvider(base.Provider[openai.AsyncOpenAI]):
         api_key_env: str | None = None,
         base_url_env: str | None = None,
         config_envs: Iterable[str] | None = None,
+        headers: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         client: OpenAIClient | None = None,
     ) -> None:
@@ -67,6 +68,7 @@ class OpenAICompatibleProvider(base.Provider[openai.AsyncOpenAI]):
             api_key_env=api_key_env,
             base_url_env=base_url_env,
             config_envs=config_envs,
+            headers=headers,
             env=env,
         )
         self._close_client_on_aclose = sdk_client is None and http_client is None
@@ -82,6 +84,7 @@ class OpenAICompatibleProvider(base.Provider[openai.AsyncOpenAI]):
         return openai.AsyncOpenAI(
             base_url=self.base_url,
             api_key=self.api_key or "",
+            default_headers=self.headers,
             http_client=http_client,
         )
 
@@ -110,6 +113,7 @@ class OpenAICompatibleProvider(base.Provider[openai.AsyncOpenAI]):
         model_provider_config: modelsdotdev.ModelProviderConfig | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
+        headers: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         client: OpenAIClient | None = None,
     ) -> base.Provider[openai.AsyncOpenAI]:
@@ -131,6 +135,7 @@ class OpenAICompatibleProvider(base.Provider[openai.AsyncOpenAI]):
             if provider.id == "openai" and base_url is None
             else None,
             config_envs=config_envs,
+            headers=headers,
             env=env,
             client=client,
         )

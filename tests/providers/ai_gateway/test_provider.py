@@ -28,6 +28,7 @@ async def test_list_gets_config_with_gateway_headers_and_sorts_ids() -> None:
         "vercel",
         base_url="https://gateway.test/v3/ai",
         api_key="sk-test",
+        headers={"X-Custom-Header": "example"},
         client=httpx.AsyncClient(transport=httpx.MockTransport(_handler)),
     )
 
@@ -39,6 +40,7 @@ async def test_list_gets_config_with_gateway_headers_and_sorts_ids() -> None:
     assert captured_urls == ["https://gateway.test/v3/ai/config"]
     assert captured_headers["authorization"] == "Bearer sk-test"
     assert captured_headers["ai-gateway-protocol-version"] == "0.0.1"
+    assert captured_headers["x-custom-header"] == "example"
     assert ids == ["anthropic/claude-a", "openai/gpt-z"]
 
 

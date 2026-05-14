@@ -29,6 +29,7 @@ async def test_list_gets_models_with_auth_header_and_sorts_ids() -> None:
         "openai",
         base_url="https://openai.test/v1",
         api_key="sk-test",
+        headers={"X-Custom-Header": "example"},
         client=httpx.AsyncClient(transport=httpx.MockTransport(_handler)),
     )
 
@@ -39,6 +40,7 @@ async def test_list_gets_models_with_auth_header_and_sorts_ids() -> None:
 
     assert captured_urls == ["https://openai.test/v1/models"]
     assert captured_headers["authorization"] == "Bearer sk-test"
+    assert captured_headers["x-custom-header"] == "example"
     assert ids == ["gpt-a", "gpt-z"]
 
 
@@ -156,6 +158,7 @@ def test_get_provider_accepts_base_url_and_api_key() -> None:
         "openai",
         base_url="https://custom.example.com/v1",
         api_key="sk-custom",
+        headers={"X-Custom-Header": "example"},
     )
 
     model = ai.Model("custom-model", provider=provider)
@@ -163,6 +166,7 @@ def test_get_provider_accepts_base_url_and_api_key() -> None:
     assert provider.adapter == "openai"
     assert provider.base_url == "https://custom.example.com/v1"
     assert provider.api_key == "sk-custom"
+    assert provider.headers == {"X-Custom-Header": "example"}
     assert provider.is_configured() is True
     assert model.id == "custom-model"
     assert model.adapter == "openai"
