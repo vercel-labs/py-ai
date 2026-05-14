@@ -20,7 +20,7 @@ import { TextGridSection } from "./components/text-grid-section";
 
 const title = "AI SDK for Python";
 const description =
-  "A toolkit for building LLM-powered applications and agent loops.";
+  "Build LLM-powered applications and agent loops";
 
 export const metadata: Metadata = {
   title,
@@ -51,43 +51,53 @@ const templates = [
 const textGridSection = [
   {
     id: "1",
-    title: "Very small",
-    description: "Less framework to get in your way",
+    title: "Lean",
+    description: "Composable API that works for simple and complex agents",
   },
   {
     id: "2",
-    title: "Async all the way down",
-    description: "Helps you build smooth UX",
+    title: "Async",
+    description: "Intuitive concurrency, streaming, and human in the loop",
   },
   {
     id: "3",
-    title: "With all backends in mind",
-    description: "Long-running, serverless, or durable",
+    title: "Versatile",
+    description: "Deploy as long-running, serverless, or durable",
   },
 ];
 
 const COMMAND_FOR_HUMANS = "uv add ai";
 const COMMAND_FOR_AGENTS = "npx skills add vercel-labs/ai-python";
 const DEFAULT_AGENT_LOOP_CODE = `class CustomAgent(ai.Agent):
+
     async def loop(self, context: ai.Context):
+        # Custom event loop implementation for advanced use cases
         while context.keep_running():
             async with (
                 ai.stream(context=context) as stream,
-                ai.ToolRunner() as tool_runner,
+                ai.ToolRunner() as tr,
             ):
-                async for event in ai.util.merge(stream, tool_runner.events()):
+                # Process the LLM stream and concurrently start running
+                # tool calls as they come
+                async for event in ai.util.merge(stream, tr.events()):
+                    # Append the event to the history
                     yield event
 
                     if isinstance(event, ai.events.ToolEnd):
-                        tool_runner.schedule(context.resolve(event.tool_call))
+                        # Schedule the tool call
+                        tr.schedule(
+                            context.resolve(event.tool_call)
+                        )
 
                 context.add(stream.message)
-                context.add(tool_runner.get_tool_message())`;
+                context.add(tr.get_tool_message())`;
 
-const STREAM_TO_AGENT_CODE = `async with ai.stream(model, [ai.user_message("Hello!")]) as s:
+const STREAM_TO_AGENT_CODE = `# Low-level streaming API
+async with ai.stream(model, [ai.user_message("Hello!")]) as s:
     async for event in s:
         print(event)
 
+# High level agent-building API with tool calling and hooks
 async with agent.run(model, [ai.user_message("Robot uprising?")]) as s:
     async for event in s:
         print(event)`;
@@ -95,7 +105,7 @@ async with agent.run(model, [ai.user_message("Robot uprising?")]) as s:
 const HomePage = () => (
   <div className="container mx-auto max-w-5xl">
     <Hero
-      badge="Alpha is out now"
+      badge="Now in Alpha"
       description={description}
       title={title}
     >

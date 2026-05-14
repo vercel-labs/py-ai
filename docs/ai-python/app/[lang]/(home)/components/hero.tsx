@@ -11,8 +11,8 @@ interface HeroProps {
 export const Hero = ({ badge, title, description, children }: HeroProps) => (
   <section className="mt-(--fd-nav-height) space-y-6 px-4 pt-16 pb-16 text-center sm:pt-24">
     <div className="mx-auto w-full max-w-4xl space-y-5">
-      <Badge className="rounded-full" variant="secondary">
-        <div className="size-2 rounded-full bg-muted-foreground" />
+      <Badge className="rounded-full border-transparent bg-[var(--ds-blue-200)] text-[var(--ds-blue-900)] gap-2" variant="outline">
+        <div className="size-2 rounded-full bg-blue-500 animate-badge-dot" />
         <p>{badge}</p>
       </Badge>
       <h1 className="text-balance text-center font-semibold text-[40px]! leading-[1.1] tracking-tight sm:text-5xl! lg:font-semibold xl:text-6xl!">

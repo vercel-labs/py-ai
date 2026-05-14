@@ -46,8 +46,8 @@ async with ai.stream(model, messages) as stream:
         if isinstance(event, ai.events.TextDelta):
             print(event.chunk, end="", flush=True)
 
-message = stream.message
-text = stream.text
+message = stream.message  # Final message
+text = stream.text  # Unwrapped text from the final message
 usage = stream.usage
 ```
 
