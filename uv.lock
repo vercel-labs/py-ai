@@ -44,7 +44,7 @@ requires-dist = [
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.83.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "mcp", specifier = ">=1.18.0" },
-    { name = "modelsdotdev", git = "https://github.com/vercel-labs/modelsdotdev-python" },
+    { name = "modelsdotdev", specifier = "==0.*" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=2.14.0" },
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "typing-extensions", specifier = ">=4.15.0" },
@@ -552,8 +552,12 @@ wheels = [
 
 [[package]]
 name = "modelsdotdev"
-version = "0.0.0"
-source = { git = "https://github.com/vercel-labs/modelsdotdev-python#8e57c6a97b05fcc72866bf36081b7bbf80c34bb0" }
+version = "0.20260514.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ed/15/4abac2cfb213cc8a0d0fab878865c7422ba710346466dbffa199c4ec553f/modelsdotdev-0.20260514.0.tar.gz", hash = "sha256:0f573ea53568f9ec72fa1755de790b36d28b502b271d69228bb8f1116fb9810e", size = 727600, upload-time = "2026-05-14T23:02:14.397Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5a/4d/1b19a2d668e47d741556f43bc927ad6997a4f1c3e676332e63e4ffc7d37b/modelsdotdev-0.20260514.0-py3-none-any.whl", hash = "sha256:fce34c56fbd5759975fe80dac3307b0d45bdbd3e3bc550b5b7658a3458042bb0", size = 728748, upload-time = "2026-05-14T23:02:13.002Z" },
+]
 
 [[package]]
 name = "mypy"
