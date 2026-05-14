@@ -7,9 +7,8 @@ message list.
 
 Cache stats are surfaced on ``Stream.usage``:
 ``cache_write_tokens`` on the first call, ``cache_read_tokens`` on the
-second.  If the prefix is below the model's minimum (1024 tokens for
-Sonnet 4 / 3.7, 2048 for Sonnet 4.6, 4096 for Opus 4.x / Haiku 4.5),
-caching silently no-ops — no error, just zeros.
+second.  Each model has a minimum prefix size below which caching
+silently no-ops — no error, just zeros.
 
 See https://vercel.com/docs/ai-gateway/models-and-providers/automatic-caching
 """
@@ -18,14 +17,14 @@ import asyncio
 
 import ai
 
-model = ai.get_model("gateway:anthropic/claude-sonnet-4")
+model = ai.get_model("gateway:anthropic/claude-sonnet-4.6")
 
 # A NOTE FROM A HUMAN: Opus originally generated this example with a
 # system prompt for a "senior incident-response engineer". I told it
 # to try something more lighthearted, and it turned it into this.
 
-# Long static prefix — kept well above Sonnet 4's 1024-token minimum so
-# the cache breakpoint Anthropic adds actually sticks.
+# Long static prefix — kept well above the model's minimum so the
+# cache breakpoint Anthropic adds actually sticks.
 SYSTEM_PROMPT = """\
 You are the Chief Naptime Coordinator for a council of eleven extremely
 opinionated house cats.  Your job is to mediate disputes between the

@@ -47,7 +47,7 @@ class CustomAgent(ai.Agent):
 
 
 async def main() -> None:
-    model = ai.get_model("gateway:anthropic/claude-sonnet-4")
+    model = ai.get_model("gateway:anthropic/claude-sonnet-4.6")
 
     my_agent = CustomAgent()
 

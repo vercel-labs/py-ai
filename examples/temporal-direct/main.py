@@ -103,7 +103,7 @@ class LLMResult:
 @temporalio.activity.defn
 async def llm_call_activity(params: LLMParams) -> LLMResult:
     """Call the LLM, drain the stream, return the final message."""
-    model = ai.get_model("gateway:anthropic/claude-sonnet-4")
+    model = ai.get_model("gateway:anthropic/claude-sonnet-4.6")
     messages = [ai.messages.Message.model_validate(m) for m in params.messages]
     tools = [
         ai.Tool(
@@ -209,7 +209,7 @@ def _activity_tool_call(
 class WeatherWorkflow:
     @temporalio.workflow.run
     async def run(self, user_query: str) -> str:
-        model = ai.get_model("gateway:anthropic/claude-sonnet-4")
+        model = ai.get_model("gateway:anthropic/claude-sonnet-4.6")
         messages: list[ai.messages.Message] = [
             ai.system_message(
                 "Answer questions using the weather and population tools."
