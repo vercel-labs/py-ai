@@ -4,9 +4,9 @@ version = "0.1.0"
 description = "Durable agent with a custom loop — every I/O call is a Temporal activity"
 requires-python = ">=3.12"
 dependencies = [
-    "vercel-ai-sdk",
+    "ai",
     "temporalio>=1.9.0",
 ]
 
 [tool.uv.sources]
-vercel-ai-sdk = { path = "../..", editable = true }
+ai = { path = "../..", editable = true }

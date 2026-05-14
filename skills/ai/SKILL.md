@@ -6,7 +6,7 @@ description: Python `ai` module — models, agents, hooks, MCP, structured outpu
 # ai
 
 ```bash
-uv add vercel-ai-sdk
+uv add ai
 ```
 
 ```python
@@ -66,7 +66,7 @@ Serialize: `msg.model_dump()`. Restore: `ai.messages.Message.model_validate(data
 
 ## Streaming tools
 
-A regular `@ai.tool` returns the tool result directly. An async-generator tool yields intermediate values that stream to the consumer as `ai.events.PartialToolCallResult` events; an *aggregator* decides what the model sees as the final result.
+A regular `@ai.tool` returns the tool result directly. An async-generator tool yields intermediate values that stream to the consumer as `ai.events.PartialToolCallResult` events; an _aggregator_ decides what the model sees as the final result.
 
 Declare the aggregator via the return-type annotation:
 

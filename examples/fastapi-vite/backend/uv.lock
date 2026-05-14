@@ -701,13 +701,13 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "fastapi", extra = ["standard"] },
-    { name = "vercel-ai-sdk" },
+    { name = "ai" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = ">=0.128.1" },
-    { name = "vercel-ai-sdk", specifier = ">=0.0.1.dev5" },
+    { name = "ai", specifier = ">=0.0.1.dev5" },
 ]
 
 [[package]]
@@ -1317,7 +1317,7 @@ wheels = [
 ]
 
 [[package]]
-name = "vercel-ai-sdk"
+name = "ai"
 version = "0.0.1.dev5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [

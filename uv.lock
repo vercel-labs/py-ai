@@ -7,6 +7,56 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "ai"
+source = { editable = "." }
+dependencies = [
+    { name = "anthropic" },
+    { name = "httpx" },
+    { name = "mcp" },
+    { name = "modelsdotdev" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "typing-extensions" },
+    { name = "vercel" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "async-solipsism" },
+    { name = "mypy" },
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "python-dotenv" },
+    { name = "rich" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anthropic", specifier = ">=0.83.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "mcp", specifier = ">=1.18.0" },
+    { name = "modelsdotdev", git = "https://github.com/vercel-labs/modelsdotdev-python" },
+    { name = "openai", specifier = ">=2.14.0" },
+    { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "typing-extensions", specifier = ">=4.15.0" },
+    { name = "vercel", specifier = ">=0.3.8" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "async-solipsism", specifier = ">=0.9" },
+    { name = "mypy", specifier = ">=1.11" },
+    { name = "pyright", specifier = ">=1.1.408" },
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-asyncio", specifier = ">=0.24" },
+    { name = "python-dotenv", specifier = ">=1.2.1" },
+    { name = "rich", specifier = ">=14.2.0" },
+    { name = "ruff", specifier = ">=0.8" },
+]
+
+[[package]]
 name = "annotated-types"
 version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1029,57 +1079,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b9/ff/b44f61587e75cd8b78cc56324fe43ca6dbf104c94dcc9396579fdf2e0d69/vercel-0.3.8.tar.gz", hash = "sha256:047fdc66db775bb334c4a12aba3ac4f39bd56613e0216c7e05f1d57d7989d21d", size = 41814, upload-time = "2026-01-20T21:33:28.921Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/27/0d/acf76808ecc6c8408d80778cb5dee834f3f17ad85a144ec3775236c44af1/vercel-0.3.8-py3-none-any.whl", hash = "sha256:4e4cebd5e665701eee00e4917a813f00277e4fb37b82c47fb7062e0ab927a6d2", size = 53092, upload-time = "2026-01-20T21:33:26.107Z" },
-]
-
-[[package]]
-name = "vercel-ai-sdk"
-version = "0.0.1.dev10"
-source = { editable = "." }
-dependencies = [
-    { name = "anthropic" },
-    { name = "httpx" },
-    { name = "mcp" },
-    { name = "modelsdotdev" },
-    { name = "openai" },
-    { name = "pydantic" },
-    { name = "typing-extensions" },
-    { name = "vercel" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "async-solipsism" },
-    { name = "mypy" },
-    { name = "pyright" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "python-dotenv" },
-    { name = "rich" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anthropic", specifier = ">=0.83.0" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "mcp", specifier = ">=1.18.0" },
-    { name = "modelsdotdev", git = "https://github.com/vercel-labs/modelsdotdev-python" },
-    { name = "openai", specifier = ">=2.14.0" },
-    { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "typing-extensions", specifier = ">=4.15.0" },
-    { name = "vercel", specifier = ">=0.3.8" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "async-solipsism", specifier = ">=0.9" },
-    { name = "mypy", specifier = ">=1.11" },
-    { name = "pyright", specifier = ">=1.1.408" },
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "pytest-asyncio", specifier = ">=0.24" },
-    { name = "python-dotenv", specifier = ">=1.2.1" },
-    { name = "rich", specifier = ">=14.2.0" },
-    { name = "ruff", specifier = ">=0.8" },
 ]
 
 [[package]]
