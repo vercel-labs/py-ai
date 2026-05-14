@@ -20,7 +20,7 @@ from ...providers.base import Provider as Provider
 if TYPE_CHECKING:
     from .model import Model
 
-__all__ = ["GenerateFn", "ProbeFn", "Provider", "StreamFn"]
+__all__ = ["GenerateFn", "Provider", "StreamFn"]
 
 
 @runtime_checkable
@@ -57,24 +57,3 @@ class GenerateFn(Protocol):
         messages: list[types.messages.Message],
         params: Any,
     ) -> types.messages.Message: ...
-
-
-@runtime_checkable
-class ProbeFn(Protocol):
-    """Protocol for model probe functions.
-
-    A probe function verifies that *model* can reach its provider and that it
-    is available there. It returns successfully when credentials are valid
-    **and** the model exists on the remote side.
-
-    The check must be **free** — it should only hit metadata / listing
-    endpoints that don't consume tokens or credits.
-
-    Failures should raise provider errors; catch ``ProviderModelNotFoundError``
-    to distinguish missing models from other failures.
-    """
-
-    async def __call__(
-        self,
-        model: Model,
-    ) -> None: ...

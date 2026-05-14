@@ -156,7 +156,18 @@ class Provider(Generic[ClientT]):
         raise NotImplementedError
 
     async def probe(self, model: model_.Model) -> None:
-        """Raise unless a model is reachable and available on this provider."""
+        """Probe if provider is online and can serve given model.
+
+        A probe function verifies that *model* can reach its provider and that it
+        is available there. It returns successfully when credentials are valid
+        **and** the model exists on the remote side.
+
+        The check must be **free** — it should only hit metadata / listing
+        endpoints that don't consume tokens or credits.
+
+        Failures should raise provider errors; catch ``ProviderModelNotFoundError``
+        to distinguish missing models from other failures.
+        """
         raise NotImplementedError
 
     def __repr__(self) -> str:

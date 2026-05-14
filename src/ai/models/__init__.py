@@ -47,7 +47,7 @@ from .core.api import (
 )
 from .core.model import Model, get_model
 from .core.params import GenerateParams, ImageParams, VideoParams
-from .core.proto import GenerateFn, ProbeFn, StreamFn
+from .core.proto import GenerateFn, StreamFn
 
 __all__ = [
     # Core types
@@ -58,7 +58,6 @@ __all__ = [
     "GenerateRequest",
     "ImageParams",
     "Model",
-    "ProbeFn",
     "Provider",
     "Stream",
     "StreamExecutor",

@@ -16,7 +16,7 @@ from .api import (
 )
 from .model import Model, get_model
 from .params import GenerateParams, ImageParams, VideoParams
-from .proto import GenerateFn, ProbeFn, StreamFn
+from .proto import GenerateFn, StreamFn
 
 __all__ = [
     "Executor",
@@ -26,7 +26,6 @@ __all__ = [
     "GenerateRequest",
     "ImageParams",
     "Model",
-    "ProbeFn",
     "Provider",
     "Stream",
     "StreamExecutor",
