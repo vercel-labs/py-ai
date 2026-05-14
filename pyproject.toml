@@ -30,7 +30,7 @@ requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28.1",
     "mcp>=1.18.0",
-    "modelsdotdev @ git+https://github.com/vercel-labs/modelsdotdev-python",
+    "modelsdotdev==0.*",
     "pydantic>=2.12.5",
     "typing-extensions>=4.15.0",
 ]
@@ -42,9 +42,6 @@ openai = ["openai>=2.14.0"]
 [build-system]
 requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]
 build-backend = "hatchling.build"
-
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [tool.hatch.version]
 source = "uv-dynamic-versioning"
