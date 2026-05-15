@@ -58,6 +58,29 @@ def _unwrap_singleton_group(exc: BaseException) -> BaseException:
     return exc
 
 
+def _error_tool_result(
+    exc: BaseException,
+    *,
+    tool_call_id: str,
+    tool_name: str,
+) -> events_.ToolCallResult:
+    """Build an error ``ToolCallResult`` from an exception.
+
+    Unwraps singleton ``ExceptionGroup``s so the surfaced type and
+    message reflect the actual failure.
+    """
+    unwrapped = _unwrap_singleton_group(exc)
+    return tool_result(
+        types.messages.ToolResultPart(
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            result=f"{type(unwrapped).__name__}: {unwrapped}",
+            is_error=True,
+        ),
+        exception=unwrapped,
+    )
+
+
 def _process_interrupted_hooks(messages: list[types.messages.Message]) -> None:
     """Detect a bailed-out-on-hook tail and mangle ``messages`` in place
     so the next agent run resumes correctly.
@@ -559,19 +582,10 @@ class BoundToolCall:
                     result = await tool.fn(**kwargs)
                     model_input = result
             except Exception as exc:
-                # A nested runtime (e.g. a sub-agent run inside this
-                # tool) raises errors wrapped in a singleton TaskGroup
-                # ExceptionGroup — collapse it so the surfaced type and
-                # message reflect the actual failure.
-                unwrapped = _unwrap_singleton_group(exc)
-                return tool_result(
-                    types.messages.ToolResultPart(
-                        tool_call_id=call.tool_call_id,
-                        tool_name=call.tool_name,
-                        result=f"{type(unwrapped).__name__}: {unwrapped}",
-                        is_error=True,
-                    ),
-                    exception=unwrapped,
+                return _error_tool_result(
+                    exc,
+                    tool_call_id=call.tool_call_id,
+                    tool_name=call.tool_name,
                 )
             part = types.messages.ToolResultPart(
                 tool_call_id=call.tool_call_id,
@@ -614,11 +628,21 @@ class GatedToolCall:
 
     async def __call__(self) -> events_.ToolCallResult:
         tc = self._tc
+        # If the model sent invalid arguments, skip the approval hook
+        # and return the validation error directly as a tool result.
+        try:
+            hook_kwargs = tc.kwargs
+        except Exception as exc:
+            return _error_tool_result(
+                exc,
+                tool_call_id=tc.id,
+                tool_name=tc.name,
+            )
         try:
             approval = await hooks_.hook(
                 f"approve_{tc.id}",
                 payload=types.tools.ToolApproval,
-                metadata={"tool": tc.name, "kwargs": tc.kwargs},
+                metadata={"tool": tc.name, "kwargs": hook_kwargs},
             )
         except hooks_.HookPendingError as e:
             return pending_tool_result(e.hook, tool_call_id=tc.id, tool_name=tc.name)
