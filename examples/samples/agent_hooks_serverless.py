@@ -76,7 +76,9 @@ async def main() -> None:
         messages = stream.messages
 
     print("\n  Run interrupted; approval will be pre-registered for re-entry.\n")
-    assert AUDIT_LOG == ["Deleted file: /tmp/old_logs.txt"]
+    assert len(AUDIT_LOG) == 1 and "/tmp/old_logs.txt" in AUDIT_LOG[0], (
+        f"Bad audit log: {AUDIT_LOG}"
+    )
 
     # -- Second run: pre-register resolution, replay from checkpoint --
     print("--- Run 2: pre-register approval, resume from checkpoint ---")
@@ -96,7 +98,9 @@ async def main() -> None:
     assert {"/tmp/old_logs.txt"} == FILES_DELETED, (
         f"Wrong files deleted: {FILES_DELETED}"
     )
-    assert AUDIT_LOG == ["Deleted file: /tmp/old_logs.txt"]
+    assert len(AUDIT_LOG) == 1 and "/tmp/old_logs.txt" in AUDIT_LOG[0], (
+        f"Bad audit log: {AUDIT_LOG}"
+    )
 
 
 if __name__ == "__main__":

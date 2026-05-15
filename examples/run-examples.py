@@ -8,6 +8,8 @@ Usage (from repo root):
     uv run examples/run-examples.py --e2e       # also run e2e test scripts
     uv run examples/run-examples.py --all       # run everything
     uv run examples/run-examples.py --parallel  # run in parallel
+    uv run examples/run-examples.py --model gateway:openai/gpt-5.4-mini
+        # patch ai.get_model() to use the given model for every sample
 """
 
 import argparse
@@ -20,6 +22,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 SAMPLES = REPO / "examples" / "samples"
+PATCH_SCRIPT = REPO / "examples" / "run-with-patched-model.py"
 
 
 @dataclasses.dataclass
@@ -116,10 +119,10 @@ E2E_TESTS = [
 ]
 
 
-def _sample_cmd(sample: Sample) -> list[str]:
+def _sample_cmd(sample: Sample, model: str | None) -> list[str]:
     if sample.cmd is not None:
         return sample.cmd
-    return [
+    base = [
         "uv",
         "run",
         "--frozen",
@@ -128,8 +131,10 @@ def _sample_cmd(sample: Sample) -> list[str]:
         "--with-editable",
         str(REPO),
         "python",
-        str(SAMPLES / sample.name),
     ]
+    if model is not None:
+        return [*base, str(PATCH_SCRIPT), model, str(SAMPLES / sample.name)]
+    return [*base, str(SAMPLES / sample.name)]
 
 
 _env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
@@ -141,11 +146,11 @@ def _sample_env(sample: Sample) -> dict[str, str]:
     return {**_env, **sample.extra_env}
 
 
-def run_sample(sample: Sample) -> bool:
+def run_sample(sample: Sample, model: str | None) -> bool:
     print(f"{'=' * 20} {sample.name} {'=' * 20}")
     sys.stdout.flush()
     result = subprocess.run(
-        _sample_cmd(sample),
+        _sample_cmd(sample, model),
         env=_sample_env(sample),
         timeout=sample.timeout,
         input=sample.stdin,
@@ -169,10 +174,10 @@ def print_summary(results: list[tuple[str, bool]]) -> bool:
     return any_failed
 
 
-def run_sample_quiet(sample: Sample) -> tuple[str, bool, str]:
+def run_sample_quiet(sample: Sample, model: str | None) -> tuple[str, bool, str]:
     try:
         result = subprocess.run(
-            _sample_cmd(sample),
+            _sample_cmd(sample, model),
             env=_sample_env(sample),
             timeout=sample.timeout,
             capture_output=True,
@@ -196,6 +201,14 @@ def main() -> None:
     parser.add_argument(
         "--parallel", action="store_true", help="run samples in parallel"
     )
+    parser.add_argument(
+        "--model",
+        help=(
+            "run each sample through run-with-patched-model.py with this "
+            "model id (e.g. 'gateway:openai/gpt-5.4-mini'); ignored for "
+            "samples with a custom cmd"
+        ),
+    )
     args = parser.parse_args()
 
     has_category = args.text or args.image or args.video or args.broken or args.e2e
@@ -217,7 +230,7 @@ def main() -> None:
     if args.parallel:
         outputs: dict[str, str] = {}
         with concurrent.futures.ThreadPoolExecutor() as pool:
-            futures = {pool.submit(run_sample_quiet, s): s for s in samples}
+            futures = {pool.submit(run_sample_quiet, s, args.model): s for s in samples}
             for future in concurrent.futures.as_completed(futures):
                 name, ok, output = future.result()
                 status = "PASS" if ok else "FAIL"
@@ -240,7 +253,7 @@ def main() -> None:
     else:
         for sample in samples:
             try:
-                ok = run_sample(sample)
+                ok = run_sample(sample, args.model)
             except subprocess.TimeoutExpired:
                 print(f"  TIMEOUT after {sample.timeout:g}s\n")
                 ok = False
