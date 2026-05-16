@@ -10,7 +10,8 @@ import httpx
 
 from ... import errors as ai_errors
 from .. import base
-from . import _sdk, errors, protocol
+from . import _sdk, errors
+from . import protocol as protocol_module
 from . import tools as tools_module
 
 if TYPE_CHECKING:
@@ -55,6 +56,7 @@ class OpenAICompatibleProvider(base.Provider[OpenAISDKClient]):
         headers: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         client: OpenAIClient | None = None,
+        protocol: base.ProviderProtocol[Any] | None = None,
     ) -> None:
         openai_sdk = None
         if client is not None and not isinstance(client, httpx.AsyncClient):
@@ -75,8 +77,8 @@ class OpenAICompatibleProvider(base.Provider[OpenAISDKClient]):
 
         super().__init__(
             name=name,
-            adapter="openai",
             base_url=default_base_url,
+            protocol=protocol or protocol_module.default_protocol(name),
             api_key=api_key,
             api_key_env=api_key_env,
             base_url_env=base_url_env,
@@ -127,16 +129,16 @@ class OpenAICompatibleProvider(base.Provider[OpenAISDKClient]):
         tools: Sequence[tools_.Tool] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         params: Any = None,
+        protocol: base.ProviderProtocol[Any] | None = None,
     ) -> AsyncGenerator[events.Event]:
-        """Stream via the OpenAI chat completions protocol."""
-        return protocol.stream(
-            self.sdk_client,
+        """Stream via this provider's configured OpenAI-compatible protocol."""
+        return super().stream(
             model,
             messages,
             tools=tools,
             output_type=output_type,
             params=params,
-            provider=self.name,
+            protocol=protocol,
         )
 
     @classmethod
@@ -150,6 +152,7 @@ class OpenAICompatibleProvider(base.Provider[OpenAISDKClient]):
         headers: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         client: OpenAIClient | None = None,
+        protocol: base.ProviderProtocol[Any] | None = None,
     ) -> base.Provider[OpenAISDKClient]:
         resolved_base_url = base_url or base.provider_base_url(
             provider,
@@ -172,16 +175,16 @@ class OpenAICompatibleProvider(base.Provider[OpenAISDKClient]):
             headers=headers,
             env=env,
             client=client,
+            protocol=protocol,
         )
 
     @property
     def tools(self) -> ModuleType:
         """The provider's built-in tool factories.
 
-        Convenience accessor: ``openai.tools.web_search(...)``. The
-        chat-completions protocol currently raises if a built-in tool is
-        passed; route via the AI Gateway provider until a Responses
-        protocol ships.
+        Convenience accessor: ``openai.tools.web_search(...)``. These tools
+        require a protocol that supports OpenAI provider-executed tools, such
+        as :class:`OpenAIResponsesProtocol`.
         """
         return tools_module
 

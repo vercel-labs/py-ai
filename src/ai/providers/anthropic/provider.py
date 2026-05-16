@@ -10,7 +10,8 @@ import httpx
 
 from ... import errors as ai_errors
 from .. import base
-from . import _sdk, errors, protocol
+from . import _sdk, errors
+from . import protocol as protocol_module
 from . import tools as tools_module
 
 if TYPE_CHECKING:
@@ -53,6 +54,7 @@ class AnthropicCompatibleProvider(base.Provider[AnthropicSDKClient]):
         headers: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         client: AnthropicClient | None = None,
+        protocol: base.ProviderProtocol[Any] | None = None,
     ) -> None:
         anthropic_sdk = None
         if client is not None and not isinstance(client, httpx.AsyncClient):
@@ -76,8 +78,8 @@ class AnthropicCompatibleProvider(base.Provider[AnthropicSDKClient]):
 
         super().__init__(
             name=name,
-            adapter="anthropic",
             base_url=default_base_url,
+            protocol=protocol or protocol_module.AnthropicMessagesProtocol(),
             api_key=api_key,
             api_key_env=api_key_env,
             base_url_env=base_url_env,
@@ -132,16 +134,16 @@ class AnthropicCompatibleProvider(base.Provider[AnthropicSDKClient]):
         tools: Sequence[tools_.Tool] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         params: Any = None,
+        protocol: base.ProviderProtocol[Any] | None = None,
     ) -> AsyncGenerator[events.Event]:
         """Stream via the Anthropic messages protocol."""
-        return protocol.stream(
-            self.sdk_client,
+        return super().stream(
             model,
             messages,
             tools=tools,
             output_type=output_type,
             params=params,
-            provider=self.name,
+            protocol=protocol,
         )
 
     @classmethod
@@ -155,6 +157,7 @@ class AnthropicCompatibleProvider(base.Provider[AnthropicSDKClient]):
         headers: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         client: AnthropicClient | None = None,
+        protocol: base.ProviderProtocol[Any] | None = None,
     ) -> base.Provider[AnthropicSDKClient]:
         resolved_base_url = base_url or base.provider_base_url(
             provider,
@@ -177,6 +180,7 @@ class AnthropicCompatibleProvider(base.Provider[AnthropicSDKClient]):
             headers=headers,
             env=env,
             client=client,
+            protocol=protocol,
         )
 
     @property

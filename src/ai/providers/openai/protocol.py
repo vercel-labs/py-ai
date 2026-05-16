@@ -1,20 +1,24 @@
-"""OpenAI protocol — chat completions API.
+"""OpenAI-compatible wire protocols.
 
 Message/tool conversion and streaming via the official ``openai`` SDK.
-OpenAI-compatible providers own the SDK client used by this protocol.
+OpenAI-compatible providers own the SDK client used by these protocols.
 """
 
 from __future__ import annotations
 
 import base64
+import json
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 import pydantic
 
+from ... import errors as ai_errors
 from ... import types
 from ...models import core
+from .. import base
 from . import _sdk, errors
+from . import tools as openai_tools
 
 if TYPE_CHECKING:
     import openai
@@ -376,3 +380,1012 @@ async def stream(
             provider=provider,
             model_id=model.id,
         ) from exc
+
+
+class OpenAIChatCompletionsProtocol(base.ProviderProtocol[Any]):
+    """OpenAI Chat Completions protocol."""
+
+    def stream(
+        self,
+        client: openai.AsyncOpenAI,
+        model: core.model.Model,
+        messages: list[types.messages.Message],
+        *,
+        tools: Sequence[types.tools.Tool] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
+        params: Any = None,
+        provider: str,
+    ) -> AsyncGenerator[types.events.Event]:
+        return stream(
+            client,
+            model,
+            messages,
+            tools=tools,
+            output_type=output_type,
+            params=params,
+            provider=provider,
+        )
+
+
+_OPENAI_METADATA_KEY = "openai"
+_RESPONSES_PROTECTED_PARAMS = frozenset({"model", "input", "stream"})
+_BUILTIN_OUTPUT_TYPES = frozenset(
+    {
+        "web_search_call",
+        "file_search_call",
+        "code_interpreter_call",
+        "image_generation_call",
+        "mcp_call",
+        "mcp_approval_request",
+        "local_shell_call",
+        "shell_call",
+        "shell_call_output",
+        "apply_patch_call",
+        "tool_search_call",
+        "tool_search_output",
+        "computer_call",
+    }
+)
+
+
+def _coerce_responses_params(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    raise TypeError("openai responses stream params must be a dict")
+
+
+def _json_dumps(value: Any) -> str:
+    return json.dumps(value, separators=(",", ":"), default=str)
+
+
+def _model_dump(value: pydantic.BaseModel) -> dict[str, Any]:
+    return value.model_dump(exclude_none=True)
+
+
+def _openai_metadata(part: Any) -> dict[str, Any]:
+    metadata = getattr(part, "provider_metadata", None)
+    if not isinstance(metadata, Mapping):
+        return {}
+    openai_metadata = metadata.get(_OPENAI_METADATA_KEY)
+    if not isinstance(openai_metadata, Mapping):
+        return {}
+    return dict(openai_metadata)
+
+
+def _metadata_item_id(metadata: Mapping[str, Any]) -> str | None:
+    value = metadata.get("item_id") or metadata.get("itemId")
+    return value if isinstance(value, str) else None
+
+
+def _provider_metadata_for_item(
+    item: Mapping[str, Any],
+    **extra: Any,
+) -> dict[str, Any]:
+    item_id = item.get("id")
+    data = {
+        "raw_item": dict(item),
+        **({"item_id": item_id} if isinstance(item_id, str) else {}),
+        **{k: v for k, v in extra.items() if v is not None},
+    }
+    return {_OPENAI_METADATA_KEY: data}
+
+
+def _provider_metadata_for_response(response: Mapping[str, Any]) -> dict[str, Any]:
+    response_id = response.get("id")
+    model = response.get("model")
+    status = response.get("status")
+    data = {
+        **({"response_id": response_id} if isinstance(response_id, str) else {}),
+        **({"model": model} if isinstance(model, str) else {}),
+        **({"status": status} if isinstance(status, str) else {}),
+    }
+    return {_OPENAI_METADATA_KEY: data} if data else {}
+
+
+def _maybe_item_reference(
+    part: Any,
+    *,
+    use_item_references: bool,
+) -> dict[str, Any] | None:
+    if not use_item_references:
+        return None
+    item_id = _metadata_item_id(_openai_metadata(part))
+    if item_id is None:
+        return None
+    return {"type": "item_reference", "id": item_id}
+
+
+def _raw_item_from_metadata(part: Any) -> dict[str, Any] | None:
+    raw_item = _openai_metadata(part).get("raw_item")
+    if isinstance(raw_item, Mapping):
+        return dict(raw_item)
+    return None
+
+
+def _stringify_tool_result(result: Any) -> str:
+    if result is None:
+        return ""
+    if isinstance(result, str):
+        return result
+    return _json_dumps(result)
+
+
+async def _file_part_to_responses(
+    part: types.messages.FilePart,
+) -> dict[str, Any]:
+    media_type = "image/jpeg" if part.media_type == "image/*" else part.media_type
+    data = part.data
+
+    if media_type.startswith("image/"):
+        return {
+            "type": "input_image",
+            "image_url": types.media.data_to_data_url(data, media_type),
+        }
+
+    if media_type == "application/pdf":
+        if isinstance(data, str) and types.media.is_downloadable_url(data):
+            return {"type": "input_file", "file_url": data}
+        return {
+            "type": "input_file",
+            "filename": part.filename or "document.pdf",
+            "file_data": types.media.data_to_data_url(data, media_type),
+        }
+
+    if media_type.startswith("text/"):
+        if isinstance(data, bytes):
+            text_content = data.decode("utf-8")
+        elif types.media.is_url(data):
+            text_content = data
+        else:
+            text_content = base64.b64decode(data).decode("utf-8")
+        return {"type": "input_text", "text": text_content}
+
+    raise ValueError(f"Unsupported media type for OpenAI Responses: {media_type}")
+
+
+async def _messages_to_responses(
+    messages: list[types.messages.Message],
+    *,
+    use_item_references: bool,
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+
+    for msg in messages:
+        match msg.role:
+            case "system":
+                text = "".join(
+                    p.text for p in msg.parts if isinstance(p, types.messages.TextPart)
+                )
+                if text:
+                    result.append({"role": "system", "content": text})
+
+            case "user":
+                content: list[dict[str, Any]] = []
+                for part in msg.parts:
+                    match part:
+                        case types.messages.TextPart(text=text):
+                            content.append({"type": "input_text", "text": text})
+                        case types.messages.FilePart():
+                            content.append(await _file_part_to_responses(part))
+                result.append({"role": "user", "content": content})
+
+            case "assistant":
+                assistant_content: list[dict[str, Any]] = []
+
+                for part in msg.parts:
+                    if item_reference := _maybe_item_reference(
+                        part,
+                        use_item_references=use_item_references,
+                    ):
+                        _flush_assistant_content(result, assistant_content)
+                        result.append(item_reference)
+                        continue
+
+                    if raw_item := _raw_item_from_metadata(part):
+                        _flush_assistant_content(result, assistant_content)
+                        result.append(raw_item)
+                        continue
+
+                    match part:
+                        case types.messages.TextPart(text=text):
+                            assistant_content.append(
+                                {"type": "output_text", "text": text}
+                            )
+                        case types.messages.ReasoningPart(text=text):
+                            _flush_assistant_content(result, assistant_content)
+                            metadata = _openai_metadata(part)
+                            encrypted_content = metadata.get(
+                                "reasoning_encrypted_content"
+                            ) or metadata.get("reasoningEncryptedContent")
+                            if encrypted_content is not None:
+                                result.append(
+                                    {
+                                        "type": "reasoning",
+                                        "summary": [
+                                            {"type": "summary_text", "text": text}
+                                        ],
+                                        "encrypted_content": encrypted_content,
+                                    }
+                                )
+                        case types.messages.ToolCallPart():
+                            _flush_assistant_content(result, assistant_content)
+                            result.append(
+                                {
+                                    "type": "function_call",
+                                    "call_id": part.tool_call_id,
+                                    "name": part.tool_name,
+                                    "arguments": part.tool_args,
+                                }
+                            )
+                        case (
+                            types.messages.BuiltinToolCallPart()
+                            | types.messages.BuiltinToolReturnPart()
+                        ):
+                            _flush_assistant_content(result, assistant_content)
+
+                _flush_assistant_content(result, assistant_content)
+
+            case "tool":
+                for part in msg.parts:
+                    if isinstance(part, types.messages.ToolResultPart):
+                        result.append(
+                            {
+                                "type": "function_call_output",
+                                "call_id": part.tool_call_id,
+                                "output": _stringify_tool_result(
+                                    part.get_model_input()
+                                ),
+                            }
+                        )
+
+            case "internal":
+                continue
+
+    return result
+
+
+def _flush_assistant_content(
+    result: list[dict[str, Any]],
+    assistant_content: list[dict[str, Any]],
+) -> None:
+    if not assistant_content:
+        return
+    result.append({"role": "assistant", "content": list(assistant_content)})
+    assistant_content.clear()
+
+
+def _tools_to_responses(
+    tools: Sequence[types.tools.Tool],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+
+    for tool in tools:
+        if tool.kind == "function":
+            args = tool.args
+            if not isinstance(args, types.tools.FunctionToolArgs):
+                raise TypeError(f"function tool {tool.name!r} has invalid args")
+            result.append(
+                {
+                    "type": "function",
+                    "name": tool.name,
+                    "description": args.description or "",
+                    "parameters": args.params,
+                }
+            )
+            continue
+
+        args = tool.args
+        tool_id = getattr(type(args), "openai_id", None)
+        if not isinstance(args, openai_tools.OpenAIProviderArgs):
+            raise TypeError(f"provider tool {tool.name!r} is not an OpenAI tool")
+
+        match tool_id:
+            case "openai.web_search":
+                result.append({"type": "web_search", **_model_dump(args)})
+            case "openai.web_search_preview":
+                result.append({"type": "web_search_preview", **_model_dump(args)})
+            case "openai.file_search":
+                data = _model_dump(args)
+                ranking = data.pop("ranking", None)
+                if ranking is not None:
+                    data["ranking_options"] = ranking
+                result.append({"type": "file_search", **data})
+            case "openai.code_interpreter":
+                data = _model_dump(args)
+                if "container" not in data:
+                    data["container"] = {"type": "auto"}
+                result.append({"type": "code_interpreter", **data})
+            case "openai.image_generation":
+                result.append({"type": "image_generation", **_model_dump(args)})
+            case "openai.local_shell":
+                result.append({"type": "local_shell"})
+            case "openai.shell":
+                result.append({"type": "shell", **_model_dump(args)})
+            case "openai.apply_patch":
+                result.append({"type": "apply_patch"})
+            case "openai.mcp":
+                result.append({"type": "mcp", **_model_dump(args)})
+            case "openai.tool_search":
+                result.append({"type": "tool_search", **_model_dump(args)})
+            case _:
+                raise NotImplementedError(f"unsupported OpenAI provider tool {tool_id}")
+
+    return result
+
+
+def _event_to_dict(event: Any) -> dict[str, Any]:
+    if isinstance(event, Mapping):
+        return dict(event)
+    if hasattr(event, "model_dump"):
+        dumped = event.model_dump(exclude_none=True, mode="json")
+        return dict(dumped) if isinstance(dumped, Mapping) else {}
+    if hasattr(event, "to_dict"):
+        dumped = event.to_dict()
+        return dict(dumped) if isinstance(dumped, Mapping) else {}
+    return {
+        key: value
+        for key in dir(event)
+        if not key.startswith("_") and not callable(value := getattr(event, key, None))
+    }
+
+
+def _usage_from_response(response: Mapping[str, Any]) -> types.usage.Usage | None:
+    usage = response.get("usage")
+    if not isinstance(usage, Mapping):
+        return None
+
+    input_details = usage.get("input_tokens_details")
+    output_details = usage.get("output_tokens_details")
+    if not isinstance(input_details, Mapping):
+        input_details = {}
+    if not isinstance(output_details, Mapping):
+        output_details = {}
+
+    return types.usage.Usage(
+        input_tokens=int(usage.get("input_tokens") or 0),
+        output_tokens=int(usage.get("output_tokens") or 0),
+        reasoning_tokens=output_details.get("reasoning_tokens"),
+        cache_read_tokens=input_details.get("cached_tokens"),
+        raw=dict(usage),
+    )
+
+
+def _image_media_type(
+    params: Mapping[str, Any],
+    tools: Sequence[types.tools.Tool],
+) -> str:
+    for tool in tools:
+        if isinstance(tool.args, openai_tools.ImageGenerationArgs):
+            fmt = str(tool.args.output_format or "png")
+            return "image/jpeg" if fmt == "jpeg" else f"image/{fmt}"
+    text = params.get("text")
+    if isinstance(text, Mapping):
+        text_fmt = text.get("output_format")
+        if isinstance(text_fmt, str):
+            return "image/jpeg" if text_fmt == "jpeg" else f"image/{text_fmt}"
+    return "image/png"
+
+
+def _state_key(item: Mapping[str, Any], data: Mapping[str, Any]) -> str:
+    value = item.get("id") or item.get("call_id") or data.get("item_id")
+    if isinstance(value, str):
+        return value
+    output_index = data.get("output_index")
+    return str(output_index) if output_index is not None else ""
+
+
+def _builtin_tool_name(item: Mapping[str, Any]) -> str:
+    item_type = item.get("type")
+    match item_type:
+        case "web_search_call":
+            return "web_search"
+        case "file_search_call":
+            return "file_search"
+        case "code_interpreter_call":
+            return "code_interpreter"
+        case "image_generation_call":
+            return "image_generation"
+        case "mcp_call" | "mcp_approval_request":
+            name = item.get("name")
+            return f"mcp.{name}" if isinstance(name, str) else "mcp"
+        case "local_shell_call":
+            return "local_shell"
+        case "shell_call" | "shell_call_output":
+            return "shell"
+        case "apply_patch_call":
+            return "apply_patch"
+        case "tool_search_call" | "tool_search_output":
+            return "tool_search"
+        case "computer_call":
+            return "computer_use"
+        case _:
+            return str(item_type or "")
+
+
+def _builtin_tool_call_id(item: Mapping[str, Any]) -> str:
+    value = item.get("call_id") or item.get("id")
+    return value if isinstance(value, str) else ""
+
+
+def _builtin_tool_args(item: Mapping[str, Any]) -> str:
+    item_type = item.get("type")
+    match item_type:
+        case "code_interpreter_call":
+            return _json_dumps(
+                {"code": item.get("code"), "container_id": item.get("container_id")}
+            )
+        case "mcp_call" | "mcp_approval_request":
+            arguments = item.get("arguments")
+            return arguments if isinstance(arguments, str) else _json_dumps(arguments)
+        case "local_shell_call" | "shell_call":
+            return _json_dumps({"action": item.get("action")})
+        case "apply_patch_call":
+            return _json_dumps(
+                {"call_id": item.get("call_id"), "operation": item.get("operation")}
+            )
+        case "tool_search_call":
+            return _json_dumps(
+                {"arguments": item.get("arguments"), "call_id": item.get("call_id")}
+            )
+        case _:
+            return "{}"
+
+
+def _builtin_tool_result(item: Mapping[str, Any]) -> Any:
+    item_type = item.get("type")
+    match item_type:
+        case "web_search_call":
+            return {"action": item.get("action")}
+        case "file_search_call":
+            return {"queries": item.get("queries"), "results": item.get("results")}
+        case "code_interpreter_call":
+            return {
+                "container_id": item.get("container_id"),
+                "outputs": item.get("outputs"),
+            }
+        case "image_generation_call":
+            return {"result": item.get("result")}
+        case "mcp_call":
+            return {
+                "server_label": item.get("server_label"),
+                "name": item.get("name"),
+                "arguments": item.get("arguments"),
+                "output": item.get("output"),
+                "error": item.get("error"),
+            }
+        case "mcp_approval_request":
+            return {
+                "server_label": item.get("server_label"),
+                "name": item.get("name"),
+                "arguments": item.get("arguments"),
+                "approval_request_id": item.get("approval_request_id")
+                or item.get("id"),
+            }
+        case "shell_call_output":
+            return {"output": item.get("output")}
+        case "tool_search_output":
+            return {"tools": item.get("tools")}
+        case "computer_call":
+            return {"status": item.get("status") or "completed"}
+        case _:
+            return None
+
+
+def _index_key(data: Mapping[str, Any]) -> str | None:
+    output_index = data.get("output_index")
+    return str(output_index) if output_index is not None else None
+
+
+def _lookup_state(
+    states_by_item: dict[str, dict[str, Any]],
+    states_by_index: dict[str, dict[str, Any]],
+    data: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    item_id = data.get("item_id")
+    if isinstance(item_id, str) and item_id in states_by_item:
+        return states_by_item[item_id]
+    index = _index_key(data)
+    if index is not None:
+        return states_by_index.get(index)
+    return None
+
+
+async def _stream_responses(
+    sdk_client: openai.AsyncOpenAI,
+    model: core.model.Model,
+    messages: list[types.messages.Message],
+    *,
+    tools: Sequence[types.tools.Tool] | None = None,
+    output_type: type[pydantic.BaseModel] | None = None,
+    params: Any = None,
+    provider: str,
+) -> AsyncGenerator[types.events.Event]:
+    openai_sdk = _sdk.import_sdk(provider=provider)
+    stream_params = _coerce_responses_params(params)
+    protected = sorted(_RESPONSES_PROTECTED_PARAMS & stream_params.keys())
+    if protected:
+        raise ValueError(
+            "openai responses params cannot override protocol-owned fields: "
+            + ", ".join(protected)
+        )
+
+    request_tools = list(tools or ())
+    use_item_references = stream_params.get("store") is not False
+    response_input = await _messages_to_responses(
+        messages,
+        use_item_references=use_item_references,
+    )
+    response_tools = _tools_to_responses(request_tools) if request_tools else None
+
+    api_kwargs: dict[str, Any] = dict(stream_params)
+    api_kwargs.update({"model": model.id, "input": response_input, "stream": True})
+    if response_tools:
+        api_kwargs["tools"] = response_tools
+
+    if output_type is not None:
+        openai_pydantic = _sdk.import_pydantic(provider=provider)
+        text_config = dict(api_kwargs.get("text") or {})
+        text_config["format"] = {
+            "type": "json_schema",
+            "name": output_type.__name__,
+            "schema": openai_pydantic.to_strict_json_schema(output_type),
+            "strict": True,
+        }
+        api_kwargs["text"] = text_config
+
+    image_media_type = _image_media_type(stream_params, request_tools)
+    text_blocks: set[str] = set()
+    reasoning_blocks: set[str] = set()
+    reasoning_delta_blocks: set[str] = set()
+    reasoning_ended_blocks: set[str] = set()
+    function_states_by_item: dict[str, dict[str, Any]] = {}
+    function_states_by_index: dict[str, dict[str, Any]] = {}
+    builtin_states_by_item: dict[str, dict[str, Any]] = {}
+    builtin_states_by_index: dict[str, dict[str, Any]] = {}
+    usage: types.usage.Usage | None = None
+    response_metadata: dict[str, Any] | None = None
+
+    try:
+        sdk_stream = await sdk_client.responses.create(**api_kwargs)
+        yield types.events.StreamStart()
+
+        async for sdk_event in sdk_stream:
+            data = _event_to_dict(sdk_event)
+            event_type = data.get("type")
+
+            if event_type == "response.created":
+                response = data.get("response")
+                if isinstance(response, Mapping):
+                    response_metadata = _provider_metadata_for_response(response)
+                continue
+
+            if event_type in {"response.completed", "response.incomplete"}:
+                response = data.get("response")
+                if isinstance(response, Mapping):
+                    usage = _usage_from_response(response) or usage
+                    response_metadata = _provider_metadata_for_response(response)
+                continue
+
+            if event_type == "response.failed":
+                response = data.get("response")
+                if isinstance(response, Mapping):
+                    usage = _usage_from_response(response) or usage
+                    response_metadata = _provider_metadata_for_response(response)
+                continue
+
+            if event_type == "error":
+                error = data.get("error")
+                if isinstance(error, Mapping):
+                    message = error.get("message") or error.get("code") or error
+                else:
+                    message = error or data
+                raise ai_errors.ProviderResponseError(str(message), provider=provider)
+
+            if event_type == "response.output_item.added":
+                item = data.get("item")
+                if not isinstance(item, Mapping):
+                    continue
+                item = dict(item)
+                item_type = item.get("type")
+                state_key = _state_key(item, data)
+                index = _index_key(data)
+
+                if item_type == "message":
+                    block_id = str(item.get("id") or state_key or "text")
+                    text_blocks.add(block_id)
+                    yield types.events.TextStart(
+                        block_id=block_id,
+                        provider_metadata=_provider_metadata_for_item(item),
+                    )
+                    continue
+
+                if item_type == "reasoning":
+                    block_id = f"{item.get('id') or state_key}:0"
+                    reasoning_blocks.add(block_id)
+                    yield types.events.ReasoningStart(
+                        block_id=block_id,
+                        provider_metadata=_provider_metadata_for_item(
+                            item,
+                            reasoning_encrypted_content=item.get("encrypted_content"),
+                        ),
+                    )
+                    continue
+
+                if item_type in {"function_call", "custom_tool_call"}:
+                    tool_call_id = str(item.get("call_id") or state_key)
+                    tool_name = str(item.get("name") or "")
+                    new_state: dict[str, Any] = {
+                        "tool_call_id": tool_call_id,
+                        "tool_name": tool_name,
+                        "arguments": "",
+                        "delta_emitted": False,
+                    }
+                    if state_key:
+                        function_states_by_item[state_key] = new_state
+                    if index is not None:
+                        function_states_by_index[index] = new_state
+                    yield types.events.ToolStart(
+                        tool_call_id=tool_call_id,
+                        tool_name=tool_name,
+                        provider_metadata=_provider_metadata_for_item(item),
+                    )
+                    arguments = item.get("arguments") or item.get("input")
+                    if isinstance(arguments, str) and arguments:
+                        new_state["arguments"] = arguments
+                        new_state["delta_emitted"] = True
+                        yield types.events.ToolDelta(
+                            tool_call_id=tool_call_id,
+                            chunk=arguments,
+                        )
+                    continue
+
+                if item_type in _BUILTIN_OUTPUT_TYPES:
+                    tool_call_id = _builtin_tool_call_id(item)
+                    tool_name = _builtin_tool_name(item)
+                    new_state = {
+                        "tool_call_id": tool_call_id,
+                        "tool_name": tool_name,
+                        "arguments": "",
+                        "delta_emitted": False,
+                    }
+                    if state_key:
+                        builtin_states_by_item[state_key] = new_state
+                    if index is not None:
+                        builtin_states_by_index[index] = new_state
+                    yield types.events.BuiltinToolStart(
+                        tool_call_id=tool_call_id,
+                        tool_name=tool_name,
+                        provider_metadata=_provider_metadata_for_item(item),
+                    )
+                    continue
+
+            if event_type == "response.output_text.delta":
+                block_id = str(data.get("item_id") or "text")
+                if block_id not in text_blocks:
+                    text_blocks.add(block_id)
+                    yield types.events.TextStart(block_id=block_id)
+                delta = data.get("delta")
+                if isinstance(delta, str) and delta:
+                    yield types.events.TextDelta(block_id=block_id, chunk=delta)
+                continue
+
+            if event_type == "response.output_text.done":
+                continue
+
+            if event_type in {
+                "response.function_call_arguments.delta",
+                "response.custom_tool_call_input.delta",
+            }:
+                function_state = _lookup_state(
+                    function_states_by_item,
+                    function_states_by_index,
+                    data,
+                )
+                delta = data.get("delta")
+                if function_state is not None and isinstance(delta, str) and delta:
+                    function_state["arguments"] += delta
+                    function_state["delta_emitted"] = True
+                    yield types.events.ToolDelta(
+                        tool_call_id=function_state["tool_call_id"],
+                        chunk=delta,
+                    )
+                continue
+
+            if event_type in {
+                "response.function_call_arguments.done",
+                "response.custom_tool_call_input.done",
+            }:
+                function_state = _lookup_state(
+                    function_states_by_item,
+                    function_states_by_index,
+                    data,
+                )
+                arguments = data.get("arguments") or data.get("input")
+                if (
+                    function_state is not None
+                    and isinstance(arguments, str)
+                    and arguments
+                    and not function_state["delta_emitted"]
+                ):
+                    function_state["arguments"] = arguments
+                    function_state["delta_emitted"] = True
+                    yield types.events.ToolDelta(
+                        tool_call_id=function_state["tool_call_id"],
+                        chunk=arguments,
+                    )
+                continue
+
+            if event_type == "response.reasoning_summary_part.added":
+                block_id = f"{data.get('item_id')}:{data.get('summary_index', 0)}"
+                if block_id not in reasoning_blocks:
+                    reasoning_blocks.add(block_id)
+                    yield types.events.ReasoningStart(block_id=block_id)
+                continue
+
+            if event_type in {
+                "response.reasoning_summary_text.delta",
+                "response.reasoning_text.delta",
+            }:
+                block_id = f"{data.get('item_id')}:{data.get('summary_index', 0)}"
+                if block_id not in reasoning_blocks:
+                    reasoning_blocks.add(block_id)
+                    yield types.events.ReasoningStart(block_id=block_id)
+                delta = data.get("delta")
+                if isinstance(delta, str) and delta:
+                    reasoning_delta_blocks.add(block_id)
+                    yield types.events.ReasoningDelta(block_id=block_id, chunk=delta)
+                continue
+
+            if event_type == "response.reasoning_summary_part.done":
+                block_id = f"{data.get('item_id')}:{data.get('summary_index', 0)}"
+                reasoning_blocks.discard(block_id)
+                reasoning_ended_blocks.add(block_id)
+                yield types.events.ReasoningEnd(block_id=block_id)
+                continue
+
+            if event_type == "response.image_generation_call.partial_image":
+                item_id = str(data.get("item_id") or "")
+                partial = data.get("partial_image_b64")
+                if isinstance(partial, str) and partial:
+                    yield types.events.FileEvent(
+                        block_id=f"{item_id}:partial",
+                        media_type=image_media_type,
+                        data=partial,
+                    )
+                continue
+
+            if event_type == "response.code_interpreter_call_code.delta":
+                builtin_state = _lookup_state(
+                    builtin_states_by_item,
+                    builtin_states_by_index,
+                    data,
+                )
+                delta = data.get("delta")
+                if builtin_state is not None and isinstance(delta, str) and delta:
+                    builtin_state["arguments"] += delta
+                continue
+
+            if event_type == "response.output_item.done":
+                item = data.get("item")
+                if not isinstance(item, Mapping):
+                    continue
+                item = dict(item)
+                item_type = item.get("type")
+                state_key = _state_key(item, data)
+                index = _index_key(data)
+
+                if item_type == "message":
+                    block_id = str(item.get("id") or state_key or "text")
+                    if block_id in text_blocks:
+                        text_blocks.remove(block_id)
+                        yield types.events.TextEnd(
+                            block_id=block_id,
+                            provider_metadata=_provider_metadata_for_item(item),
+                        )
+                    continue
+
+                if item_type == "reasoning":
+                    item_id = str(item.get("id") or state_key)
+                    summaries = item.get("summary")
+                    if isinstance(summaries, list) and summaries:
+                        for idx, summary in enumerate(summaries):
+                            block_id = f"{item_id}:{idx}"
+                            if block_id in reasoning_ended_blocks:
+                                continue
+                            if block_id not in reasoning_blocks:
+                                reasoning_blocks.add(block_id)
+                                yield types.events.ReasoningStart(
+                                    block_id=block_id,
+                                    provider_metadata=_provider_metadata_for_item(
+                                        item,
+                                        reasoning_encrypted_content=item.get(
+                                            "encrypted_content"
+                                        ),
+                                    ),
+                                )
+                            if block_id not in reasoning_delta_blocks and isinstance(
+                                summary, Mapping
+                            ):
+                                text = summary.get("text")
+                                if isinstance(text, str) and text:
+                                    yield types.events.ReasoningDelta(
+                                        block_id=block_id,
+                                        chunk=text,
+                                    )
+                            reasoning_blocks.discard(block_id)
+                            reasoning_ended_blocks.add(block_id)
+                            yield types.events.ReasoningEnd(
+                                block_id=block_id,
+                                provider_metadata=_provider_metadata_for_item(
+                                    item,
+                                    reasoning_encrypted_content=item.get(
+                                        "encrypted_content"
+                                    ),
+                                ),
+                            )
+                    else:
+                        for block_id in list(reasoning_blocks):
+                            if block_id.startswith(f"{item_id}:"):
+                                reasoning_blocks.remove(block_id)
+                                yield types.events.ReasoningEnd(
+                                    block_id=block_id,
+                                    provider_metadata=_provider_metadata_for_item(
+                                        item,
+                                        reasoning_encrypted_content=item.get(
+                                            "encrypted_content"
+                                        ),
+                                    ),
+                                )
+                    continue
+
+                if item_type in {"function_call", "custom_tool_call"}:
+                    function_state = (
+                        function_states_by_item.pop(state_key, None)
+                        if state_key
+                        else None
+                    )
+                    if function_state is None and index is not None:
+                        function_state = function_states_by_index.get(index)
+                    if index is not None:
+                        function_states_by_index.pop(index, None)
+                    tool_call_id = str(item.get("call_id") or state_key)
+                    tool_name = str(item.get("name") or "")
+                    arguments = item.get("arguments") or item.get("input")
+                    if function_state is None:
+                        yield types.events.ToolStart(
+                            tool_call_id=tool_call_id,
+                            tool_name=tool_name,
+                            provider_metadata=_provider_metadata_for_item(item),
+                        )
+                        if isinstance(arguments, str) and arguments:
+                            yield types.events.ToolDelta(
+                                tool_call_id=tool_call_id,
+                                chunk=arguments,
+                            )
+                    elif (
+                        isinstance(arguments, str)
+                        and arguments
+                        and not function_state["delta_emitted"]
+                    ):
+                        yield types.events.ToolDelta(
+                            tool_call_id=function_state["tool_call_id"],
+                            chunk=arguments,
+                        )
+                        tool_call_id = function_state["tool_call_id"]
+                    else:
+                        tool_call_id = function_state["tool_call_id"]
+                    yield types.events.ToolEnd(
+                        tool_call_id=tool_call_id,
+                        tool_call=types.messages.DUMMY_TOOL_CALL,
+                        provider_metadata=_provider_metadata_for_item(item),
+                    )
+                    continue
+
+                if item_type in _BUILTIN_OUTPUT_TYPES:
+                    builtin_state = (
+                        builtin_states_by_item.pop(state_key, None)
+                        if state_key
+                        else None
+                    )
+                    if builtin_state is None and index is not None:
+                        builtin_state = builtin_states_by_index.get(index)
+                    if index is not None:
+                        builtin_states_by_index.pop(index, None)
+                    tool_call_id = _builtin_tool_call_id(item)
+                    tool_name = _builtin_tool_name(item)
+                    arguments = _builtin_tool_args(item)
+                    if builtin_state is None:
+                        yield types.events.BuiltinToolStart(
+                            tool_call_id=tool_call_id,
+                            tool_name=tool_name,
+                            provider_metadata=_provider_metadata_for_item(item),
+                        )
+                    else:
+                        tool_call_id = builtin_state["tool_call_id"]
+                        tool_name = builtin_state["tool_name"]
+                    if arguments and (
+                        builtin_state is None or not builtin_state["delta_emitted"]
+                    ):
+                        yield types.events.BuiltinToolDelta(
+                            tool_call_id=tool_call_id,
+                            chunk=arguments,
+                        )
+                    yield types.events.BuiltinToolEnd(
+                        tool_call_id=tool_call_id,
+                        tool_call=types.messages.BuiltinToolCallPart(
+                            tool_call_id=tool_call_id,
+                            tool_name=tool_name,
+                            tool_args=arguments,
+                            provider_metadata=_provider_metadata_for_item(item),
+                        ),
+                        provider_metadata=_provider_metadata_for_item(item),
+                    )
+
+                    if item_type == "image_generation_call":
+                        result = item.get("result")
+                        if isinstance(result, str) and result:
+                            yield types.events.FileEvent(
+                                block_id=str(item.get("id") or tool_call_id),
+                                media_type=image_media_type,
+                                data=result,
+                                provider_metadata=_provider_metadata_for_item(item),
+                            )
+
+                    result_payload = _builtin_tool_result(item)
+                    if result_payload is not None:
+                        yield types.events.BuiltinToolResult(
+                            tool_call_id=tool_call_id,
+                            result=types.messages.BuiltinToolReturnPart(
+                                tool_call_id=tool_call_id,
+                                tool_name=tool_name,
+                                result=result_payload,
+                                provider_metadata=_provider_metadata_for_item(item),
+                            ),
+                        )
+                    continue
+
+        for block_id in list(text_blocks):
+            yield types.events.TextEnd(block_id=block_id)
+        for block_id in list(reasoning_blocks):
+            yield types.events.ReasoningEnd(block_id=block_id)
+
+        yield types.events.StreamEnd(
+            usage=usage,
+            provider_metadata=response_metadata,
+        )
+    except openai_sdk.OpenAIError as exc:
+        raise errors.map_error(exc, provider=provider, model_id=model.id) from exc
+
+
+class OpenAIResponsesProtocol(base.ProviderProtocol[Any]):
+    """OpenAI Responses API protocol."""
+
+    def stream(
+        self,
+        client: openai.AsyncOpenAI,
+        model: core.model.Model,
+        messages: list[types.messages.Message],
+        *,
+        tools: Sequence[types.tools.Tool] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
+        params: Any = None,
+        provider: str,
+    ) -> AsyncGenerator[types.events.Event]:
+        return _stream_responses(
+            client,
+            model,
+            messages,
+            tools=tools,
+            output_type=output_type,
+            params=params,
+            provider=provider,
+        )
+
+
+def default_protocol(provider: str) -> base.ProviderProtocol[Any]:
+    """Return the best default OpenAI-compatible protocol for *provider*."""
+    if provider == "openai":
+        return OpenAIResponsesProtocol()
+    return OpenAIChatCompletionsProtocol()

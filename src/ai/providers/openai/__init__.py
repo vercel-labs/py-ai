@@ -14,6 +14,12 @@ uses an SDK client.
 """
 
 from . import tools
+from .protocol import OpenAIChatCompletionsProtocol, OpenAIResponsesProtocol
 from .provider import OpenAICompatibleProvider
 
-__all__ = ["OpenAICompatibleProvider", "tools"]
+__all__ = [
+    "OpenAIChatCompletionsProtocol",
+    "OpenAICompatibleProvider",
+    "OpenAIResponsesProtocol",
+    "tools",
+]

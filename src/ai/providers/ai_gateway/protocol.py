@@ -13,6 +13,7 @@ import pydantic
 
 from ... import types
 from ...models import core
+from .. import base
 from ..anthropic import tools as anthropic_tools
 from ..openai import tools as openai_tools
 from . import client as gateway_client
@@ -635,3 +636,40 @@ async def generate(
         return await _generate_image(gateway, model, messages, params)
     except client_errors.GatewayError as exc:
         raise errors.map_error(exc) from exc
+
+
+class GatewayV3Protocol(base.ProviderProtocol[gateway_client.GatewayClient]):
+    """AI Gateway v3 wire protocol."""
+
+    def stream(
+        self,
+        client: gateway_client.GatewayClient,
+        model: core.model.Model,
+        messages: list[types.messages.Message],
+        *,
+        tools: Sequence[types.tools.Tool] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
+        params: Any = None,
+        provider: str,
+    ) -> AsyncGenerator[types.events.Event]:
+        _ = provider
+        return stream(
+            client,
+            model,
+            messages,
+            tools=tools,
+            output_type=output_type,
+            params=params,
+        )
+
+    async def generate(
+        self,
+        client: gateway_client.GatewayClient,
+        model: core.model.Model,
+        messages: list[types.messages.Message],
+        params: core.GenerateParams,
+        *,
+        provider: str,
+    ) -> types.messages.Message:
+        _ = provider
+        return await generate(client, model, messages, params)

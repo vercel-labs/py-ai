@@ -2,7 +2,7 @@
 
 from .ai_gateway import GatewayProvider
 from .anthropic import AnthropicCompatibleProvider
-from .base import Provider, get_provider
+from .base import Provider, ProviderProtocol, get_provider
 from .openai import OpenAICompatibleProvider
 
 __all__ = [
@@ -10,5 +10,6 @@ __all__ = [
     "GatewayProvider",
     "OpenAICompatibleProvider",
     "Provider",
+    "ProviderProtocol",
     "get_provider",
 ]

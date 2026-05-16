@@ -7,7 +7,10 @@ import httpx
 import pytest
 
 import ai
-from ai.providers.anthropic import AnthropicCompatibleProvider
+from ai.providers.anthropic import (
+    AnthropicCompatibleProvider,
+    AnthropicMessagesProtocol,
+)
 
 
 async def test_list_models_gets_models_with_provider_headers_and_sorts_ids() -> None:
@@ -176,13 +179,12 @@ def test_get_provider_accepts_base_url_and_api_key() -> None:
 
     model = ai.Model("custom-model", provider=provider)
     assert repr(provider) == "anthropic"
-    assert provider.adapter == "anthropic"
+    assert isinstance(provider.protocol, AnthropicMessagesProtocol)
     assert provider.base_url == "https://custom.example.com"
     assert provider.api_key == "sk-custom"
     assert provider.headers == {"X-Custom-Header": "example"}
     assert provider.is_configured() is True
     assert model.id == "custom-model"
-    assert model.adapter == "anthropic"
     assert model.provider is provider
 
 
