@@ -16,6 +16,7 @@ import pydantic
 from ... import types
 from ...models import core
 from ...types import events
+from .. import base
 from . import _sdk, errors
 from . import tools as anthropic_tools
 
@@ -583,3 +584,28 @@ async def stream(
             provider=provider,
             model_id=model.id,
         ) from exc
+
+
+class AnthropicMessagesProtocol(base.ProviderProtocol[Any]):
+    """Anthropic Messages API protocol."""
+
+    def stream(
+        self,
+        client: anthropic.AsyncAnthropic,
+        model: core.model.Model,
+        messages: list[types.messages.Message],
+        *,
+        tools: Sequence[types.tools.Tool] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
+        params: Any = None,
+        provider: str,
+    ) -> AsyncGenerator[events.Event]:
+        return stream(
+            client,
+            model,
+            messages,
+            tools=tools,
+            output_type=output_type,
+            params=params,
+            provider=provider,
+        )

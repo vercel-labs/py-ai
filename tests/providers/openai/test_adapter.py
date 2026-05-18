@@ -16,7 +16,7 @@ import pytest
 import ai
 from ai.providers.openai import protocol
 from ai.providers.openai import tools as openai_tools
-from ai.types import messages
+from ai.types import events, messages, tools
 
 
 class _Answer(pydantic.BaseModel):
@@ -29,6 +29,22 @@ class _EmptyOpenAIStream:
 
     async def __anext__(self) -> Any:
         raise StopAsyncIteration
+
+
+class _ListStream:
+    def __init__(self, items: list[dict[str, Any]]) -> None:
+        self._items = items
+        self._idx = 0
+
+    def __aiter__(self) -> _ListStream:
+        return self
+
+    async def __anext__(self) -> dict[str, Any]:
+        if self._idx >= len(self._items):
+            raise StopAsyncIteration
+        item = self._items[self._idx]
+        self._idx += 1
+        return item
 
 
 class _FakeCompletions:
@@ -52,6 +68,21 @@ class _FakeOpenAIClient:
 
     async def close(self) -> None:
         self.closed = True
+
+
+class _FakeResponses:
+    def __init__(self, captured: dict[str, Any], items: list[dict[str, Any]]) -> None:
+        self._captured = captured
+        self._items = items
+
+    async def create(self, **kwargs: Any) -> _ListStream:
+        self._captured.update(kwargs)
+        return _ListStream(self._items)
+
+
+class _FakeResponsesClient:
+    def __init__(self, captured: dict[str, Any], items: list[dict[str, Any]]) -> None:
+        self.responses = _FakeResponses(captured, items)
 
 
 class _RaisingCompletions:
@@ -88,9 +119,281 @@ def _patch(
     return cast(openai.AsyncOpenAI, fake), captured
 
 
+def _patch_responses(
+    items: list[dict[str, Any]] | None = None,
+) -> tuple[openai.AsyncOpenAI, dict[str, Any]]:
+    captured: dict[str, Any] = {}
+    fake = _FakeResponsesClient(captured, items or [])
+    return cast(openai.AsyncOpenAI, fake), captured
+
+
 async def _drain(stream: Any) -> None:
     async for _ in stream:
         pass
+
+
+async def test_responses_request_uses_responses_input() -> None:
+    fake, captured = _patch_responses()
+
+    await _drain(
+        protocol.OpenAIResponsesProtocol().stream(
+            fake,
+            _MODEL,
+            [ai.system_message("rules"), ai.user_message("Hi")],
+            provider="openai",
+        )
+    )
+
+    assert captured["model"] == "gpt-5.4"
+    assert captured["stream"] is True
+    assert captured["input"] == [
+        {"role": "system", "content": "rules"},
+        {"role": "user", "content": [{"type": "input_text", "text": "Hi"}]},
+    ]
+    assert "messages" not in captured
+
+
+async def test_responses_raw_params_and_structured_output() -> None:
+    fake, captured = _patch_responses()
+
+    await _drain(
+        protocol.OpenAIResponsesProtocol().stream(
+            fake,
+            _MODEL,
+            [ai.user_message("Hi")],
+            output_type=_Answer,
+            params={
+                "reasoning": {"effort": "high"},
+                "include": ["file_search_call.results"],
+                "text": {"verbosity": "low"},
+                "extra_headers": {"x-openai-feature": "enabled"},
+            },
+            provider="openai",
+        )
+    )
+
+    assert captured["reasoning"] == {"effort": "high"}
+    assert captured["include"] == ["file_search_call.results"]
+    assert captured["extra_headers"] == {"x-openai-feature": "enabled"}
+    assert captured["text"]["verbosity"] == "low"
+    assert captured["text"]["format"]["type"] == "json_schema"
+    assert captured["text"]["format"]["name"] == "_Answer"
+    assert captured["text"]["format"]["strict"] is True
+
+
+async def test_responses_tools_convert_function_and_provider_tools() -> None:
+    fake, captured = _patch_responses()
+
+    await _drain(
+        protocol.OpenAIResponsesProtocol().stream(
+            fake,
+            _MODEL,
+            [ai.user_message("Hi")],
+            tools=[
+                tools.Tool(
+                    kind="function",
+                    name="weather",
+                    args=tools.FunctionToolArgs(
+                        description="Get weather",
+                        params={
+                            "type": "object",
+                            "properties": {"city": {"type": "string"}},
+                        },
+                    ),
+                ),
+                openai_tools.web_search(search_context_size="low"),
+                openai_tools.code_interpreter(),
+            ],
+            provider="openai",
+        )
+    )
+
+    assert captured["tools"] == [
+        {
+            "type": "function",
+            "name": "weather",
+            "description": "Get weather",
+            "parameters": {
+                "type": "object",
+                "properties": {"city": {"type": "string"}},
+            },
+        },
+        {"type": "web_search", "search_context_size": "low"},
+        {"type": "code_interpreter", "container": {"type": "auto"}},
+    ]
+
+
+async def test_responses_streams_text_and_usage() -> None:
+    fake, _ = _patch_responses(
+        [
+            {
+                "type": "response.created",
+                "response": {
+                    "id": "resp_1",
+                    "model": "gpt-5.4",
+                    "status": "in_progress",
+                },
+            },
+            {
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {"id": "msg_1", "type": "message", "role": "assistant"},
+            },
+            {"type": "response.output_text.delta", "item_id": "msg_1", "delta": "Hi"},
+            {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {
+                    "id": "msg_1",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Hi"}],
+                },
+            },
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_1",
+                    "model": "gpt-5.4",
+                    "status": "completed",
+                    "usage": {
+                        "input_tokens": 3,
+                        "input_tokens_details": {"cached_tokens": 1},
+                        "output_tokens": 5,
+                        "output_tokens_details": {"reasoning_tokens": 2},
+                    },
+                },
+            },
+        ]
+    )
+
+    stream = ai.Stream(
+        protocol.OpenAIResponsesProtocol().stream(
+            fake,
+            _MODEL,
+            [ai.user_message("Hi")],
+            provider="openai",
+        )
+    )
+    async for _ in stream:
+        pass
+
+    assert stream.text == "Hi"
+    assert stream.usage is not None
+    assert stream.usage.input_tokens == 3
+    assert stream.usage.output_tokens == 5
+    assert stream.usage.reasoning_tokens == 2
+    assert stream.usage.cache_read_tokens == 1
+    assert stream.message.provider_metadata == {
+        "openai": {
+            "response_id": "resp_1",
+            "model": "gpt-5.4",
+            "status": "completed",
+        }
+    }
+
+
+async def test_responses_streams_function_tool_call() -> None:
+    fake, _ = _patch_responses(
+        [
+            {
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {
+                    "id": "fc_1",
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "weather",
+                },
+            },
+            {
+                "type": "response.function_call_arguments.delta",
+                "item_id": "fc_1",
+                "output_index": 0,
+                "delta": '{"city"',
+            },
+            {
+                "type": "response.function_call_arguments.delta",
+                "item_id": "fc_1",
+                "output_index": 0,
+                "delta": ':"SF"}',
+            },
+            {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {
+                    "id": "fc_1",
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "weather",
+                    "arguments": '{"city":"SF"}',
+                },
+            },
+        ]
+    )
+
+    stream = ai.Stream(
+        protocol.OpenAIResponsesProtocol().stream(
+            fake,
+            _MODEL,
+            [ai.user_message("Hi")],
+            provider="openai",
+        )
+    )
+    async for _ in stream:
+        pass
+
+    assert len(stream.tool_calls) == 1
+    assert stream.tool_calls[0].tool_call_id == "call_1"
+    assert stream.tool_calls[0].tool_name == "weather"
+    assert stream.tool_calls[0].tool_args == '{"city":"SF"}'
+
+
+async def test_responses_streams_builtin_tool_call_and_result() -> None:
+    fake, _ = _patch_responses(
+        [
+            {
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {
+                    "id": "ws_1",
+                    "type": "web_search_call",
+                    "status": "searching",
+                },
+            },
+            {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {
+                    "id": "ws_1",
+                    "type": "web_search_call",
+                    "status": "completed",
+                    "action": {"type": "search", "query": "weather"},
+                },
+            },
+        ]
+    )
+
+    stream = ai.Stream(
+        protocol.OpenAIResponsesProtocol().stream(
+            fake,
+            _MODEL,
+            [ai.user_message("Hi")],
+            provider="openai",
+        )
+    )
+    seen: list[type[events.Event]] = []
+    async for event in stream:
+        seen.append(type(event))
+
+    assert events.BuiltinToolStart in seen
+    assert events.BuiltinToolEnd in seen
+    assert len(stream.message.builtin_tool_calls) == 1
+    assert stream.message.builtin_tool_calls[0].tool_name == "web_search"
+    assert len(stream.message.builtin_tool_returns) == 1
+    assert stream.message.builtin_tool_returns[0].result == {
+        "action": {"type": "search", "query": "weather"}
+    }
 
 
 async def test_system_messages_use_openai_system_role(

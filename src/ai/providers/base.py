@@ -24,12 +24,46 @@ if TYPE_CHECKING:
 ClientT = TypeVar("ClientT", default=Any)
 
 
+class ProviderProtocol(Generic[ClientT]):
+    """Interface implemented by provider wire protocols."""
+
+    def stream(
+        self,
+        client: ClientT,
+        model: model_.Model,
+        messages: list[messages_.Message],
+        *,
+        tools: Sequence[tools_.Tool] | None = None,
+        output_type: type[pydantic.BaseModel] | None = None,
+        params: Any = None,
+        provider: str,
+    ) -> AsyncGenerator[events.Event]:
+        """Stream a language-model response using *client*."""
+        raise NotImplementedError(
+            f"protocol {type(self).__name__!r} does not support stream()"
+        )
+
+    async def generate(
+        self,
+        client: ClientT,
+        model: model_.Model,
+        messages: list[messages_.Message],
+        params: params_.GenerateParams,
+        *,
+        provider: str,
+    ) -> messages_.Message:
+        """Generate a non-streaming response using *client*."""
+        raise NotImplementedError(
+            f"protocol {type(self).__name__!r} does not support generate()"
+        )
+
+
 class Provider(Generic[ClientT]):
     """Base class for model providers.
 
     A provider carries provider-specific configuration and a shared upstream
     client: API endpoint, authentication, and model enumeration. Model objects
-    hold metadata (``id``, ``adapter``) plus a back-reference to their provider.
+    hold metadata plus a back-reference to their provider.
     """
 
     handles: ClassVar[tuple[str, ...]] = ()
@@ -46,8 +80,8 @@ class Provider(Generic[ClientT]):
         self,
         *,
         name: str,
-        adapter: str,
         base_url: str,
+        protocol: ProviderProtocol[ClientT] | None = None,
         api_key: str | None = None,
         api_key_env: str | None = None,
         base_url_env: str | None = None,
@@ -59,8 +93,8 @@ class Provider(Generic[ClientT]):
         if type(self) is Provider:
             raise TypeError("Provider is a base class; implement a subclass instead")
         self._name = name
-        self._adapter = adapter
         self._base_url = base_url
+        self._protocol = protocol
         self._api_key = api_key
         self._api_key_env = api_key_env
         self._base_url_env = base_url_env
@@ -142,11 +176,6 @@ class Provider(Generic[ClientT]):
         return None
 
     @property
-    def adapter(self) -> str:
-        """Provider protocol key used in model metadata and reprs."""
-        return self._adapter
-
-    @property
     def config_envs(self) -> tuple[str, ...]:
         """Additional env vars used to configure the provider client."""
         return self._config_envs
@@ -155,6 +184,13 @@ class Provider(Generic[ClientT]):
     def name(self) -> str:
         """Human-readable provider name (for repr, error messages)."""
         return self._name
+
+    @property
+    def protocol(self) -> ProviderProtocol[ClientT]:
+        """Default wire protocol used by this provider."""
+        if self._protocol is None:
+            raise RuntimeError(f"provider {self.name!r} does not have a protocol")
+        return self._protocol
 
     async def list_models(self) -> list[str]:
         """List available model IDs from the provider API."""
@@ -168,18 +204,37 @@ class Provider(Generic[ClientT]):
         tools: Sequence[tools_.Tool] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         params: Any = None,
+        protocol: ProviderProtocol[Any] | None = None,
     ) -> AsyncGenerator[events.Event]:
         """Stream a language-model response from this provider."""
-        raise NotImplementedError(f"provider {self.name!r} does not support stream()")
+        selected_protocol = protocol or model.protocol or self.protocol
+        return selected_protocol.stream(
+            self.client,
+            model,
+            messages,
+            tools=tools,
+            output_type=output_type,
+            params=params,
+            provider=self.name,
+        )
 
     async def generate(
         self,
         model: model_.Model,
         messages: list[messages_.Message],
         params: params_.GenerateParams,
+        *,
+        protocol: ProviderProtocol[Any] | None = None,
     ) -> messages_.Message:
         """Generate a non-streaming response from this provider."""
-        raise NotImplementedError(f"provider {self.name!r} does not support generate()")
+        selected_protocol = protocol or model.protocol or self.protocol
+        return await selected_protocol.generate(
+            self.client,
+            model,
+            messages,
+            params,
+            provider=self.name,
+        )
 
     async def probe(self, model: model_.Model) -> None:
         """Probe if provider is online and can serve given model.
@@ -210,6 +265,7 @@ class Provider(Generic[ClientT]):
         headers: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         client: Any | None = None,
+        protocol: ProviderProtocol[Any] | None = None,
     ) -> Provider[Any]:
         """Return a concrete provider for a models.dev provider ID."""
         modelsdev_provider = _modelsdev.get_provider_by_id(known_id)
@@ -230,6 +286,7 @@ class Provider(Generic[ClientT]):
                     headers=headers,
                     env=env,
                     client=client,
+                    protocol=protocol,
                 )
 
         raise UnsupportedProviderError(modelsdev_provider.id)
@@ -245,6 +302,7 @@ class Provider(Generic[ClientT]):
         headers: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         client: Any | None = None,
+        protocol: ProviderProtocol[Any] | None = None,
     ) -> Provider[Any]:
         """Construct this provider implementation from models.dev metadata."""
         raise NotImplementedError
@@ -261,6 +319,7 @@ def get_provider(
     headers: Mapping[str, str] | None = None,
     env: Mapping[str, str] | None = None,
     client: ClientT | None = None,
+    protocol: ProviderProtocol[ClientT] | None = None,
 ) -> Provider[ClientT]:
     """Create a provider from a models.dev provider ID."""
     return Provider.from_id(
@@ -270,6 +329,7 @@ def get_provider(
         headers=headers,
         env=env,
         client=client,
+        protocol=protocol,
     )
 
 

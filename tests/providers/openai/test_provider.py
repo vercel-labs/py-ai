@@ -7,7 +7,7 @@ import openai
 import pytest
 
 import ai
-from ai.providers.openai import OpenAICompatibleProvider
+from ai.providers.openai import OpenAICompatibleProvider, OpenAIResponsesProtocol
 
 
 async def test_list_models_gets_models_with_auth_header_and_sorts_ids() -> None:
@@ -207,13 +207,12 @@ def test_get_provider_accepts_base_url_and_api_key() -> None:
 
     model = ai.Model("custom-model", provider=provider)
     assert repr(provider) == "openai"
-    assert provider.adapter == "openai"
+    assert isinstance(provider.protocol, OpenAIResponsesProtocol)
     assert provider.base_url == "https://custom.example.com/v1"
     assert provider.api_key == "sk-custom"
     assert provider.headers == {"X-Custom-Header": "example"}
     assert provider.is_configured() is True
     assert model.id == "custom-model"
-    assert model.adapter == "openai"
     assert model.provider is provider
     assert isinstance(provider, ai.Provider)
 

@@ -22,6 +22,7 @@ or uses an SDK client.
 """
 
 from . import tools
+from .protocol import AnthropicMessagesProtocol
 from .provider import AnthropicCompatibleProvider
 
-__all__ = ["AnthropicCompatibleProvider", "tools"]
+__all__ = ["AnthropicCompatibleProvider", "AnthropicMessagesProtocol", "tools"]

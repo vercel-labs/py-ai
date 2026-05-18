@@ -8,8 +8,12 @@ Usage (from repo root):
     uv run examples/run-examples.py --e2e       # also run e2e test scripts
     uv run examples/run-examples.py --all       # run everything
     uv run examples/run-examples.py --parallel  # run in parallel
+    uv run examples/run-examples.py stream.py tools_schema.py
+        # run selected example files
     uv run examples/run-examples.py --model gateway:openai/gpt-5.4-mini
         # patch ai.get_model() to use the given model for every sample
+    uv run examples/run-examples.py --protocol=responses
+        # patch model/provider helpers and ai.stream()/ai.generate()
 """
 
 import argparse
@@ -43,6 +47,7 @@ TEXT_SAMPLES = [
     Sample("agent_custom_loop.py"),
     Sample("agent_nested.py"),
     Sample("streaming_tool.py"),
+    Sample("openai_chat_completions.py"),
     Sample("explicit_client.py"),
     Sample("multimodal_input.py"),
     Sample("check_connection.py"),
@@ -118,8 +123,62 @@ E2E_TESTS = [
     ),
 ]
 
+KNOWN_SAMPLES = [
+    *TEXT_SAMPLES,
+    *IMAGE_SAMPLES,
+    *VIDEO_SAMPLES,
+    *BROKEN_SAMPLES,
+    *E2E_TESTS,
+]
 
-def _sample_cmd(sample: Sample, model: str | None) -> list[str]:
+
+def _path_key(path: Path | str) -> str:
+    return Path(path).as_posix()
+
+
+def _known_sample_map() -> dict[str, Sample]:
+    samples: dict[str, Sample] = {}
+    for sample in KNOWN_SAMPLES:
+        samples[sample.name] = sample
+        if sample.cmd is None:
+            samples[f"samples/{sample.name}"] = sample
+            samples[f"examples/samples/{sample.name}"] = sample
+            samples[_path_key(SAMPLES / sample.name)] = sample
+        else:
+            samples[f"examples/{sample.name}"] = sample
+            samples[_path_key(REPO / "examples" / sample.name)] = sample
+    return samples
+
+
+def _sample_path(name: str) -> Path:
+    path = Path(name)
+    if path.is_absolute():
+        return path
+    if path.parts[:1] == ("examples",):
+        return REPO / path
+    if path.parts[:1] == ("samples",):
+        return REPO / "examples" / path
+    return SAMPLES / path
+
+
+def _select_sample(name: str, known_samples: dict[str, Sample]) -> Sample | None:
+    sample = known_samples.get(name)
+    if sample is not None:
+        return sample
+    sample = known_samples.get(_path_key(Path(name).resolve()))
+    if sample is not None:
+        return sample
+    if _sample_path(name).is_file():
+        return Sample(name)
+    path = Path(name)
+    if not path.is_absolute() and path.parts[:1] != ("examples",):
+        example_path = REPO / "examples" / path
+        if example_path.is_file():
+            return Sample(f"examples/{_path_key(path)}")
+    return None
+
+
+def _sample_cmd(sample: Sample, model: str | None, protocol: str | None) -> list[str]:
     if sample.cmd is not None:
         return sample.cmd
     base = [
@@ -132,9 +191,14 @@ def _sample_cmd(sample: Sample, model: str | None) -> list[str]:
         str(REPO),
         "python",
     ]
-    if model is not None:
-        return [*base, str(PATCH_SCRIPT), model, str(SAMPLES / sample.name)]
-    return [*base, str(SAMPLES / sample.name)]
+    if model is not None or protocol is not None:
+        cmd = [*base, str(PATCH_SCRIPT)]
+        if model is not None:
+            cmd.extend(["--model", model])
+        if protocol is not None:
+            cmd.extend(["--protocol", protocol])
+        return [*cmd, str(_sample_path(sample.name))]
+    return [*base, str(_sample_path(sample.name))]
 
 
 _env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
@@ -146,11 +210,11 @@ def _sample_env(sample: Sample) -> dict[str, str]:
     return {**_env, **sample.extra_env}
 
 
-def run_sample(sample: Sample, model: str | None) -> bool:
+def run_sample(sample: Sample, model: str | None, protocol: str | None) -> bool:
     print(f"{'=' * 20} {sample.name} {'=' * 20}")
     sys.stdout.flush()
     result = subprocess.run(
-        _sample_cmd(sample, model),
+        _sample_cmd(sample, model, protocol),
         env=_sample_env(sample),
         timeout=sample.timeout,
         input=sample.stdin,
@@ -174,10 +238,12 @@ def print_summary(results: list[tuple[str, bool]]) -> bool:
     return any_failed
 
 
-def run_sample_quiet(sample: Sample, model: str | None) -> tuple[str, bool, str]:
+def run_sample_quiet(
+    sample: Sample, model: str | None, protocol: str | None
+) -> tuple[str, bool, str]:
     try:
         result = subprocess.run(
-            _sample_cmd(sample, model),
+            _sample_cmd(sample, model, protocol),
             env=_sample_env(sample),
             timeout=sample.timeout,
             capture_output=True,
@@ -209,20 +275,41 @@ def main() -> None:
             "samples with a custom cmd"
         ),
     )
+    parser.add_argument(
+        "--protocol",
+        choices=("chat", "messages", "responses"),
+        help=(
+            "run each sample through run-with-patched-model.py with this "
+            "underlying protocol; ignored for samples with a custom cmd"
+        ),
+    )
+    parser.add_argument(
+        "examples",
+        nargs="*",
+        metavar="example",
+        help="example file(s) to run, e.g. stream.py or examples/samples/stream.py",
+    )
     args = parser.parse_args()
 
     has_category = args.text or args.image or args.video or args.broken or args.e2e
 
     samples: list[Sample] = []
-    if args.text or args.all or not has_category:
+    if args.examples:
+        known_samples = _known_sample_map()
+        for example in args.examples:
+            sample = _select_sample(example, known_samples)
+            if sample is None:
+                parser.error(f"unknown example file: {example}")
+            samples.append(sample)
+    elif args.text or args.all or not has_category:
         samples.extend(TEXT_SAMPLES)
-    if args.image or args.all:
+    if not args.examples and (args.image or args.all):
         samples.extend(IMAGE_SAMPLES)
-    if args.video or args.all:
+    if not args.examples and (args.video or args.all):
         samples.extend(VIDEO_SAMPLES)
-    if args.broken or args.all:
+    if not args.examples and (args.broken or args.all):
         samples.extend(BROKEN_SAMPLES)
-    if args.e2e or args.all:
+    if not args.examples and (args.e2e or args.all):
         samples.extend(E2E_TESTS)
 
     results: list[tuple[str, bool]] = []
@@ -230,7 +317,10 @@ def main() -> None:
     if args.parallel:
         outputs: dict[str, str] = {}
         with concurrent.futures.ThreadPoolExecutor() as pool:
-            futures = {pool.submit(run_sample_quiet, s, args.model): s for s in samples}
+            futures = {
+                pool.submit(run_sample_quiet, s, args.model, args.protocol): s
+                for s in samples
+            }
             for future in concurrent.futures.as_completed(futures):
                 name, ok, output = future.result()
                 status = "PASS" if ok else "FAIL"
@@ -253,7 +343,7 @@ def main() -> None:
     else:
         for sample in samples:
             try:
-                ok = run_sample(sample, args.model)
+                ok = run_sample(sample, args.model, args.protocol)
             except subprocess.TimeoutExpired:
                 print(f"  TIMEOUT after {sample.timeout:g}s\n")
                 ok = False

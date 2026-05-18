@@ -32,7 +32,7 @@ Usage::
     ids = await ai.get_provider("openai").list_models()
 """
 
-from ..providers.base import Provider
+from ..providers.base import Provider, ProviderProtocol
 from .core.api import (
     Executor,
     GenerateExecutor,
@@ -56,6 +56,7 @@ __all__ = [
     "ImageParams",
     "Model",
     "Provider",
+    "ProviderProtocol",
     "Stream",
     "StreamExecutor",
     "StreamRequest",

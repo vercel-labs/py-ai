@@ -14,6 +14,7 @@ from ... import errors as ai_errors
 from .. import base
 from . import client as gateway_client
 from . import errors
+from . import protocol as protocol_module
 from .client import errors as client_errors
 
 if TYPE_CHECKING:
@@ -43,11 +44,12 @@ class GatewayProvider(base.Provider[gateway_client.GatewayClient]):
         headers: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         client: httpx.AsyncClient | None = None,
+        protocol: base.ProviderProtocol[Any] | None = None,
     ) -> None:
         super().__init__(
             name="ai-gateway",
-            adapter="ai-gateway-v3",
             base_url=base_url,
+            protocol=protocol or protocol_module.GatewayV3Protocol(),
             api_key=api_key,
             api_key_env=_API_KEY_ENV,
             headers=headers,
@@ -82,17 +84,16 @@ class GatewayProvider(base.Provider[gateway_client.GatewayClient]):
         tools: Sequence[tools_.Tool] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         params: Any = None,
+        protocol: base.ProviderProtocol[Any] | None = None,
     ) -> AsyncGenerator[events.Event]:
         """Stream via the AI Gateway v3 protocol."""
-        from . import protocol
-
-        return protocol.stream(
-            self.client,
+        return super().stream(
             model,
             messages,
             tools=tools,
             output_type=output_type,
             params=params,
+            protocol=protocol,
         )
 
     async def generate(
@@ -100,11 +101,11 @@ class GatewayProvider(base.Provider[gateway_client.GatewayClient]):
         model: model_.Model,
         messages: list[messages_.Message],
         params: params_.GenerateParams,
+        *,
+        protocol: base.ProviderProtocol[Any] | None = None,
     ) -> messages_.Message:
         """Generate media via the AI Gateway v3 protocol."""
-        from . import protocol
-
-        return await protocol.generate(self.client, model, messages, params)
+        return await super().generate(model, messages, params, protocol=protocol)
 
     @classmethod
     def from_modelsdev_provider(
@@ -117,6 +118,7 @@ class GatewayProvider(base.Provider[gateway_client.GatewayClient]):
         headers: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         client: httpx.AsyncClient | None = None,
+        protocol: base.ProviderProtocol[Any] | None = None,
     ) -> base.Provider[gateway_client.GatewayClient]:
         return cls(
             api_key=api_key,
@@ -124,6 +126,7 @@ class GatewayProvider(base.Provider[gateway_client.GatewayClient]):
             headers=headers,
             env=env,
             client=client,
+            protocol=protocol,
         )
 
     @property

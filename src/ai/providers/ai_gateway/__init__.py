@@ -27,16 +27,15 @@ Usage::
     ) as s:
         ...
 
-The heavy ``.protocol`` module is loaded lazily by provider methods so that
-``import ai`` does not pull in extra I/O code at import time.  This matters
-for sandboxed runtimes (e.g. Temporal workflow workers).
 """
 
 from . import errors, tools
+from .protocol import GatewayV3Protocol
 from .provider import GatewayProvider
 
 __all__ = [
     "GatewayProvider",
+    "GatewayV3Protocol",
     "errors",
     "tools",
 ]

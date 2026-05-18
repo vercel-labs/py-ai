@@ -24,13 +24,11 @@ class MockProvider(models.Provider):
         self,
         *,
         name: str = "mock",
-        adapter: str = "mock",
         base_url: str = "http://mock.test",
         api_key_env: str | None = "MOCK_API_KEY",
     ) -> None:
         super().__init__(
             name=name,
-            adapter=adapter,
             base_url=base_url,
             api_key_env=api_key_env,
         )
@@ -48,7 +46,18 @@ class MockProvider(models.Provider):
         tools: Sequence[ai.tools.Tool] | None = None,
         output_type: type[pydantic.BaseModel] | None = None,
         params: Any = None,
+        protocol: models.ProviderProtocol[Any] | None = None,
     ) -> AsyncGenerator[events_.Event]:
+        if protocol is not None:
+            return protocol.stream(
+                None,
+                model,
+                messages,
+                tools=tools,
+                output_type=output_type,
+                params=params,
+                provider=self.name,
+            )
         if self._stream_impl is None:
             raise RuntimeError("MockProvider: no stream implementation configured")
         return cast(
@@ -67,7 +76,17 @@ class MockProvider(models.Provider):
         model: models.Model,
         messages: list[messages_.Message],
         params: Any,
+        *,
+        protocol: models.ProviderProtocol[Any] | None = None,
     ) -> messages_.Message:
+        if protocol is not None:
+            return await protocol.generate(
+                None,
+                model,
+                messages,
+                params,
+                provider=self.name,
+            )
         if self._generate_impl is None:
             raise RuntimeError("MockProvider: no generate implementation configured")
         return cast(
@@ -77,10 +96,9 @@ class MockProvider(models.Provider):
 
 MOCK_PROVIDER = MockProvider()
 
-# A fixed Model used in tests — adapter="mock" dispatches to the mock adapter.
+# A fixed Model used in tests.
 MOCK_MODEL: models.Model = models.Model(
     id="mock-model",
-    adapter="mock",
     provider=MOCK_PROVIDER,
 )
 

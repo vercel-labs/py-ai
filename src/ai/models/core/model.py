@@ -1,6 +1,7 @@
 """Model metadata types."""
 
 import os
+from typing import Any
 
 from ... import _modelsdev
 from ...errors import ConfigurationError
@@ -13,8 +14,8 @@ class Model:
     """Lightweight reference to a model on a specific provider.
 
     * ``id`` — identifier sent to the provider (e.g. ``"claude-sonnet-4-6"``).
-    * ``adapter`` — wire protocol key (e.g. ``"ai-gateway-v3"``, ``"anthropic"``).
     * ``provider`` — :class:`Provider` that owns this model.
+    * ``protocol`` — optional wire-protocol override for this model.
     """
 
     def __init__(
@@ -22,31 +23,32 @@ class Model:
         id: str,
         *,
         provider: base.Provider,
-        adapter: str | None = None,
+        protocol: base.ProviderProtocol[Any] | None = None,
     ) -> None:
         self.id = id
         self.provider = provider
-        self.adapter = adapter or provider.adapter
+        self.protocol = protocol
 
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, Model)
             and self.id == other.id
-            and self.adapter == other.adapter
             and self.provider is other.provider
+            and self.protocol is other.protocol
         )
 
     def __repr__(self) -> str:
-        return (
-            f"Model(id={self.id!r}, adapter={self.adapter!r}, "
-            f"provider={self.provider!r})"
-        )
+        return f"Model(id={self.id!r}, provider={self.provider!r})"
 
     def __hash__(self) -> int:
-        return hash((self.id, self.adapter, id(self.provider)))
+        return hash((self.id, id(self.provider), id(self.protocol)))
 
 
-def get_model(model_id: str | None = None) -> Model:
+def get_model(
+    model_id: str | None = None,
+    *,
+    protocol: base.ProviderProtocol[Any] | None = None,
+) -> Model:
     """Resolve a model ID into a :class:`Model`.
 
     Args:
@@ -56,6 +58,9 @@ def get_model(model_id: str | None = None) -> Model:
             Vercel AI Gateway. Examples: ``"openai:gpt-5"`` or
             ``"anthropic/claude-sonnet-4"``. When omitted, reads
             ``AI_SDK_DEFAULT_MODEL`` from the environment.
+        protocol:
+            Optional wire-protocol override for this model. When omitted,
+            the provider chooses its default protocol.
     Raises:
         Raises :class:`ai.ConfigurationError` when ``model_id`` and
         ``AI_SDK_DEFAULT_MODEL`` is empty or malformed.
@@ -89,4 +94,4 @@ def get_model(model_id: str | None = None) -> Model:
         model_provider_config=model_provider_config,
     )
 
-    return Model(provider_model_id, provider=provider)
+    return Model(provider_model_id, provider=provider, protocol=protocol)

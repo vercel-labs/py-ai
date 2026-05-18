@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Run a Python file with ``ai.get_model()`` patched to always return a fixed model.
+"""Run a Python file with model/protocol selection patched in.
 
-Useful for re-running an example against a different model without
-editing it.
+Useful for re-running an example against a different model or underlying
+wire protocol without editing it.
 
 Usage (from repo root):
 
     uv run examples/run-with-patched-model.py <model> <file.py>
+    uv run examples/run-with-patched-model.py --protocol=responses <file.py>
 
 Example:
 
@@ -18,31 +19,152 @@ Example:
 import argparse
 import runpy
 import sys
+from collections.abc import Callable
 from typing import Any
 
 import ai
 from ai import models
 from ai.models import core
+from ai.models.core import api as _api
 from ai.models.core import model as _model
+
+PROTOCOLS = ("chat", "messages", "responses")
+
+
+def _protocol_factory(
+    name: str | None,
+) -> Callable[[], ai.ProviderProtocol[Any]] | None:
+    if name is None:
+        return None
+
+    if name == "chat":
+        from ai.providers.openai import OpenAIChatCompletionsProtocol
+
+        return OpenAIChatCompletionsProtocol
+    if name == "messages":
+        from ai.providers.anthropic import AnthropicMessagesProtocol
+
+        return AnthropicMessagesProtocol
+    if name == "responses":
+        from ai.providers.openai import OpenAIResponsesProtocol
+
+        return OpenAIResponsesProtocol
+
+    raise ValueError(f"unsupported protocol: {name}")
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--model", help="model id, e.g. 'gateway:anthropic/claude-sonnet-4.6'"
+    )
+    parser.add_argument("--protocol", choices=PROTOCOLS)
+    parser.add_argument("args", nargs="+", metavar="ARG")
+    args = parser.parse_args()
+
+    if len(args.args) == 1:
+        args.file = args.args[0]
+    elif len(args.args) == 2 and args.model is None:
+        args.model = args.args[0]
+        args.file = args.args[1]
+    else:
+        parser.error("expected <file.py> or legacy <model> <file.py>")
+
+    return args
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "model", help="model id, e.g. 'gateway:anthropic/claude-sonnet-4.6'"
-    )
-    parser.add_argument("file", help="path to a python file to execute")
-    args = parser.parse_args()
+    args = _parse_args()
 
-    original = _model.get_model
+    protocol_factory = _protocol_factory(args.protocol)
 
-    def patched(*_args: Any, **_kwargs: Any) -> ai.Model:
-        return original(args.model)
+    original_get_model = _model.get_model
+    original_stream = _api.stream
+    original_generate = _api.generate
+    original_model = _model.Model
 
-    ai.get_model = patched
-    models.get_model = patched
-    core.get_model = patched
-    _model.get_model = patched
+    def selected_protocol() -> ai.ProviderProtocol[Any] | None:
+        if protocol_factory is None:
+            return None
+        return protocol_factory()
+
+    def selected_protocol_for_provider(
+        provider: ai.Provider[Any],
+    ) -> ai.ProviderProtocol[Any] | None:
+        if args.protocol is None:
+            return None
+        if args.protocol in ("chat", "responses"):
+            from ai.providers.openai import OpenAICompatibleProvider
+
+            if isinstance(provider, OpenAICompatibleProvider):
+                return selected_protocol()
+        if args.protocol == "messages":
+            from ai.providers.anthropic import AnthropicCompatibleProvider
+
+            if isinstance(provider, AnthropicCompatibleProvider):
+                return selected_protocol()
+        return None
+
+    def selected_protocol_for_model(model: Any) -> ai.ProviderProtocol[Any] | None:
+        provider = getattr(model, "provider", None)
+        if provider is None:
+            return None
+        return selected_protocol_for_provider(provider)
+
+    def patched_get_model(*_args: Any, **_kwargs: Any) -> ai.Model:
+        model_id = args.model or (_args[0] if _args else _kwargs.get("model_id"))
+        model = original_get_model(model_id)
+        model.protocol = selected_protocol_for_model(model)
+        return model
+
+    def patched_stream(*args: Any, **kwargs: Any) -> Any:
+        model = args[0] if args else getattr(kwargs.get("context"), "model", None)
+        protocol = selected_protocol_for_model(model)
+        if protocol is not None:
+            kwargs["protocol"] = protocol
+        return original_stream(*args, **kwargs)
+
+    async def patched_generate(*args: Any, **kwargs: Any) -> Any:
+        model = args[0] if args else kwargs.get("model")
+        protocol = selected_protocol_for_model(model)
+        if protocol is not None:
+            kwargs["protocol"] = protocol
+        return await original_generate(*args, **kwargs)
+
+    class PatchedModel(original_model):
+        def __init__(
+            self,
+            id: str,
+            *,
+            provider: ai.Provider[Any],
+            protocol: ai.ProviderProtocol[Any] | None = None,
+        ) -> None:
+            super().__init__(
+                id,
+                provider=provider,
+                protocol=selected_protocol_for_provider(provider) or protocol,
+            )
+
+    ai.get_model = patched_get_model
+    models.get_model = patched_get_model
+    core.get_model = patched_get_model
+    _model.get_model = patched_get_model
+
+    if args.protocol is not None:
+        ai.Model = PatchedModel
+        models.Model = PatchedModel
+        core.Model = PatchedModel
+        _model.Model = PatchedModel
+
+        ai.stream = patched_stream
+        models.stream = patched_stream
+        core.stream = patched_stream
+        _api.stream = patched_stream
+
+        ai.generate = patched_generate
+        models.generate = patched_generate
+        core.generate = patched_generate
+        _api.generate = patched_generate
 
     sys.argv = [args.file]
     runpy.run_path(args.file, run_name="__main__")
