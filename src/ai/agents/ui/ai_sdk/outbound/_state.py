@@ -40,6 +40,15 @@ def _to_wire_output(snapshot: Any) -> Any:
     return snapshot
 
 
+def _stream_message_id(event: events_.Event) -> str | None:
+    message = event.message
+    if message.role != "assistant":
+        return None
+    if message.turn_id is not None:
+        return message.turn_id
+    return None if message.id == "<unset>" else message.id
+
+
 class _StreamState:
     """Single-pass state across one ``to_stream()`` call."""
 
@@ -96,12 +105,16 @@ class _StreamState:
         self.emitted_tool_results.clear()
         self.emitted_approval_requests.clear()
 
-    def _ensure_started(self) -> list[protocol.UIMessageStreamPart]:
+    def _ensure_started(
+        self,
+        message_id: str | None = None,
+    ) -> list[protocol.UIMessageStreamPart]:
         """Lazily emit StartPart / StartStepPart on the first event."""
         parts: list[protocol.UIMessageStreamPart] = []
 
         if not self.emitted_start:
-            parts.append(protocol.StartPart(message_id=None))
+            self.ui_message_id = message_id
+            parts.append(protocol.StartPart(message_id=self.ui_message_id))
             parts.append(protocol.StartStepPart())
             self.emitted_start = True
             self.in_step = True
@@ -118,7 +131,7 @@ class _StreamState:
 
         # Lazily open the UI message on the first streaming event.
         if not self.emitted_start:
-            out.extend(self._ensure_started())
+            out.extend(self._ensure_started(_stream_message_id(event)))
 
         match event:
             case events_.TextStart(block_id=pid):
@@ -197,7 +210,7 @@ class _StreamState:
         msg = event.message
         out: list[protocol.UIMessageStreamPart] = []
 
-        out.extend(self._ensure_started())
+        out.extend(self._ensure_started(msg.turn_id))
 
         # Emit ToolInputAvailable for each tool call that triggered
         # these results (from the assistant message's ToolCallParts).
@@ -307,7 +320,7 @@ class _StreamState:
         out: list[protocol.UIMessageStreamPart] = []
 
         # Ensure the UI message is started.
-        out.extend(self._ensure_started())
+        out.extend(self._ensure_started(event.message.turn_id))
 
         tc_id = _approvals.tool_call_id_for(hook_part)
         if tc_id is None:

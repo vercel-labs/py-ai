@@ -13,6 +13,16 @@ from typing import Any, cast
 from ....types import messages as messages_
 from . import _approvals, ui_message
 
+_TOOL_STATE_RANK: dict[ui_message.UIToolInvocationState, int] = {
+    "input-streaming": 0,
+    "input-available": 1,
+    "approval-requested": 2,
+    "approval-responded": 3,
+    "output-denied": 4,
+    "output-error": 5,
+    "output-available": 6,
+}
+
 
 def _normalize_tool_input(raw: str) -> str | dict[str, Any]:
     """Parse tool args JSON string into a dict; fall back to raw string.
@@ -59,6 +69,57 @@ def to_ui_parts(parts: list[messages_.Part]) -> list[ui_message.UIMessagePart]:
                     }
                 )
             )
+    return result
+
+
+def _merge_tool_part(
+    existing: ui_message.UIToolPart,
+    candidate: ui_message.UIToolPart,
+) -> ui_message.UIToolPart:
+    """Merge duplicate UI tool parts, keeping the first display position."""
+    existing_rank = _TOOL_STATE_RANK.get(existing.state, 0)
+    candidate_rank = _TOOL_STATE_RANK.get(candidate.state, 0)
+    updates: dict[str, Any] = {}
+
+    if candidate_rank >= existing_rank:
+        updates["state"] = candidate.state
+        if candidate.state == "output-denied":
+            updates["output"] = None
+
+    if existing.input is None and candidate.input is not None:
+        updates["input"] = candidate.input
+    if candidate.output is not None:
+        updates["output"] = candidate.output
+    if candidate.error_text is not None:
+        updates["error_text"] = candidate.error_text
+    if candidate.approval is not None:
+        updates["approval"] = candidate.approval
+
+    return existing.model_copy(update=updates) if updates else existing
+
+
+def dedupe_tool_parts(
+    ui_parts: list[ui_message.UIMessagePart],
+) -> list[ui_message.UIMessagePart]:
+    """Collapse duplicate UIToolParts by tool_call_id."""
+    result: list[ui_message.UIMessagePart] = []
+    tool_index: dict[str, int] = {}
+
+    for part in ui_parts:
+        if not isinstance(part, ui_message.UIToolPart):
+            result.append(part)
+            continue
+
+        idx = tool_index.get(part.tool_call_id)
+        if idx is None:
+            tool_index[part.tool_call_id] = len(result)
+            result.append(part)
+            continue
+
+        existing = result[idx]
+        if isinstance(existing, ui_message.UIToolPart):
+            result[idx] = _merge_tool_part(existing, part)
+
     return result
 
 

@@ -32,6 +32,54 @@ def _is_tool_error(state: ui_message.UIToolInvocationState) -> bool:
     return state in _TOOL_ERROR_STATES
 
 
+class _AdapterIdPolicy:
+    """Stable ids for reconstructing canonical messages from UI bubbles."""
+
+    @staticmethod
+    def message_id(turn_id: str, role: str, index: int) -> str:
+        return f"{turn_id}:{role}:{index}"
+
+    @classmethod
+    def with_stable_part_ids(
+        cls,
+        message_id: str,
+        parts: list[messages_.Part],
+    ) -> list[messages_.Part]:
+        counts: dict[str, int] = {}
+        result: list[messages_.Part] = []
+        for index, part in enumerate(parts):
+            base = cls.part_id(message_id, part, index)
+            seen = counts.get(base, 0)
+            counts[base] = seen + 1
+            part_id = base if seen == 0 else f"{base}:{seen}"
+            result.append(part.model_copy(update={"id": part_id}))
+        return result
+
+    @staticmethod
+    def part_id(
+        message_id: str,
+        part: messages_.Part,
+        index: int,
+    ) -> str:
+        match part:
+            case messages_.TextPart():
+                return f"{message_id}:text:{index}"
+            case messages_.ReasoningPart():
+                return f"{message_id}:reasoning:{index}"
+            case messages_.ToolCallPart(tool_call_id=tool_call_id):
+                return f"{message_id}:call:{tool_call_id}"
+            case messages_.ToolResultPart(tool_call_id=tool_call_id):
+                return f"{message_id}:result:{tool_call_id}"
+            case messages_.BuiltinToolCallPart(tool_call_id=tool_call_id):
+                return f"{message_id}:builtin-call:{tool_call_id}"
+            case messages_.BuiltinToolReturnPart(tool_call_id=tool_call_id):
+                return f"{message_id}:builtin-result:{tool_call_id}"
+            case messages_.HookPart():
+                return f"{message_id}:hook:{index}"
+            case messages_.FilePart():
+                return f"{message_id}:file:{index}"
+
+
 # TODO(datamodel-rework §4): once tool args have a canonical shape, drop
 # these normalizers.
 def _normalize_tool_args(tool_input: str | dict[str, Any] | None) -> str:
@@ -295,6 +343,7 @@ def _patch_pending_hook_aborts(
             continue
         new_parts.append(
             messages_.ToolResultPart(
+                id=f"{tool_msg.id}:result:{tc.tool_call_id}:hook-pending",
                 tool_call_id=tc.tool_call_id,
                 tool_name=tc.tool_name,
                 result=f"Pending on hook '{hook.hook_id}'",
@@ -443,15 +492,23 @@ def _parse(
         if ui_msg.role == "assistant":
             result.extend(
                 _split_assistant_parts(
-                    assistant_parts, tool_result_parts, msg_id=ui_msg.id
+                    assistant_parts,
+                    tool_result_parts,
+                    turn_id=ui_msg.id,
                 )
             )
-            for hp in hook_parts:
+            for index, hp in enumerate(hook_parts):
+                msg_id = _AdapterIdPolicy.message_id(
+                    ui_msg.id, "internal", index
+                )
                 result.append(
                     messages_.Message(
-                        id=ui_msg.id,
+                        id=msg_id,
+                        turn_id=ui_msg.id,
                         role="internal",
-                        parts=[hp],
+                        parts=_AdapterIdPolicy.with_stable_part_ids(
+                            msg_id, [hp]
+                        ),
                     )
                 )
         else:
@@ -459,7 +516,9 @@ def _parse(
                 messages_.Message(
                     id=ui_msg.id,
                     role=ui_msg.role,
-                    parts=assistant_parts,
+                    parts=_AdapterIdPolicy.with_stable_part_ids(
+                        ui_msg.id, assistant_parts
+                    ),
                 )
             )
 
@@ -469,7 +528,7 @@ def _parse(
 def _split_assistant_parts(
     parts: list[messages_.Part],
     tool_results: list[messages_.ToolResultPart],
-    msg_id: str,
+    turn_id: str,
 ) -> list[messages_.Message]:
     """Split assistant parts into assistant + tool message pairs."""
     results_by_id = {tr.tool_call_id: tr for tr in tool_results}
@@ -484,13 +543,53 @@ def _split_assistant_parts(
 
     if not pending_results:
         if parts:
-            return [messages_.Message(role="assistant", parts=parts, id=msg_id)]
+            msg_id = _AdapterIdPolicy.message_id(turn_id, "assistant", 0)
+            return [
+                messages_.Message(
+                    role="assistant",
+                    parts=_AdapterIdPolicy.with_stable_part_ids(msg_id, parts),
+                    id=msg_id,
+                    turn_id=turn_id,
+                )
+            ]
         return []
 
     messages: list[messages_.Message] = []
     current: list[messages_.Part] = []
     current_results: list[messages_.ToolResultPart] = []
     seen_tool_call = False
+    assistant_index = 0
+    tool_index = 0
+
+    def _append_assistant(parts_: list[messages_.Part]) -> None:
+        nonlocal assistant_index
+        msg_id = _AdapterIdPolicy.message_id(
+            turn_id, "assistant", assistant_index
+        )
+        messages.append(
+            messages_.Message(
+                role="assistant",
+                parts=_AdapterIdPolicy.with_stable_part_ids(msg_id, parts_),
+                id=msg_id,
+                turn_id=turn_id,
+            )
+        )
+        assistant_index += 1
+
+    def _append_tool(parts_: list[messages_.ToolResultPart]) -> None:
+        nonlocal tool_index
+        msg_id = _AdapterIdPolicy.message_id(turn_id, "tool", tool_index)
+        messages.append(
+            messages_.Message(
+                role="tool",
+                parts=_AdapterIdPolicy.with_stable_part_ids(
+                    msg_id, list(parts_)
+                ),
+                id=msg_id,
+                turn_id=turn_id,
+            )
+        )
+        tool_index += 1
 
     for part in parts:
         if (
@@ -498,12 +597,8 @@ def _split_assistant_parts(
             and current_results
             and not isinstance(part, messages_.ToolCallPart)
         ):
-            messages.append(
-                messages_.Message(role="assistant", parts=current, id=msg_id)
-            )
-            messages.append(
-                messages_.Message(role="tool", parts=list(current_results))
-            )
+            _append_assistant(current)
+            _append_tool(current_results)
             current = []
             current_results = []
             seen_tool_call = False
@@ -516,12 +611,8 @@ def _split_assistant_parts(
                 current_results.append(results_by_id[part.tool_call_id])
 
     if current:
-        messages.append(
-            messages_.Message(role="assistant", parts=current, id=msg_id)
-        )
+        _append_assistant(current)
     if current_results:
-        messages.append(
-            messages_.Message(role="tool", parts=list(current_results))
-        )
+        _append_tool(current_results)
 
     return messages

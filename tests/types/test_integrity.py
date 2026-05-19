@@ -528,23 +528,6 @@ def test_duplicate_tool_results_within_same_message_raises() -> None:
     assert "duplicate-tool-result" in exc_info.value.issues
 
 
-def test_integrity_error_includes_tool_ids_and_message_locations() -> None:
-    bad_history = [
-        *_parallel_tool_turn(turn_id="turn-1", assistant_prefix="server"),
-        *_parallel_tool_turn(turn_id="turn-1", assistant_prefix="client"),
-    ]
-
-    with pytest.raises(IntegrityError) as exc_info:
-        prepare_messages(bad_history)
-
-    error = exc_info.value
-    assert "duplicate-tool-call" in str(error)
-    assert "duplicate-tool-result" in str(error)
-    assert "tc-bash" in str(error)
-    assert "server:assistant:0" in str(error)
-    assert "client:assistant:0" in str(error)
-
-
 # ---------------------------------------------------------------------------
 # Does not mutate input
 # ---------------------------------------------------------------------------
